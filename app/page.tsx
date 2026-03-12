@@ -1,84 +1,59 @@
+import Sidebar from "@/components/Sidebar";
+import StatCard from "@/components/StatCard";
+import SectionCard from "@/components/SectionCard";
+import { alerts, stats, upcomingBookings } from "@/lib/data";
+
 export default function Home() {
   return (
-    <main className="min-h-screen bg-gray-50 text-gray-900 p-4 pb-24">
-      <div className="mx-auto max-w-md">
-        <header className="mb-6">
-          <p className="text-sm text-gray-500">ToDo Manager</p>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Gestionale esperienze, clienti e fornitori
-          </p>
-        </header>
+    <main className="min-h-screen bg-zinc-50 p-6">
+      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[260px_1fr]">
+        <Sidebar />
 
-        <section className="grid grid-cols-2 gap-3 mb-6">
-          <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-200">
-            <p className="text-xs text-gray-500">Incassato mese</p>
-            <p className="text-2xl font-bold mt-1">€ 4.250</p>
+        <div className="space-y-6">
+          <div>
+            <p className="text-sm text-zinc-500">ToDo Manager</p>
+            <h1 className="text-3xl font-bold text-zinc-900">Dashboard</h1>
+            <p className="mt-1 text-zinc-600">
+              Gestionale prenotazioni, clienti, fornitori e pagamenti
+            </p>
           </div>
 
-          <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-200">
-            <p className="text-xs text-gray-500">Da incassare</p>
-            <p className="text-2xl font-bold mt-1">€ 1.180</p>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {stats.map((stat) => (
+              <StatCard key={stat.title} title={stat.title} value={stat.value} />
+            ))}
           </div>
 
-          <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-200">
-            <p className="text-xs text-gray-500">Da pagare</p>
-            <p className="text-2xl font-bold mt-1">€ 2.040</p>
-          </div>
-
-          <div className="rounded-2xl bg-white p-4 shadow-sm border border-gray-200">
-            <p className="text-xs text-gray-500">Margine mese</p>
-            <p className="text-2xl font-bold mt-1">€ 1.030</p>
-          </div>
-        </section>
-
-        <section className="rounded-2xl bg-white p-4 shadow-sm border border-gray-200 mb-4">
-          <h2 className="text-lg font-semibold mb-3">Prenotazioni prossime</h2>
-
-          <div className="space-y-3">
-            <div className="rounded-xl bg-gray-50 p-3 border border-gray-100">
-              <p className="font-medium">Farm Tour & Lunch</p>
-              <p className="text-sm text-gray-600">John Smith • 4 pax • 14 Mar</p>
-              <p className="text-sm text-amber-600 mt-1">Cliente: parziale</p>
+          <SectionCard title="Prenotazioni prossime">
+            <div className="space-y-3">
+              {upcomingBookings.map((booking) => (
+                <div
+                  key={booking.id}
+                  className="rounded-xl border border-zinc-200 p-4"
+                >
+                  <p className="font-semibold text-zinc-900">
+                    {booking.experience}
+                  </p>
+                  <p className="text-sm text-zinc-600">
+                    {booking.customer} • {booking.pax} pax • {booking.date}
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-zinc-800">
+                    {booking.status}
+                  </p>
+                </div>
+              ))}
             </div>
+          </SectionCard>
 
-            <div className="rounded-xl bg-gray-50 p-3 border border-gray-100">
-              <p className="font-medium">Wine Tasting</p>
-              <p className="text-sm text-gray-600">Emily Brown • 2 pax • 15 Mar</p>
-              <p className="text-sm text-green-600 mt-1">Cliente: pagato</p>
-            </div>
-
-            <div className="rounded-xl bg-gray-50 p-3 border border-gray-100">
-              <p className="font-medium">E-bike Tour</p>
-              <p className="text-sm text-gray-600">Lucas Martin • 2 pax • 16 Mar</p>
-              <p className="text-sm text-red-600 mt-1">Fornitore: da pagare</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl bg-white p-4 shadow-sm border border-gray-200 mb-4">
-          <h2 className="text-lg font-semibold mb-3">Attenzione</h2>
-          <ul className="space-y-2 text-sm text-gray-700">
-            <li>• 3 clienti non saldati</li>
-            <li>• 2 fornitori da pagare</li>
-            <li>• 1 prenotazione incompleta</li>
-          </ul>
-        </section>
-
-        <button className="w-full rounded-2xl bg-black text-white py-4 text-base font-semibold shadow-sm">
-          + Nuova prenotazione
-        </button>
-      </div>
-
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white">
-        <div className="mx-auto max-w-md grid grid-cols-5 text-center text-xs">
-          <div className="py-3 font-semibold text-black">Home</div>
-          <div className="py-3 text-gray-500">Prenotazioni</div>
-          <div className="py-3 text-gray-500">Esperienze</div>
-          <div className="py-3 text-gray-500">Fornitori</div>
-          <div className="py-3 text-gray-500">Pagamenti</div>
+          <SectionCard title="Attenzione">
+            <ul className="space-y-2 text-zinc-700">
+              {alerts.map((alert) => (
+                <li key={alert}>• {alert}</li>
+              ))}
+            </ul>
+          </SectionCard>
         </div>
-      </nav>
+      </div>
     </main>
   );
 }
