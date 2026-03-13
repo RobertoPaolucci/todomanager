@@ -39,8 +39,8 @@ export default async function EsperienzePage() {
                 <tr>
                   <th className="py-3 pr-4">Esperienza</th>
                   <th className="py-3 pr-4">Fornitore</th>
-                  <th className="py-3 pr-4">Costo fornitore</th>
-                  <th className="py-3 pr-4">Prezzo TOD</th>
+                  <th className="py-3 pr-4">Costo</th>
+                  <th className="py-3 pr-4">Prezzo base</th>
                   <th className="py-3 pr-4">Stato</th>
                   <th className="py-3 pr-4">Azioni</th>
                 </tr>
@@ -48,18 +48,13 @@ export default async function EsperienzePage() {
 
               <tbody>
                 {experiences.map((experience) => (
-                  <tr
-                    key={experience.id}
-                    className="border-b border-zinc-100"
-                  >
+                  <tr key={experience.id} className="border-b border-zinc-100">
                     <td className="py-3 pr-4 font-medium text-zinc-900">
                       {experience.name}
                     </td>
 
                     <td className="py-3 pr-4">
-                      {experience.suppliers && Array.isArray(experience.suppliers)
-                        ? experience.suppliers[0]?.name || "-"
-                        : "-"}
+                      {experience.suppliers?.[0]?.name || "-"}
                     </td>
 
                     <td className="py-3 pr-4">
@@ -84,6 +79,14 @@ export default async function EsperienzePage() {
 
                     <td className="py-3 pr-4">
                       <div className="flex gap-2">
+
+                        <Link
+                          href={`/esperienze/${experience.id}/prezzi`}
+                          className="rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                        >
+                          Prezzi
+                        </Link>
+
                         <Link
                           href={`/esperienze/${experience.id}/modifica`}
                           className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
@@ -100,6 +103,7 @@ export default async function EsperienzePage() {
                             Elimina
                           </button>
                         </form>
+
                       </div>
                     </td>
                   </tr>

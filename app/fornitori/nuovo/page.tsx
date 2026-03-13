@@ -1,35 +1,32 @@
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
-import { createExperience } from "../actions";
-import { getSuppliers } from "@/lib/queries";
+import { createSupplier } from "../actions";
 
-export default async function NuovaEsperienzaPage() {
-  const suppliers = await getSuppliers();
-
+export default function NuovoFornitorePage() {
   return (
     <AppShell
-      title="Nuova esperienza"
-      subtitle="Crea una nuova esperienza e collega il fornitore"
+      title="Nuovo fornitore"
+      subtitle="Crea un nuovo fornitore o partner"
     >
       <div className="mb-4 flex items-center justify-end">
         <Link
-          href="/esperienze"
+          href="/fornitori"
           className="rounded-xl border border-zinc-300 px-4 py-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
         >
-          ← Torna alle esperienze
+          ← Torna ai fornitori
         </Link>
       </div>
 
-      <SectionCard title="Dati esperienza">
-        <form action={createExperience} className="space-y-6">
+      <SectionCard title="Dati fornitore">
+        <form action={createSupplier} className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label
                 htmlFor="name"
                 className="mb-2 block text-sm font-medium text-zinc-700"
               >
-                Nome esperienza
+                Nome fornitore
               </label>
               <input
                 id="name"
@@ -37,67 +34,71 @@ export default async function NuovaEsperienzaPage() {
                 type="text"
                 required
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
-                placeholder="Es. Wine Tasting Montepulciano"
+                placeholder="Es. Fattoria Madonna della Querce"
               />
             </div>
 
             <div>
               <label
-                htmlFor="supplier_id"
+                htmlFor="contact_person"
                 className="mb-2 block text-sm font-medium text-zinc-700"
               >
-                Fornitore
-              </label>
-              <select
-                id="supplier_id"
-                name="supplier_id"
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
-                defaultValue=""
-              >
-                <option value="">Seleziona fornitore</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label
-                htmlFor="supplier_unit_cost"
-                className="mb-2 block text-sm font-medium text-zinc-700"
-              >
-                Costo fornitore
+                Contatto
               </label>
               <input
-                id="supplier_unit_cost"
-                name="supplier_unit_cost"
-                type="number"
-                step="0.01"
-                min="0"
-                defaultValue="0"
+                id="contact_person"
+                name="contact_person"
+                type="text"
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
-                placeholder="0.00"
+                placeholder="Es. Roberto Paolucci"
               />
             </div>
 
             <div>
               <label
-                htmlFor="base_price"
+                htmlFor="email"
                 className="mb-2 block text-sm font-medium text-zinc-700"
               >
-                Prezzo TOD
+                Email
               </label>
               <input
-                id="base_price"
-                name="base_price"
-                type="number"
-                step="0.01"
-                min="0"
-                defaultValue="0"
+                id="email"
+                name="email"
+                type="email"
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
-                placeholder="0.00"
+                placeholder="info@esempio.com"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="phone"
+                className="mb-2 block text-sm font-medium text-zinc-700"
+              >
+                Telefono
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="text"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                placeholder="+39 ..."
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label
+                htmlFor="website"
+                className="mb-2 block text-sm font-medium text-zinc-700"
+              >
+                Sito web
+              </label>
+              <input
+                id="website"
+                name="website"
+                type="text"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                placeholder="https://..."
               />
             </div>
           </div>
@@ -127,7 +128,7 @@ export default async function NuovaEsperienzaPage() {
               className="h-4 w-4 rounded border-zinc-300"
             />
             <label htmlFor="active" className="text-sm text-zinc-700">
-              Esperienza attiva
+              Fornitore attivo
             </label>
           </div>
 
@@ -136,7 +137,7 @@ export default async function NuovaEsperienzaPage() {
               type="submit"
               className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-700"
             >
-              Salva esperienza
+              Salva fornitore
             </button>
           </div>
         </form>

@@ -58,6 +58,52 @@ export async function getSuppliers() {
 
   return data;
 }
+
+export async function getAllSuppliers() {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select(`
+      id,
+      name,
+      contact_person,
+      email,
+      phone,
+      website,
+      notes,
+      active
+    `)
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(`Errore caricamento fornitori: ${error.message}`);
+  }
+
+  return data;
+}
+
+export async function getSupplierById(id: number) {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select(`
+      id,
+      name,
+      contact_person,
+      email,
+      phone,
+      website,
+      notes,
+      active
+    `)
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    throw new Error(`Errore caricamento fornitore: ${error.message}`);
+  }
+
+  return data;
+}
+
 export async function getExperienceById(id: number) {
   const { data, error } = await supabase
     .from("experiences")
