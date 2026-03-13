@@ -13,6 +13,33 @@ type PageProps = {
   }>;
 };
 
+type BookingRow = {
+  id: number;
+  supplier_id: number | null;
+  booking_source: string | null;
+  booking_reference: string | null;
+  booking_created_at: string | null;
+  customer_name: string | null;
+  experience_name: string | null;
+  booking_date: string | null;
+  booking_time: string | null;
+  total_people: number | null;
+  pax: number | null;
+  total_customer: number | null;
+  total_to_you: number | null;
+  total_supplier_cost: number | null;
+  margin_total: number | null;
+  is_cancelled: boolean | null;
+  customer_email: string | null;
+  customer_phone: string | null;
+  notes: string | null;
+};
+
+type SupplierRow = {
+  id: number;
+  phone: string | null;
+};
+
 function formatEuro(value: number | null) {
   return new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -31,6 +58,48 @@ function formatDate(value: string | null) {
     month: "2-digit",
     year: "numeric",
   }).format(date);
+}
+
+function formatWhatsappTime(value: string | null) {
+  if (!value) return "";
+  return value.replace(":", ",");
+}
+
+function normalizePhoneForWhatsApp(value: string | null) {
+  if (!value) return "";
+  return value.replace(/[^\d]/g, "");
+}
+
+function buildWhatsappLink(
+  booking: BookingRow,
+  supplierPhoneById: Record<number, string>
+) {
+  const supplierId = Number(booking.supplier_id || 0);
+  if (!supplierId) return null;
+
+  const rawPhone = supplierPhoneById[supplierId];
+  if (!rawPhone) return null;
+
+  const phone = normalizePhoneForWhatsApp(rawPhone);
+  if (!phone) return null;
+
+  const people = booking.total_people ?? booking.pax ?? 0;
+  const formattedDate = formatDate(booking.booking_date || null);
+  const formattedTime = formatWhatsappTime(booking.booking_time || null);
+  const source = booking.booking_source || "-";
+  const reference = booking.booking_reference || "-";
+  const experienceName = booking.experience_name || "-";
+  const customerName = booking.customer_name || "-";
+
+  const message = `${people} persone
+${formattedDate}${formattedTime ? ` ore ${formattedTime}` : ""}
+${experienceName}
+
+Canale: ${source}
+Ref: ${reference}
+Cliente: ${customerName}`;
+
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
 function getNextDir(currentSort: string, currentDir: string, column: string) {
@@ -94,19 +163,19 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const today = new Date();
   const todayStr = today.toISOString().split("T")[0];
 
-  let query = supabase
+  let bookingsQuery = supabase
     .from("bookings")
     .select("*")
     .order(sortColumn, { ascending: dir === "asc", nullsFirst: false });
 
   if (!showPast) {
-    query = query.gte("booking_date", todayStr);
+    bookingsQuery = bookingsQuery.gte("booking_date", todayStr);
   }
 
   if (q) {
     const safeQ = q.replace(/,/g, " ").replace(/\./g, " ").trim();
 
-    query = query.or(
+    bookingsQuery = bookingsQuery.or(
       [
         `booking_source.ilike.%${safeQ}%`,
         `booking_reference.ilike.%${safeQ}%`,
@@ -119,7 +188,22 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     );
   }
 
-  const { data: bookings, error } = await query;
+  const [bookingsRes, suppliersRes] = await Promise.all([
+    bookingsQuery,
+    supabase.from("suppliers").select("id, phone").order("id", { ascending: true }),
+  ]);
+
+  const bookings = (bookingsRes.data || []) as BookingRow[];
+  const suppliers = (suppliersRes.data || []) as SupplierRow[];
+
+  const error = bookingsRes.error || suppliersRes.error;
+
+  const supplierPhoneById: Record<number, string> = {};
+  for (const supplier of suppliers) {
+    if (supplier.id && supplier.phone) {
+      supplierPhoneById[supplier.id] = supplier.phone;
+    }
+  }
 
   return (
     <AppShell
@@ -182,7 +266,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
           <p className="text-sm text-red-600">
             Errore nel caricamento prenotazioni: {error.message}
           </p>
-        ) : !bookings || bookings.length === 0 ? (
+        ) : bookings.length === 0 ? (
           <p className="text-sm text-zinc-600">Nessuna prenotazione trovata.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -279,7 +363,16 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
                   const isToday = booking.booking_date === todayStr;
                   const isTomorrow = booking.booking_date === tomorrowStr;
-                  const isPast = booking.booking_date < todayStr;
+                  const isPast = !!booking.booking_date && booking.booking_date < todayStr;
+
+                  const whatsappLink = buildWhatsappLink(
+                    booking,
+                    supplierPhoneById
+                  );
+
+                  const supplierPhone = booking.supplier_id
+                    ? supplierPhoneById[booking.supplier_id] || ""
+                    : "";
 
                   return (
                     <tr key={booking.id} className="border-b border-zinc-100">
@@ -326,27 +419,50 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       </td>
 
                       <td className="py-3 pr-4">
-                        <div className="flex gap-2">
-                          <Link
-                            href={`/prenotazioni/${booking.id}/modifica`}
-                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
-                          >
-                            Modifica
-                          </Link>
+  <div className="flex gap-2">
 
-                          {!isCancelled ? (
-                            <form action={cancelBooking}>
-                              <input type="hidden" name="id" value={booking.id} />
-                              <button
-                                type="submit"
-                                className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
-                              >
-                                Cancella
-                              </button>
-                            </form>
-                          ) : null}
-                        </div>
-                      </td>
+{booking.supplier_id && supplierPhoneById[booking.supplier_id] && (
+  <a
+    href={`https://wa.me/${supplierPhoneById[booking.supplier_id].replace(/[^\d]/g,"")}?text=${encodeURIComponent(
+`${booking.total_people ?? booking.pax ?? 0} persone
+${formatDate(booking.booking_date)}${booking.booking_time ? ` ore ${booking.booking_time}` : ""}
+${booking.experience_name}
+
+Canale: ${booking.booking_source}
+Ref: ${booking.booking_reference}
+Cliente: ${booking.customer_name}`
+    )}`}
+    target="_blank"
+    className="rounded-lg border border-green-200 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50"
+  >
+    WhatsApp
+  </a>
+)}
+
+
+    <Link
+      href={`/prenotazioni/${booking.id}/modifica`}
+      className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+    >
+      Modifica
+    </Link>
+
+    {!isCancelled ? (
+      <form action={cancelBooking}>
+        <input type="hidden" name="id" value={booking.id} />
+        <button
+          type="submit"
+          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
+        >
+          Cancella
+        </button>
+      </form>
+    ) : null}
+
+  </div>
+</td>
+
+
                     </tr>
                   );
                 })}
