@@ -33,11 +33,14 @@ export default function ModificaEsperienzaForm({
   const [todPrice, setTodPrice] = useState(Number(experience.base_price || 0));
 
   const margin = useMemo(() => todPrice - supplierCost, [todPrice, supplierCost]);
+
   const marginPercent = useMemo(() => {
     return todPrice > 0 ? ((margin / todPrice) * 100).toFixed(2) : "0.00";
   }, [margin, todPrice]);
 
-  const updateExperienceWithId = updateExperience.bind(null, experience.id);
+  const updateExperienceWithId = async (formData: FormData) => {
+    return updateExperience(formData);
+  };
 
   return (
     <form action={updateExperienceWithId} className="grid gap-4 md:grid-cols-2">
