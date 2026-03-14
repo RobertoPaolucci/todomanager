@@ -28,6 +28,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
   }
 
   const rows = (channels ?? []).map((channel) => {
+    // your_unit_price riceve i dati dall'input "Prezzo agenzia" del form
     const your_unit_price = parseMoney(formData.get(`your_unit_price_${channel.id}`));
     const public_unit_price = parseMoney(formData.get(`public_unit_price_${channel.id}`));
     const currency = String(formData.get(`currency_${channel.id}`) || "EUR").trim() || "EUR";
@@ -43,6 +44,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
     };
   });
 
+  // Pulizia vecchi prezzi e inserimento nuovi (Upsert logico)
   const { error: deleteError } = await supabase
     .from("experience_channel_prices")
     .delete()

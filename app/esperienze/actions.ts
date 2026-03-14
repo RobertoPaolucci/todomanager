@@ -6,13 +6,13 @@ import { supabase } from "@/lib/supabase";
 
 function parseNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string" || value.trim() === "") return 0;
-  const normalized = Number(value);
+  const normalized = Number(value.replace(",", "."));
   return Number.isNaN(normalized) ? 0 : normalized;
 }
 
 function parseNullableNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string" || value.trim() === "") return null;
-  const normalized = Number(value);
+  const normalized = Number(value.replace(",", "."));
   return Number.isNaN(normalized) ? null : normalized;
 }
 
@@ -20,7 +20,7 @@ export async function createExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
-  const base_price = parseNumber(formData.get("base_price"));
+  // base_price rimosso perché non più utilizzato
   const notes = String(formData.get("notes") || "").trim();
   const active = formData.get("active") === "on";
 
@@ -32,7 +32,6 @@ export async function createExperience(formData: FormData) {
     name,
     supplier_id,
     supplier_unit_cost,
-    base_price,
     notes: notes || null,
     active,
   });
@@ -50,7 +49,7 @@ export async function updateExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
-  const base_price = parseNumber(formData.get("base_price"));
+  // base_price rimosso
   const notes = String(formData.get("notes") || "").trim();
   const active = formData.get("active") === "on";
 
@@ -68,7 +67,6 @@ export async function updateExperience(formData: FormData) {
       name,
       supplier_id,
       supplier_unit_cost,
-      base_price,
       notes: notes || null,
       active,
     })

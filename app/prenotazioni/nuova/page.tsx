@@ -13,13 +13,16 @@ export default async function NuovaPrenotazionePage() {
       title="Nuova Prenotazione"
       subtitle="Inserisci una nuova prenotazione nel gestionale"
     >
-      <SectionCard title="Dati prenotazione">
-        <BookingForm
-          channels={channels}
-          experiences={experiences}
-          today={today}
-        />
-      </SectionCard>
+      {/* Aggiungiamo lang="it-IT" al contenitore per suggerire al browser il formato data/ora europeo */}
+      <div lang="it-IT">
+        <SectionCard title="Dati prenotazione">
+          <BookingForm
+            channels={channels}
+            experiences={experiences}
+            today={today}
+          />
+        </SectionCard>
+      </div>
     </AppShell>
   );
 }

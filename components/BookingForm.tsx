@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createBooking } from "@/app/prenotazioni/actions";
+import { updateBooking } from "@/app/prenotazioni/actions"; // Assicurati di avere questa action esportata
 
 type Channel = {
   id: number;
@@ -22,7 +23,6 @@ type Experience = {
   name: string;
   supplier_id: number | null;
   supplier_unit_cost: number;
-  base_price: number;
   experience_channel_prices: ExperiencePrice[];
 };
 
@@ -30,17 +30,22 @@ type BookingFormProps = {
   channels: Channel[];
   experiences: Experience[];
   today: string;
+  initialData?: any; // Aggiunto per pre-compilare i dati in modifica
+  isEditing?: boolean; // Aggiunto per capire quale action usare
 };
 
 export default function BookingForm({
   channels,
   experiences,
   today,
+  initialData = null,
+  isEditing = false,
 }: BookingFormProps) {
-  const [channelId, setChannelId] = useState("");
-  const [experienceId, setExperienceId] = useState("");
-  const [adults, setAdults] = useState(1);
-  const [children, setChildren] = useState(0);
+  // Inizializziamo gli stati con initialData se presente, altrimenti vuoti/default
+  const [channelId, setChannelId] = useState(initialData?.channel_id ? String(initialData.channel_id) : "");
+  const [experienceId, setExperienceId] = useState(initialData?.experience_id ? String(initialData.experience_id) : "");
+  const [adults, setAdults] = useState(initialData?.adults ?? initialData?.total_people ?? 1);
+  const [children, setChildren] = useState(initialData?.children ?? 0);
 
   const selectedExperience = useMemo(
     () => experiences.find((experience) => String(experience.id) === experienceId),
@@ -49,7 +54,6 @@ export default function BookingForm({
 
   const selectedPrice = useMemo(() => {
     if (!selectedExperience || !channelId) return null;
-
     return (
       selectedExperience.experience_channel_prices.find(
         (price) => String(price.channel_id) === channelId
@@ -68,7 +72,11 @@ export default function BookingForm({
   const marginTotal = totalToYou - totalSupplierCost;
 
   return (
-    <form action={createBooking} className="grid gap-4 md:grid-cols-2">
+    // Se isEditing è true usa updateBooking, altrimenti createBooking
+    <form action={isEditing ? updateBooking : createBooking} className="grid gap-4 md:grid-cols-2">
+      {/* Se stiamo modificando, passiamo l'ID nascosto */}
+      {isEditing && <input type="hidden" name="id" value={initialData.id} />}
+
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
           Canale di prenotazione
@@ -78,7 +86,7 @@ export default function BookingForm({
           required
           value={channelId}
           onChange={(e) => setChannelId(e.target.value)}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
         >
           <option value="">Seleziona canale</option>
           {channels.map((channel) => (
@@ -89,8 +97,6 @@ export default function BookingForm({
         </select>
       </div>
 
-
-
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
           Numero prenotazione
@@ -98,6 +104,7 @@ export default function BookingForm({
         <input
           name="booking_reference"
           type="text"
+          defaultValue={initialData?.booking_reference ?? ""}
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
           placeholder="Es. VIATOR-847392"
         />
@@ -110,7 +117,8 @@ export default function BookingForm({
         <input
           name="booking_created_at"
           type="date"
-          defaultValue={today}
+          defaultValue={initialData?.booking_created_at ?? today}
+          lang="it-IT"
           required
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
         />
@@ -123,6 +131,7 @@ export default function BookingForm({
         <input
           name="customer_name"
           type="text"
+          defaultValue={initialData?.customer_name ?? ""}
           required
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
           placeholder="Es. John Smith"
@@ -136,6 +145,7 @@ export default function BookingForm({
         <input
           name="customer_phone"
           type="text"
+          defaultValue={initialData?.customer_phone ?? ""}
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
           placeholder="Es. +39 333 1234567"
         />
@@ -148,6 +158,7 @@ export default function BookingForm({
         <input
           name="customer_email"
           type="email"
+          defaultValue={initialData?.customer_email ?? ""}
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
           placeholder="Es. john@email.com"
         />
@@ -162,7 +173,7 @@ export default function BookingForm({
           required
           value={experienceId}
           onChange={(e) => setExperienceId(e.target.value)}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
         >
           <option value="">Seleziona esperienza</option>
           {experiences.map((experience) => (
@@ -186,6 +197,8 @@ export default function BookingForm({
         <input
           name="booking_date"
           type="date"
+          lang="it-IT"
+          defaultValue={initialData?.booking_date ?? ""}
           required
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
         />
@@ -198,6 +211,8 @@ export default function BookingForm({
         <input
           name="booking_time"
           type="time"
+          lang="it-IT"
+          defaultValue={initialData?.booking_time ?? ""}
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
         />
       </div>
@@ -234,7 +249,7 @@ export default function BookingForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Totale cliente finale
+          Totale cliente finale (Calcolato)
         </label>
         <input
           name="total_amount"
@@ -253,8 +268,8 @@ export default function BookingForm({
         </label>
         <select
           name="customer_payment_status"
-          defaultValue="pending"
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          defaultValue={initialData?.customer_payment_status ?? "pending"}
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
         >
           <option value="pending">pending</option>
           <option value="partial">partial</option>
@@ -268,8 +283,8 @@ export default function BookingForm({
         </label>
         <select
           name="supplier_payment_status"
-          defaultValue="pending"
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          defaultValue={initialData?.supplier_payment_status ?? "pending"}
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
         >
           <option value="pending">pending</option>
           <option value="paid">paid</option>
@@ -343,6 +358,7 @@ export default function BookingForm({
         <textarea
           name="notes"
           rows={4}
+          defaultValue={initialData?.notes ?? ""}
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
           placeholder="Es. allergie, richieste particolari, info operative..."
         />
@@ -353,7 +369,7 @@ export default function BookingForm({
           type="submit"
           className="rounded-xl bg-zinc-900 px-5 py-3 text-white transition hover:bg-zinc-700"
         >
-          Salva prenotazione
+          {isEditing ? "Aggiorna prenotazione" : "Salva prenotazione"}
         </button>
 
         <a

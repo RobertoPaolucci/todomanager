@@ -21,7 +21,6 @@ export async function getExperiences() {
       name,
       supplier_id,
       supplier_unit_cost,
-      base_price,
       notes,
       active,
       suppliers (
@@ -112,7 +111,6 @@ export async function getExperienceById(id: number) {
       name,
       supplier_id,
       supplier_unit_cost,
-      base_price,
       notes,
       active
     `)

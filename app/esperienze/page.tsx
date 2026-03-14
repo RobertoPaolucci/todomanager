@@ -18,7 +18,7 @@ export default async function EsperienzePage() {
   return (
     <AppShell
       title="Esperienze"
-      subtitle="Gestione esperienze, fornitori e prezzi base"
+      subtitle="Gestione esperienze e fornitori"
     >
       <div className="flex items-center justify-end">
         <Link
@@ -35,79 +35,88 @@ export default async function EsperienzePage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-zinc-200 text-zinc-500">
+              <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[11px] font-bold">
                 <tr>
                   <th className="py-3 pr-4">Esperienza</th>
                   <th className="py-3 pr-4">Fornitore</th>
-                  <th className="py-3 pr-4">Costo</th>
-                  <th className="py-3 pr-4">Prezzo base</th>
-                  <th className="py-3 pr-4">Stato</th>
-                  <th className="py-3 pr-4">Azioni</th>
+                  <th className="py-3 pr-4 text-right">Costo Fornitore</th>
+                  <th className="py-3 pr-4 text-center">Stato</th>
+                  <th className="py-3 pr-4 text-right">Azioni</th>
                 </tr>
               </thead>
 
               <tbody>
-                {experiences.map((experience) => (
-                  <tr key={experience.id} className="border-b border-zinc-100">
-                    <td className="py-3 pr-4 font-medium text-zinc-900">
-                      {experience.name}
-                    </td>
+                {experiences.map((experience) => {
+                  // Estrazione sicura del nome del fornitore
+                  const supplier = (experience as any).suppliers;
+                  let supplierName = "Non assegnato";
+                  
+                  if (supplier) {
+                    supplierName = Array.isArray(supplier) 
+                      ? (supplier[0]?.name || "Non assegnato") 
+                      : (supplier.name || "Non assegnato");
+                  }
 
-                    <td className="py-3 pr-4">
-                      {experience.suppliers?.[0]?.name || "-"}
-                    </td>
+                  return (
+                    <tr key={experience.id} className="border-b border-zinc-100 transition hover:bg-zinc-50/50">
+                      <td className="py-3 pr-4 font-medium text-zinc-900">
+                        {experience.name}
+                      </td>
 
-                    <td className="py-3 pr-4">
-                      {formatEuro(Number(experience.supplier_unit_cost || 0))}
-                    </td>
+                      <td className="py-3 pr-4">
+                        {supplierName === "Non assegnato" ? (
+                          <span className="text-xs italic text-zinc-400">Non assegnato</span>
+                        ) : (
+                          <span className="text-zinc-600">{supplierName}</span>
+                        )}
+                      </td>
 
-                    <td className="py-3 pr-4">
-                      {formatEuro(Number(experience.base_price || 0))}
-                    </td>
+                      <td className="py-3 pr-4 text-right">
+                        {formatEuro(Number(experience.supplier_unit_cost || 0))}
+                      </td>
 
-                    <td className="py-3 pr-4">
-                      <span
-                        className={`rounded px-2 py-1 text-xs font-medium ${
-                          experience.active
-                            ? "bg-green-100 text-green-700"
-                            : "bg-zinc-200 text-zinc-700"
-                        }`}
-                      >
-                        {experience.active ? "attiva" : "non attiva"}
-                      </span>
-                    </td>
-
-                    <td className="py-3 pr-4">
-                      <div className="flex gap-2">
-
-                        <Link
-                          href={`/esperienze/${experience.id}/prezzi`}
-                          className="rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                      <td className="py-3 pr-4 text-center">
+                        <span
+                          className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
+                            experience.active
+                              ? "bg-green-100 text-green-700"
+                              : "bg-zinc-200 text-zinc-700"
+                          }`}
                         >
-                          Prezzi
-                        </Link>
+                          {experience.active ? "attiva" : "non attiva"}
+                        </span>
+                      </td>
 
-                        <Link
-                          href={`/esperienze/${experience.id}/modifica`}
-                          className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
-                        >
-                          Modifica
-                        </Link>
-
-                        <form action={deleteExperience}>
-                          <input type="hidden" name="id" value={experience.id} />
-                          <button
-                            type="submit"
-                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
+                      <td className="py-3 pr-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <Link
+                            href={`/esperienze/${experience.id}/prezzi`}
+                            className="rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 transition"
                           >
-                            Elimina
-                          </button>
-                        </form>
+                            Prezzi
+                          </Link>
 
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          <Link
+                            href={`/esperienze/${experience.id}/modifica`}
+                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100 transition"
+                          >
+                            Modifica
+                          </Link>
+
+                          <form action={deleteExperience}>
+                            <input type="hidden" name="id" value={experience.id} />
+                            <button
+                              type="submit"
+                              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 transition"
+                            >
+                              Elimina
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
