@@ -197,7 +197,6 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
   return (
     <AppShell title="Prenotazioni" subtitle="Elenco prenotazioni e stato pagamenti">
-      {/* HEADER: RICERCA E BOTTONE NUOVA PRENOTAZIONE (REDACT RESPONSIVE) */}
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <form action="/prenotazioni" method="get" className="flex flex-1 items-center gap-2">
@@ -256,7 +255,15 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
           <p className="text-sm text-zinc-600">Nessuna prenotazione trovata.</p>
         ) : (
           <>
-            {/* --- VERSIONE MOBILE (VISIBILE SOLO SU SCHERMI PICCOLI) --- */}
+            {/* --- ORDINAMENTO MOBILE (VISIBILE SOLO SU IPHONE) --- */}
+            <div className="mb-4 flex flex-wrap gap-x-4 gap-y-2 border-b border-zinc-100 pb-4 text-[11px] font-bold uppercase text-zinc-400 lg:hidden">
+              <SortLink label="Canale" column="booking_source" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
+              <SortLink label="Data Pren." column="booking_created_at" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
+              <SortLink label="Data Exp" column="booking_date" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
+              <SortLink label="Persone" column="total_people" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
+            </div>
+
+            {/* --- VERSIONE MOBILE (CARD) --- */}
             <div className="grid grid-cols-1 gap-4 lg:hidden">
               {bookings.map((booking) => {
                 const isCancelled = booking.is_cancelled === true;
@@ -265,7 +272,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 const waLink = buildWhatsappLink(booking, supplierPhoneById);
 
                 return (
-                  <div key={booking.id} className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <div key={booking.id} className={`rounded-xl border p-4 shadow-sm bg-white ${isCancelled ? 'border-red-100 opacity-75' : 'border-zinc-200'}`}>
                     <div className="mb-3 flex items-start justify-between">
                       <div className="flex flex-col">
                         <span className="text-[10px] font-bold uppercase text-zinc-400">ID #{booking.id}</span>
@@ -280,10 +287,10 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
                     <div className="mb-3">
                       <p className="text-sm font-medium text-zinc-700">{booking.experience_name}</p>
-                      <div className="mt-1 flex gap-2 text-xs text-zinc-500">
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
                         <span>{booking.booking_time || "--:--"}</span>
                         <span>•</span>
-                        <span>{booking.total_people ?? booking.pax} persone</span>
+                        <span>{booking.total_people ?? booking.pax} pax</span>
                         <span>•</span>
                         <span className="font-semibold text-zinc-900">{booking.booking_source}</span>
                       </div>
@@ -306,8 +313,16 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                           </a>
                         )}
                         <Link href={`/prenotazioni/${booking.id}/modifica`} className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700">
-                          Modifica
+                          Edit
                         </Link>
+                        {!isCancelled && (
+                          <form action={cancelBooking}>
+                            <input type="hidden" name="id" value={booking.id} />
+                            <button type="submit" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50">
+                              X
+                            </button>
+                          </form>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -315,7 +330,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               })}
             </div>
 
-            {/* --- VERSIONE DESKTOP (TABELLA ORIGINALE - NASCOSTA SU MOBILE) --- */}
+            {/* --- VERSIONE DESKTOP (TABELLA) --- */}
             <div className="hidden lg:block overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead className="border-b border-zinc-200 text-zinc-500">
@@ -329,9 +344,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     <th className="py-3 pr-4"><SortLink label="Data" column="booking_date" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
                     <th className="py-3 pr-4"><SortLink label="Ora" column="booking_time" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
                     <th className="py-3 pr-4"><SortLink label="Persone" column="total_people" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4">Cliente €</th>
-                    <th className="py-3 pr-4">A te €</th>
-                    <th className="py-3 pr-4">Fornitore €</th>
+                    <th className="py-3 pr-4 text-zinc-400 font-normal italic">Cliente €</th>
+                    <th className="py-3 pr-4 text-zinc-400 font-normal italic">A te €</th>
+                    <th className="py-3 pr-4 text-zinc-400 font-normal italic">Fornitore €</th>
                     <th className="py-3 pr-4">Margine €</th>
                     <th className="py-3 pr-4">Azioni</th>
                   </tr>
@@ -348,7 +363,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const waLink = buildWhatsappLink(booking, supplierPhoneById);
 
                     return (
-                      <tr key={booking.id} className="border-b border-zinc-100 transition hover:bg-zinc-50/50">
+                      <tr key={booking.id} className={`border-b border-zinc-100 transition hover:bg-zinc-50/50 ${isCancelled ? 'bg-red-50/30' : ''}`}>
                         <td className="py-3 pr-4">{booking.id}</td>
                         <td className="py-3 pr-4">{booking.booking_source}</td>
                         <td className="py-3 pr-4 text-xs font-mono">{booking.booking_reference || "-"}</td>
@@ -369,24 +384,24 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         </td>
                         <td className="py-3 pr-4">{booking.booking_time || "-"}</td>
                         <td className="py-3 pr-4 text-center">{booking.total_people ?? booking.pax}</td>
-                        <td className="py-3 pr-4">{formatEuro(booking.total_customer)}</td>
-                        <td className="py-3 pr-4">{formatEuro(booking.total_to_you)}</td>
-                        <td className="py-3 pr-4">{formatEuro(booking.total_supplier_cost)}</td>
+                        <td className="py-3 pr-4 text-zinc-400 italic">{formatEuro(booking.total_customer)}</td>
+                        <td className="py-3 pr-4 text-zinc-400 italic">{formatEuro(booking.total_to_you)}</td>
+                        <td className="py-3 pr-4 text-zinc-400 italic">{formatEuro(booking.total_supplier_cost)}</td>
                         <td className="py-3 pr-4 font-bold text-zinc-900">{formatEuro(booking.margin_total)}</td>
                         <td className="py-3 pr-4">
                           <div className="flex gap-2">
                             {waLink && (
-                              <a href={waLink} target="_blank" className="rounded-lg border border-green-200 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50">
+                              <a href={waLink} target="_blank" className="rounded-lg border border-green-200 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50 transition">
                                 WA
                               </a>
                             )}
-                            <Link href={`/prenotazioni/${booking.id}/modifica`} className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100">
+                            <Link href={`/prenotazioni/${booking.id}/modifica`} className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100 transition">
                               Modifica
                             </Link>
                             {!isCancelled && (
                               <form action={cancelBooking}>
                                 <input type="hidden" name="id" value={booking.id} />
-                                <button type="submit" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50">
+                                <button type="submit" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 transition">
                                   Cancella
                                 </button>
                               </form>
