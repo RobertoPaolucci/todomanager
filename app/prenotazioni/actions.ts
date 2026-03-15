@@ -29,6 +29,8 @@ function yourSupplierCostFix(unitCost: number, people: number) {
 }
 
 export async function createBooking(formData: FormData) {
+  const returnTo = String(formData.get("returnTo") || "/prenotazioni").trim();
+
   const channel_id = Number(formData.get("channel_id") || 0);
   const experience_id = Number(formData.get("experience_id") || 0);
 
@@ -49,24 +51,15 @@ export async function createBooking(formData: FormData) {
 
   const total_amount = Number(formData.get("total_amount") || 0);
 
-  const customer_payment_status = String(
-    formData.get("customer_payment_status") || "pending"
-  ).trim();
-
-  const supplier_payment_status = String(
-    formData.get("supplier_payment_status") || "pending"
-  ).trim();
+  const customer_payment_status = String(formData.get("customer_payment_status") || "pending").trim();
+  const supplier_payment_status = String(formData.get("supplier_payment_status") || "pending").trim();
+  
+  // Estrazione del nuovo campo
+  const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
 
   const notes = String(formData.get("notes") || "").trim();
 
-  if (
-    !channel_id ||
-    !experience_id ||
-    !experience_name ||
-    !booking_date ||
-    !customer_name ||
-    !booking_created_at
-  ) {
+  if (!channel_id || !experience_id || !experience_name || !booking_date || !customer_name || !booking_created_at) {
     throw new Error("Compila i campi obbligatori");
   }
 
@@ -75,43 +68,23 @@ export async function createBooking(formData: FormData) {
   }
 
   const { data: experience, error: experienceError } = await supabase
-    .from("experiences")
-    .select("id, name, supplier_id, supplier_unit_cost")
-    .eq("id", experience_id)
-    .single();
-
-  if (experienceError || !experience) {
-    throw new Error("Esperienza non trovata");
-  }
+    .from("experiences").select("id, name, supplier_id, supplier_unit_cost").eq("id", experience_id).single();
+  if (experienceError || !experience) throw new Error("Esperienza non trovata");
 
   const { data: channel, error: channelError } = await supabase
-    .from("channels")
-    .select("id, name")
-    .eq("id", channel_id)
-    .single();
-
-  if (channelError || !channel) {
-    throw new Error("Canale non trovato");
-  }
+    .from("channels").select("id, name").eq("id", channel_id).single();
+  if (channelError || !channel) throw new Error("Canale non trovato");
 
   const { data: priceRow, error: priceError } = await supabase
-    .from("experience_channel_prices")
-    .select("your_unit_price, public_unit_price")
-    .eq("experience_id", experience_id)
-    .eq("channel_id", channel_id)
-    .single();
-
-  if (priceError || !priceRow) {
-    throw new Error("Prezzo canale/esperienza non trovato");
-  }
+    .from("experience_channel_prices").select("your_unit_price, public_unit_price").eq("experience_id", experience_id).eq("channel_id", channel_id).single();
+  if (priceError || !priceRow) throw new Error("Prezzo canale/esperienza non trovato");
 
   const your_unit_price = Number(priceRow.your_unit_price || 0);
   const public_unit_price = Number(priceRow.public_unit_price || 0);
   const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
   const total_to_you = yourUnitPriceFix(your_unit_price, total_people);
-  const total_customer =
-    total_amount > 0 ? total_amount : yourPublicPriceFix(public_unit_price, total_people);
+  const total_customer = total_amount > 0 ? total_amount : yourPublicPriceFix(public_unit_price, total_people);
   const total_supplier_cost = yourSupplierCostFix(supplier_unit_cost, total_people);
   const margin_total = total_to_you - total_supplier_cost;
 
@@ -142,18 +115,21 @@ export async function createBooking(formData: FormData) {
     margin_total,
     customer_payment_status,
     supplier_payment_status,
+    supplier_amount_paid, // Salvataggio del nuovo campo
     notes: notes || null,
     is_cancelled: false,
   });
 
-  if (error) {
-    throw new Error(`Errore nel salvataggio prenotazione: ${error.message}`);
-  }
+  if (error) throw new Error(`Errore nel salvataggio prenotazione: ${error.message}`);
 
-  redirect("/prenotazioni");
+  revalidatePath("/prenotazioni");
+  if (returnTo !== "/prenotazioni") revalidatePath(returnTo);
+  redirect(returnTo);
 }
 
 export async function updateBooking(formData: FormData) {
+  const returnTo = String(formData.get("returnTo") || "/prenotazioni").trim();
+
   const id = Number(formData.get("id") || 0);
   const channel_id = Number(formData.get("channel_id") || 0);
   const experience_id = Number(formData.get("experience_id") || 0);
@@ -174,78 +150,42 @@ export async function updateBooking(formData: FormData) {
 
   const total_amount = parseNumber(formData.get("total_amount"), 0);
 
-  const customer_payment_status = String(
-    formData.get("customer_payment_status") || "pending"
-  ).trim();
-
-  const supplier_payment_status = String(
-    formData.get("supplier_payment_status") || "pending"
-  ).trim();
+  const customer_payment_status = String(formData.get("customer_payment_status") || "pending").trim();
+  const supplier_payment_status = String(formData.get("supplier_payment_status") || "pending").trim();
+  
+  // Estrazione del nuovo campo
+  const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
 
   const notes = normalizeText(formData.get("notes"));
 
-  if (!id) {
-    throw new Error("ID prenotazione non valido");
-  }
-
-  if (
-    !channel_id ||
-    !experience_id ||
-    !booking_date ||
-    !customer_name ||
-    !booking_created_at
-  ) {
+  if (!id) throw new Error("ID prenotazione non valido");
+  if (!channel_id || !experience_id || !booking_date || !customer_name || !booking_created_at) {
     throw new Error("Compila i campi obbligatori");
   }
-
-  if (total_people <= 0) {
-    throw new Error("Inserisci almeno 1 persona");
-  }
+  if (total_people <= 0) throw new Error("Inserisci almeno 1 persona");
 
   const { data: experience, error: experienceError } = await supabase
-    .from("experiences")
-    .select("id, name, supplier_id, supplier_unit_cost")
-    .eq("id", experience_id)
-    .single();
-
-  if (experienceError || !experience) {
-    throw new Error("Esperienza non trovata");
-  }
+    .from("experiences").select("id, name, supplier_id, supplier_unit_cost").eq("id", experience_id).single();
+  if (experienceError || !experience) throw new Error("Esperienza non trovata");
 
   const { data: channel, error: channelError } = await supabase
-    .from("channels")
-    .select("id, name")
-    .eq("id", channel_id)
-    .single();
-
-  if (channelError || !channel) {
-    throw new Error("Canale non trovato");
-  }
+    .from("channels").select("id, name").eq("id", channel_id).single();
+  if (channelError || !channel) throw new Error("Canale non trovato");
 
   const { data: priceRow, error: priceError } = await supabase
-    .from("experience_channel_prices")
-    .select("your_unit_price, public_unit_price")
-    .eq("experience_id", experience_id)
-    .eq("channel_id", channel_id)
-    .single();
-
-  if (priceError || !priceRow) {
-    throw new Error("Prezzo canale/esperienza non trovato");
-  }
+    .from("experience_channel_prices").select("your_unit_price, public_unit_price").eq("experience_id", experience_id).eq("channel_id", channel_id).single();
+  if (priceError || !priceRow) throw new Error("Prezzo canale/esperienza non trovato");
 
   const your_unit_price = Number(priceRow.your_unit_price || 0);
   const public_unit_price = Number(priceRow.public_unit_price || 0);
   const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
   const total_to_you = yourUnitPriceFix(your_unit_price, total_people);
-  const total_customer =
-    total_amount > 0 ? total_amount : yourPublicPriceFix(public_unit_price, total_people);
+  const total_customer = total_amount > 0 ? total_amount : yourPublicPriceFix(public_unit_price, total_people);
   const total_supplier_cost = yourSupplierCostFix(supplier_unit_cost, total_people);
   const margin_total = total_to_you - total_supplier_cost;
 
-  const { error } = await supabase
-    .from("bookings")
-    .update({
+  const { error } = await supabase.from("bookings").update({
       channel_id,
       booking_source: channel.name,
       experience_id,
@@ -272,37 +212,27 @@ export async function updateBooking(formData: FormData) {
       margin_total,
       customer_payment_status,
       supplier_payment_status,
+      supplier_amount_paid, // Salvataggio del nuovo campo
       notes,
-    })
-    .eq("id", id);
+    }).eq("id", id);
 
-  if (error) {
-    throw new Error(`Errore aggiornamento prenotazione: ${error.message}`);
-  }
+  if (error) throw new Error(`Errore aggiornamento prenotazione: ${error.message}`);
 
   revalidatePath("/prenotazioni");
   revalidatePath(`/prenotazioni/${id}/modifica`);
-  redirect("/prenotazioni");
+  if (returnTo !== "/prenotazioni") revalidatePath(returnTo);
+  redirect(returnTo);
 }
 
 export async function cancelBooking(formData: FormData) {
   const id = Number(formData.get("id") || 0);
+  if (!id) throw new Error("ID prenotazione non valido");
 
-  if (!id) {
-    throw new Error("ID prenotazione non valido");
-  }
-
-  const { error } = await supabase
-    .from("bookings")
-    .update({
+  const { error } = await supabase.from("bookings").update({
       is_cancelled: true,
       cancelled_at: new Date().toISOString(),
-    })
-    .eq("id", id);
+    }).eq("id", id);
 
-  if (error) {
-    throw new Error(`Errore cancellazione prenotazione: ${error.message}`);
-  }
-
+  if (error) throw new Error(`Errore cancellazione prenotazione: ${error.message}`);
   revalidatePath("/prenotazioni");
 }

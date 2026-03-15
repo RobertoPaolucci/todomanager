@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { createBooking } from "@/app/prenotazioni/actions";
-import { updateBooking } from "@/app/prenotazioni/actions"; // Assicurati di avere questa action esportata
+import { updateBooking } from "@/app/prenotazioni/actions";
 
 type Channel = {
   id: number;
@@ -30,8 +31,10 @@ type BookingFormProps = {
   channels: Channel[];
   experiences: Experience[];
   today: string;
-  initialData?: any; // Aggiunto per pre-compilare i dati in modifica
-  isEditing?: boolean; // Aggiunto per capire quale action usare
+  initialData?: any;
+  isEditing?: boolean;
+  viewOnly?: boolean;
+  returnTo?: string;
 };
 
 export default function BookingForm({
@@ -40,8 +43,9 @@ export default function BookingForm({
   today,
   initialData = null,
   isEditing = false,
+  viewOnly = false,
+  returnTo = "/prenotazioni",
 }: BookingFormProps) {
-  // Inizializziamo gli stati con initialData se presente, altrimenti vuoti/default
   const [channelId, setChannelId] = useState(initialData?.channel_id ? String(initialData.channel_id) : "");
   const [experienceId, setExperienceId] = useState(initialData?.experience_id ? String(initialData.experience_id) : "");
   const [adults, setAdults] = useState(initialData?.adults ?? initialData?.total_people ?? 1);
@@ -72,10 +76,9 @@ export default function BookingForm({
   const marginTotal = totalToYou - totalSupplierCost;
 
   return (
-    // Se isEditing è true usa updateBooking, altrimenti createBooking
-    <form action={isEditing ? updateBooking : createBooking} className="grid gap-4 md:grid-cols-2">
-      {/* Se stiamo modificando, passiamo l'ID nascosto */}
+    <form action={isEditing && !viewOnly ? updateBooking : createBooking} className="grid gap-4 md:grid-cols-2">
       {isEditing && <input type="hidden" name="id" value={initialData.id} />}
+      <input type="hidden" name="returnTo" value={returnTo} />
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
@@ -84,9 +87,10 @@ export default function BookingForm({
         <select
           name="channel_id"
           required
+          disabled={viewOnly}
           value={channelId}
           onChange={(e) => setChannelId(e.target.value)}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         >
           <option value="">Seleziona canale</option>
           {channels.map((channel) => (
@@ -104,8 +108,9 @@ export default function BookingForm({
         <input
           name="booking_reference"
           type="text"
+          disabled={viewOnly}
           defaultValue={initialData?.booking_reference ?? ""}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
           placeholder="Es. VIATOR-847392"
         />
       </div>
@@ -117,10 +122,11 @@ export default function BookingForm({
         <input
           name="booking_created_at"
           type="date"
+          disabled={viewOnly}
           defaultValue={initialData?.booking_created_at ?? today}
           lang="it-IT"
           required
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         />
       </div>
 
@@ -131,9 +137,10 @@ export default function BookingForm({
         <input
           name="customer_name"
           type="text"
+          disabled={viewOnly}
           defaultValue={initialData?.customer_name ?? ""}
           required
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
           placeholder="Es. John Smith"
         />
       </div>
@@ -145,8 +152,9 @@ export default function BookingForm({
         <input
           name="customer_phone"
           type="text"
+          disabled={viewOnly}
           defaultValue={initialData?.customer_phone ?? ""}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
           placeholder="Es. +39 333 1234567"
         />
       </div>
@@ -158,8 +166,9 @@ export default function BookingForm({
         <input
           name="customer_email"
           type="email"
+          disabled={viewOnly}
           defaultValue={initialData?.customer_email ?? ""}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
           placeholder="Es. john@email.com"
         />
       </div>
@@ -171,9 +180,10 @@ export default function BookingForm({
         <select
           name="experience_id"
           required
+          disabled={viewOnly}
           value={experienceId}
           onChange={(e) => setExperienceId(e.target.value)}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         >
           <option value="">Seleziona esperienza</option>
           {experiences.map((experience) => (
@@ -184,11 +194,7 @@ export default function BookingForm({
         </select>
       </div>
 
-      <input
-        type="hidden"
-        name="experience_name"
-        value={selectedExperience?.name || ""}
-      />
+      <input type="hidden" name="experience_name" value={selectedExperience?.name || ""} />
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
@@ -198,9 +204,10 @@ export default function BookingForm({
           name="booking_date"
           type="date"
           lang="it-IT"
+          disabled={viewOnly}
           defaultValue={initialData?.booking_date ?? ""}
           required
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         />
       </div>
 
@@ -212,8 +219,9 @@ export default function BookingForm({
           name="booking_time"
           type="time"
           lang="it-IT"
+          disabled={viewOnly}
           defaultValue={initialData?.booking_time ?? ""}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         />
       </div>
 
@@ -225,10 +233,11 @@ export default function BookingForm({
           name="adults"
           type="number"
           min="0"
+          disabled={viewOnly}
           value={adults}
           onChange={(e) => setAdults(Number(e.target.value))}
           required
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         />
       </div>
 
@@ -240,16 +249,17 @@ export default function BookingForm({
           name="children"
           type="number"
           min="0"
+          disabled={viewOnly}
           value={children}
           onChange={(e) => setChildren(Number(e.target.value))}
           required
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         />
       </div>
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Totale cliente finale (Calcolato)
+          Totale cliente finale
         </label>
         <input
           name="total_amount"
@@ -258,7 +268,7 @@ export default function BookingForm({
           step="0.01"
           value={totalCustomer}
           readOnly
-          className="w-full rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-zinc-700 outline-none"
+          className="w-full rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-zinc-700 outline-none opacity-80"
         />
       </div>
 
@@ -268,8 +278,9 @@ export default function BookingForm({
         </label>
         <select
           name="customer_payment_status"
+          disabled={viewOnly}
           defaultValue={initialData?.customer_payment_status ?? "pending"}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         >
           <option value="pending">pending</option>
           <option value="partial">partial</option>
@@ -277,18 +288,38 @@ export default function BookingForm({
         </select>
       </div>
 
-      <div>
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Pagamento fornitore
-        </label>
-        <select
-          name="supplier_payment_status"
-          defaultValue={initialData?.supplier_payment_status ?? "pending"}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white"
-        >
-          <option value="pending">pending</option>
-          <option value="paid">paid</option>
-        </select>
+      <div className="grid grid-cols-2 gap-4 col-span-1 md:col-span-1">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-zinc-700">
+            Pagamento fornitore
+          </label>
+          <select
+            name="supplier_payment_status"
+            disabled={viewOnly}
+            defaultValue={initialData?.supplier_payment_status ?? "pending"}
+            className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
+          >
+            <option value="pending">pending</option>
+            <option value="partial">partial</option>
+            <option value="paid">paid</option>
+          </select>
+        </div>
+        
+        <div>
+          <label className="mb-1 block text-sm font-medium text-zinc-700 whitespace-nowrap">
+            Importo pagato (€)
+          </label>
+          <input
+            name="supplier_amount_paid"
+            type="number"
+            step="0.01"
+            min="0"
+            disabled={viewOnly}
+            defaultValue={initialData?.supplier_amount_paid ?? 0}
+            className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
+            placeholder="0.00"
+          />
+        </div>
       </div>
 
       <div className="md:col-span-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
@@ -344,7 +375,7 @@ export default function BookingForm({
           </div>
         </div>
 
-        {channelId && experienceId && !selectedPrice ? (
+        {channelId && experienceId && !selectedPrice && !viewOnly ? (
           <p className="mt-4 text-sm font-medium text-red-600">
             Nessun prezzo configurato per questa combinazione canale + esperienza.
           </p>
@@ -358,26 +389,29 @@ export default function BookingForm({
         <textarea
           name="notes"
           rows={4}
+          disabled={viewOnly}
           defaultValue={initialData?.notes ?? ""}
-          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500"
+          className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
           placeholder="Es. allergie, richieste particolari, info operative..."
         />
       </div>
 
       <div className="md:col-span-2 flex gap-3 pt-2">
-        <button
-          type="submit"
-          className="rounded-xl bg-zinc-900 px-5 py-3 text-white transition hover:bg-zinc-700"
-        >
-          {isEditing ? "Aggiorna prenotazione" : "Salva prenotazione"}
-        </button>
+        {!viewOnly && (
+          <button
+            type="submit"
+            className="rounded-xl bg-zinc-900 px-5 py-3 text-white transition hover:bg-zinc-700"
+          >
+            {isEditing ? "Aggiorna prenotazione" : "Salva prenotazione"}
+          </button>
+        )}
 
-        <a
-          href="/prenotazioni"
-          className="rounded-xl border border-zinc-300 px-5 py-3 text-zinc-700 transition hover:bg-zinc-100"
+        <Link
+          href={returnTo}
+          className="rounded-xl border border-zinc-300 px-5 py-3 text-zinc-700 transition hover:bg-zinc-100 flex items-center justify-center"
         >
-          Annulla
-        </a>
+          {viewOnly ? "Torna indietro" : "Annulla"}
+        </Link>
       </div>
     </form>
   );
