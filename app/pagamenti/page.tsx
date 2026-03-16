@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
@@ -14,7 +16,6 @@ export default async function PagamentiPage() {
   const todayObj = new Date();
   const todayStr = todayObj.toISOString().split("T")[0];
 
-  // 1. Scarichiamo Fornitori, Prenotazioni e la NUOVA tabella Pagamenti
   const [suppliersRes, bookingsRes, paymentsRes] = await Promise.all([
     supabase.from("suppliers").select("id, name").order("name"),
     supabase.from("bookings").select("supplier_id, total_supplier_cost, booking_date, is_cancelled"),
@@ -25,24 +26,17 @@ export default async function PagamentiPage() {
   const bookings = bookingsRes.data || [];
   const payments = paymentsRes.data || [];
 
-  // 2. Aggreghiamo i dati: calcoliamo i totali per ogni fornitore usando il metodo a cascata
   const supplierBalances = suppliers.map((supplier) => {
-    // Escludiamo le prenotazioni annullate
     const supplierBookings = bookings.filter((b) => b.supplier_id === supplier.id && !b.is_cancelled);
     const supplierPayments = payments.filter((p) => p.supplier_id === supplier.id);
     
-    // Totale generato (tutte le prenotazioni passate e future)
     const totalCosto = supplierBookings.reduce((sum, b) => sum + Number(b.total_supplier_cost || 0), 0);
-    
-    // Totale incassato dal fornitore
     const totalPagato = supplierPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     
-    // Costo maturato fino a oggi (solo le esperienze già avvenute o in data odierna)
     const costoMaturatoOggi = supplierBookings
       .filter(b => b.booking_date && b.booking_date <= todayStr)
       .reduce((sum, b) => sum + Number(b.total_supplier_cost || 0), 0);
 
-    // Il debito reale da pagare SUBITO (costo maturato - totale pagato, non va mai sotto zero)
     const daPagareOggi = Math.max(0, costoMaturatoOggi - totalPagato);
 
     return {
@@ -54,7 +48,6 @@ export default async function PagamentiPage() {
     };
   });
 
-  // Mostriamo solo i fornitori che hanno generato almeno una prenotazione
   const activeSuppliers = supplierBalances.filter(s => s.prenotazioniCount > 0);
 
   return (
