@@ -7,6 +7,7 @@ const links = [
   { href: "/", label: "Dashboard" },
   { href: "/prenotazioni", label: "Prenotazioni" },
   { href: "/esperienze", label: "Esperienze" },
+  { href: "/canali", label: "Canali" },
   { href: "/clienti", label: "Clienti" },
   { href: "/fornitori", label: "Fornitori" },
   { href: "/pagamenti", label: "Pagamenti" },

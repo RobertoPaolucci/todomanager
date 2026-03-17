@@ -38,40 +38,29 @@ type PageProps = {
 };
 
 export default async function Home({ searchParams }: PageProps) {
-  // 1. Gestione parametri URL per la navigazione dei mesi
   const params = await searchParams;
   const today = new Date();
   
-  // Mese 1-12 (se non passato, usa il mese corrente)
   const selectedMonth = params.m ? Number(params.m) : today.getMonth() + 1; 
   const selectedYear = params.y ? Number(params.y) : today.getFullYear();
 
-  // Calcolo Mese Precedente
   const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
   const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
 
-  // Calcolo Mese Successivo
   const nextMonth = selectedMonth === 12 ? 1 : selectedMonth + 1;
   const nextYear = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
 
   const nomeMese = getMonthName(selectedMonth - 1);
-  
-  // Ultimo giorno del mese selezionato
   const lastDayOfMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
-  // Finestra temporale di 10 giorni per l'agenda
   const todayStr = today.toISOString().split("T")[0];
   const tenDaysFromNow = new Date(today);
   tenDaysFromNow.setDate(today.getDate() + 10);
   const tenDaysFromNowStr = tenDaysFromNow.toISOString().split("T")[0];
 
-  // 2. Dati generali (Canali ecc.)
   const { bookingsByChannel } = await getDashboardStats();
-
-  // Calcolo del valore massimo per proporzionare le barre dei canali
   const maxChannelCount = Math.max(...bookingsByChannel.map(c => c.count), 1);
 
-  // 3. Scarichiamo le prenotazioni
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("*")
@@ -80,33 +69,41 @@ export default async function Home({ searchParams }: PageProps) {
   if (error) console.error("Errore caricamento prenotazioni:", error.message);
   const allBookings = bookings || [];
 
-  // Variabili per il mese selezionato
-  let meseEntrate = 0; // Totale a te
-  let meseSpese = 0;   // Totale fornitori
-  let meseTotale = 0;  // Margine netto
+  let meseEntrate = 0; 
+  let meseSpese = 0;   
+  let meseTotale = 0;  
   const prossimePrenotazioni: any[] = [];
+  
+  const expPaxCounts: Record<string, number> = {};
 
   allBookings.forEach((b) => {
     if (b.is_cancelled) return;
 
+    const expName = b.experience_name || "Sconosciuta";
+    const numPeople = Number(b.total_people || 0);
+    expPaxCounts[expName] = (expPaxCounts[expName] || 0) + numPeople;
+
     if (b.booking_date) {
       const bDate = new Date(b.booking_date);
       
-      // Calcolo Bilancio del mese selezionato
       if (bDate.getMonth() + 1 === selectedMonth && bDate.getFullYear() === selectedYear) {
         meseEntrate += Number(b.total_to_you || 0);
         meseSpese += Number(b.total_supplier_cost || 0);
         meseTotale += Number(b.margin_total || 0);
       }
 
-      // Agenda: Solo le prenotazioni nei prossimi 10 giorni
       if (b.booking_date >= todayStr && b.booking_date <= tenDaysFromNowStr) {
         prossimePrenotazioni.push(b);
       }
     }
   });
 
-  // 4. Preparazione Dati per il Grafico a Barre Economico (12 mesi dell'anno selezionato)
+  const bookingsByExperience = Object.entries(expPaxCounts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const maxExpPax = Math.max(...bookingsByExperience.map(e => e.count), 1);
+
   const chartData = Array.from({ length: 12 }, (_, i) => {
     const monthMargin = allBookings
       .filter((b) => {
@@ -128,9 +125,7 @@ export default async function Home({ searchParams }: PageProps) {
     >
       <div className="grid gap-6 lg:grid-cols-[1fr_350px] items-start">
         
-        {/* COLONNA SINISTRA: L'App Finanziaria e Grafico */}
         <div className="space-y-6">
-          
           {/* SELETTORE MESE */}
           <div className="flex items-center justify-between rounded-full border border-zinc-200 bg-white p-2 shadow-sm max-w-md mx-auto">
             <Link 
@@ -168,7 +163,6 @@ export default async function Home({ searchParams }: PageProps) {
             </div>
             
             <div className="p-6 space-y-4">
-              {/* Riga Totale */}
               <div className="flex items-center justify-between border-b border-zinc-100 pb-4">
                 <span className="text-2xl font-bold text-zinc-900">Totale</span>
                 <span className={`text-2xl font-bold ${meseTotale >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -176,7 +170,6 @@ export default async function Home({ searchParams }: PageProps) {
                 </span>
               </div>
 
-              {/* Riga Entrate */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 text-white">
@@ -189,7 +182,6 @@ export default async function Home({ searchParams }: PageProps) {
                 <span className="text-xl font-medium text-green-600">{formatEuro(meseEntrate)}</span>
               </div>
 
-              {/* Riga Spese */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 text-white">
@@ -202,45 +194,27 @@ export default async function Home({ searchParams }: PageProps) {
                 <span className="text-xl font-medium text-red-600">-{formatEuro(meseSpese)}</span>
               </div>
 
-              {/* Grafico a Barre CSS (Bilancio) */}
               <div className="pt-6 mt-4 border-t border-dashed border-zinc-200">
                 <div className="flex items-stretch justify-between h-32 gap-1 relative">
                   {chartData.map((d, idx) => {
-                    const isPos = d.value >= 0;
                     const heightPct = (Math.abs(d.value) / maxAbsChartValue) * 100;
                     const isCurrentMonth = d.index === selectedMonth;
-
                     return (
                       <div key={idx} className="flex-1 flex flex-col justify-center relative group">
-                        {/* Tooltip Hover (Valore del mese) */}
                         <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-zinc-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 whitespace-nowrap">
                           {formatEuro(d.value)}
                         </div>
-
-                        {/* Barra Positiva */}
                         <div className="flex-1 flex items-end">
-                          {isPos && (
-                            <div 
-                              className={`w-full rounded-t-sm transition-all ${isCurrentMonth ? 'bg-blue-500' : 'bg-green-500 hover:bg-green-400'}`} 
-                              style={{ height: `${heightPct}%` }}
-                            ></div>
+                          {d.value > 0 && (
+                            <div className={`w-full rounded-t-sm transition-all ${isCurrentMonth ? 'bg-blue-500' : 'bg-green-500 hover:bg-green-400'}`} style={{ height: `${heightPct}%` }}></div>
                           )}
                         </div>
-                        
-                        {/* Linea Zero */}
                         <div className="w-full h-px bg-zinc-300 my-0.5"></div>
-                        
-                        {/* Barra Negativa */}
                         <div className="h-6 flex items-start">
-                          {!isPos && (
-                            <div 
-                              className={`w-full rounded-b-sm transition-all ${isCurrentMonth ? 'bg-blue-500' : 'bg-red-500 hover:bg-red-400'}`} 
-                              style={{ height: `${Math.min(heightPct, 100)}%` }}
-                            ></div>
+                          {d.value < 0 && (
+                            <div className={`w-full rounded-b-sm transition-all ${isCurrentMonth ? 'bg-blue-500' : 'bg-red-500 hover:bg-red-400'}`} style={{ height: `${Math.min(heightPct, 100)}%` }}></div>
                           )}
                         </div>
-
-                        {/* Etichetta Mese */}
                         <div className={`text-center text-[9px] uppercase mt-1 ${isCurrentMonth ? 'font-bold text-blue-600' : 'text-zinc-500'}`}>
                           {d.label}
                         </div>
@@ -253,7 +227,6 @@ export default async function Home({ searchParams }: PageProps) {
           </div>
         </div>
 
-        {/* COLONNA DESTRA: Agenda e Canali */}
         <div className="space-y-6">
           <SectionCard title="Agenda (Prossimi 10 giorni)">
             <div className="overflow-x-auto">
@@ -261,6 +234,7 @@ export default async function Home({ searchParams }: PageProps) {
                 <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
                   <tr>
                     <th className="py-2 pr-2">Data/Ora</th>
+                    <th className="py-2 pr-2">Pax</th>
                     <th className="py-2 pr-2">Cliente</th>
                     <th className="py-2 pr-2 text-right">Stato</th>
                   </tr>
@@ -268,27 +242,49 @@ export default async function Home({ searchParams }: PageProps) {
                 <tbody>
                   {prossimePrenotazioni.map((booking) => {
                     const isToday = booking.booking_date === todayStr;
-                    const customerPaid = booking.customer_payment_status === "paid";
-
                     return (
-                      <tr key={booking.id} className="border-b border-zinc-100">
+                      <tr 
+                        key={booking.id} 
+                        className="group relative border-b border-zinc-100 transition hover:bg-zinc-50"
+                      >
                         <td className="py-3 pr-2 whitespace-nowrap">
                           <div className={`font-bold ${isToday ? 'text-blue-700' : 'text-zinc-900'}`}>
                             {isToday ? "OGGI" : formatDate(booking.booking_date)}
                           </div>
-                          <div className="text-[10px] text-zinc-500">{booking.booking_time || "-"}</div>
+                          <div className="text-[10px] text-zinc-500">
+                            {booking.booking_time ? booking.booking_time.slice(0, 5) : "-"}
+                          </div>
+                        </td>
+                        <td className="py-3 pr-2 whitespace-nowrap">
+                          <div className="text-xs font-bold text-zinc-700">{booking.total_people}</div>
                         </td>
                         <td className="py-3 pr-2">
-                          <div className="font-medium text-zinc-900 truncate max-w-[120px]">{booking.customer_name}</div>
-                          <div className="text-[10px] text-zinc-500 truncate max-w-[120px]">{booking.experience_name}</div>
+                          <div className="font-medium text-zinc-900 truncate max-w-[100px]">
+                            {/* Link invisibile per evidenziare la riga nell'elenco */}
+                            <Link 
+                              href={`/prenotazioni?highlight=${booking.id}`} 
+                              className="after:absolute after:inset-0"
+                            >
+                              {booking.customer_name}
+                            </Link>
+                          </div>
+                          <div className="text-[10px] text-zinc-500 truncate max-w-[100px]">{booking.experience_name}</div>
                         </td>
-                        <td className="py-3 pr-2 text-right">
-                          <Link href={`/prenotazioni/${booking.id}/modifica`} className="inline-block">
-                            <span className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
-                              customerPaid ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                            }`}>
-                              {customerPaid ? "Pagato" : "Incassa"}
-                            </span>
+                        
+                        {/* CELLA STATO: 
+                          Usiamo 'relative z-20' per far sì che questo link stia SOPRA 
+                          al link invisibile della riga e rimanga cliccabile singolarmente.
+                        */}
+                        <td className="py-3 pr-2 text-right relative z-20">
+                          <Link 
+                            href={`/prenotazioni/${booking.id}/modifica`}
+                            className={`inline-block rounded-lg px-2 py-1 text-[10px] font-bold uppercase transition hover:scale-105 active:scale-95 ${
+                              booking.customer_payment_status === "paid" 
+                                ? "bg-green-100 text-green-700" 
+                                : "bg-red-100 text-red-700"
+                            }`}
+                          >
+                            {booking.customer_payment_status === "paid" ? "Pagato" : "Incassa"}
                           </Link>
                         </td>
                       </tr>
@@ -296,50 +292,48 @@ export default async function Home({ searchParams }: PageProps) {
                   })}
                   {prossimePrenotazioni.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-zinc-500">
-                        Nessun arrivo in programma per i prossimi 10 giorni.
+                      <td colSpan={4} className="py-6 text-center text-xs text-zinc-500">
+                        Nessun arrivo in programma nei prossimi 10 giorni.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <div className="mt-4 text-center">
-              <Link href="/prenotazioni" className="text-xs font-semibold text-blue-600 hover:underline">
-                Vedi tutte le prenotazioni
-              </Link>
-            </div>
           </SectionCard>
 
           <SectionCard title="Prenotazioni per canale (Storico)">
-            {bookingsByChannel.length === 0 ? (
-              <p className="text-sm text-zinc-600">Nessuna prenotazione disponibile.</p>
-            ) : (
-              <div className="space-y-4 pt-2">
-                {bookingsByChannel.map((item) => {
-                  const widthPct = (item.count / maxChannelCount) * 100;
-                  return (
-                    <div key={item.channel} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-zinc-800">{item.channel}</span>
-                        <span className="font-bold text-zinc-900">{item.count}</span>
-                      </div>
-                      {/* Sfondo della barra */}
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100">
-                        {/* Riempimento della barra animato */}
-                        <div 
-                          className="h-full rounded-full bg-zinc-800 transition-all duration-500 ease-out" 
-                          style={{ width: `${widthPct}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="space-y-4 pt-2">
+              {bookingsByChannel.map((item) => (
+                <div key={item.channel} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-zinc-800">{item.channel}</span>
+                    <span className="font-bold text-zinc-900">{item.count}</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100">
+                    <div className="h-full rounded-full bg-zinc-800" style={{ width: `${(item.count / maxChannelCount) * 100}%` }}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Esperienze più vendute (Pax Totali)">
+            <div className="space-y-4 pt-2">
+              {bookingsByExperience.map((item) => (
+                <div key={item.name} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-zinc-800 truncate pr-4">{item.name}</span>
+                    <span className="font-bold text-zinc-900">{item.count} Pax</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100">
+                    <div className="h-full rounded-full bg-emerald-600" style={{ width: `${(item.count / maxExpPax) * 100}%` }}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </SectionCard>
         </div>
-
       </div>
     </AppShell>
   );
