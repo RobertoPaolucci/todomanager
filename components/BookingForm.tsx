@@ -117,7 +117,7 @@ export default function BookingForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Data prenotazione
+          Data inserimento
         </label>
         <input
           name="booking_created_at"
@@ -132,7 +132,7 @@ export default function BookingForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Nome cliente
+          Nome cliente principale
         </label>
         <input
           name="customer_name"
@@ -147,7 +147,7 @@ export default function BookingForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Telefono cliente
+          Telefono
         </label>
         <input
           name="customer_phone"
@@ -161,7 +161,7 @@ export default function BookingForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Email cliente
+          Email
         </label>
         <input
           name="customer_email"
@@ -259,7 +259,7 @@ export default function BookingForm({
 
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Totale cliente finale
+          Prezzo di vendita totale
         </label>
         <input
           name="total_amount"
@@ -272,9 +272,10 @@ export default function BookingForm({
         />
       </div>
 
+      {/* MODIFICA: Pagamento Agenzia invece di Cliente */}
       <div>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Pagamento cliente
+          Pagamento Agenzia (es. Viator)
         </label>
         <select
           name="customer_payment_status"
@@ -282,9 +283,9 @@ export default function BookingForm({
           defaultValue={initialData?.customer_payment_status ?? "pending"}
           className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-500 bg-white disabled:bg-zinc-50 disabled:text-zinc-500 disabled:opacity-80"
         >
-          <option value="pending">pending</option>
-          <option value="partial">partial</option>
-          <option value="paid">paid</option>
+          <option value="pending">Da incassare (Pending)</option>
+          <option value="partial">Acconto (Partial)</option>
+          <option value="paid">Incassato (Paid)</option>
         </select>
       </div>
 
@@ -329,29 +330,30 @@ export default function BookingForm({
 
         <div className="grid gap-3 md:grid-cols-4">
           <div className="rounded-xl border border-zinc-200 bg-white p-3">
-            <p className="text-sm text-zinc-500">Cliente paga</p>
+            {/* MODIFICA: Testo riepilogo */}
+            <p className="text-sm text-zinc-500">Incasso lordo (Agenzia)</p>
             <p className="mt-1 text-xl font-bold text-zinc-900">
               € {totalCustomer.toFixed(2)}
             </p>
           </div>
 
           <div className="rounded-xl border border-zinc-200 bg-white p-3">
-            <p className="text-sm text-zinc-500">A te</p>
+            <p className="text-sm text-zinc-500">A te (Netto canali)</p>
             <p className="mt-1 text-xl font-bold text-zinc-900">
               € {totalToYou.toFixed(2)}
             </p>
           </div>
 
           <div className="rounded-xl border border-zinc-200 bg-white p-3">
-            <p className="text-sm text-zinc-500">Fornitore</p>
+            <p className="text-sm text-zinc-500">Costo Fornitore</p>
             <p className="mt-1 text-xl font-bold text-zinc-900">
               € {totalSupplierCost.toFixed(2)}
             </p>
           </div>
 
           <div className="rounded-xl border border-zinc-200 bg-white p-3">
-            <p className="text-sm text-zinc-500">Margine</p>
-            <p className="mt-1 text-xl font-bold text-zinc-900">
+            <p className="text-sm font-bold text-emerald-700">Margine pulito</p>
+            <p className="mt-1 text-xl font-bold text-emerald-700">
               € {marginTotal.toFixed(2)}
             </p>
           </div>
@@ -366,7 +368,7 @@ export default function BookingForm({
             {yourUnitPrice.toFixed(2)}
           </div>
           <div>
-            <span className="font-medium">Prezzo cliente/unità:</span> €{" "}
+            <span className="font-medium">Prezzo lordo/unità:</span> €{" "}
             {publicUnitPrice.toFixed(2)}
           </div>
           <div>

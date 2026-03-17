@@ -1,408 +1,334 @@
 export const dynamic = "force-dynamic";
+
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
+import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
 import { supabase } from "@/lib/supabase";
 import { cancelBooking } from "./actions";
 
-type PageProps = {
-  searchParams?: Promise<{
-    q?: string;
-    sort?: string;
-    dir?: string;
-    showPast?: string;
-  }>;
-};
-
-type BookingRow = {
-  id: number;
-  supplier_id: number | null;
-  booking_source: string | null;
-  booking_reference: string | null;
-  booking_created_at: string | null;
-  customer_name: string | null;
-  experience_name: string | null;
-  booking_date: string | null;
-  booking_time: string | null;
-  total_people: number | null;
-  pax: number | null;
-  total_customer: number | null;
-  total_to_you: number | null;
-  total_supplier_cost: number | null;
-  margin_total: number | null;
-  is_cancelled: boolean | null;
-  customer_email: string | null;
-  customer_phone: string | null;
-  notes: string | null;
-};
-
-type SupplierRow = {
-  id: number;
-  phone: string | null;
-};
-
-function formatEuro(value: number | null) {
+function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
     style: "currency",
     currency: "EUR",
-    maximumFractionDigits: 2,
-  }).format(Number(value || 0));
+  }).format(value);
 }
 
 function formatDate(value: string | null) {
   if (!value) return "-";
-  const date = new Date(value);
   return new Intl.DateTimeFormat("it-IT", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  }).format(date);
+  }).format(new Date(value));
 }
 
-function formatWhatsappTime(value: string | null) {
-  if (!value) return "";
-  return value.replace(":", ",");
-}
-
-function normalizePhoneForWhatsApp(value: string | null) {
-  if (!value) return "";
-  return value.replace(/[^\d]/g, "");
-}
-
-function buildWhatsappLink(
-  booking: BookingRow,
-  supplierPhoneById: Record<number, string>
-) {
-  const supplierId = Number(booking.supplier_id || 0);
-  if (!supplierId) return null;
-  const rawPhone = supplierPhoneById[supplierId];
-  if (!rawPhone) return null;
-  const phone = normalizePhoneForWhatsApp(rawPhone);
-  if (!phone) return null;
-
-  const people = booking.total_people ?? booking.pax ?? 0;
-  const formattedDate = formatDate(booking.booking_date || null);
-  const formattedTime = formatWhatsappTime(booking.booking_time || null);
-  const source = booking.booking_source || "-";
-  const reference = booking.booking_reference || "-";
-  const experienceName = booking.experience_name || "-";
-  const customerName = booking.customer_name || "-";
-
-  const message = `${people} persone
-${formattedDate}${formattedTime ? ` ore ${formattedTime}` : ""}
-${experienceName}
-
-Canale: ${source}
-Ref: ${reference}
-Cliente: ${customerName}`;
-
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-}
-
-function getNextDir(currentSort: string, currentDir: string, column: string) {
-  if (currentSort === column) {
-    return currentDir === "asc" ? "desc" : "asc";
-  }
-  return "asc";
-}
-
-function SortLink({
-  label,
-  column,
-  currentSort,
-  currentDir,
-  q,
-  showPast,
-}: {
-  label: string;
-  column: string;
-  currentSort: string;
-  currentDir: string;
-  q: string;
-  showPast: boolean;
-}) {
-  const nextDir = getNextDir(currentSort, currentDir, column);
-  const arrow = currentSort === column ? (currentDir === "asc" ? " ↑" : " ↓") : "";
-
-  return (
-    <Link
-      href={`/prenotazioni?sort=${column}&dir=${nextDir}&q=${encodeURIComponent(q)}&showPast=${showPast ? "1" : "0"}`}
-      className="transition hover:text-zinc-900"
-    >
-      {label}
-      {arrow}
-    </Link>
-  );
-}
+type PageProps = {
+  searchParams: Promise<{
+    q?: string;
+    sort?: string;
+    dir?: string;
+    past?: string;
+  }>;
+};
 
 export default async function PrenotazioniPage({ searchParams }: PageProps) {
-  const params = (await searchParams) || {};
-  const q = params.q?.trim() || "";
+  const params = await searchParams;
+  const q = params.q || "";
   const sort = params.sort || "booking_date";
-  const dir = params.dir === "desc" ? "desc" : "asc";
-  const showPast = params.showPast === "1";
+  const dir = params.dir || "asc";
+  const showPast = params.past === "true";
 
-  const sortableColumns = [
-    "booking_source",
-    "booking_created_at",
-    "customer_name",
-    "experience_name",
-    "booking_date",
-    "booking_time",
-    "total_people",
-  ];
+  const todayStr = new Date().toISOString().split("T")[0];
 
-  const sortColumn = sortableColumns.includes(sort) ? sort : "booking_date";
-  const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
+  const { data: bookings, error } = await supabase.from("bookings").select("*");
 
-  let bookingsQuery = supabase
-    .from("bookings")
-    .select("*")
-    .order(sortColumn, { ascending: dir === "asc", nullsFirst: false });
-
-  if (!showPast) {
-    bookingsQuery = bookingsQuery.gte("booking_date", todayStr);
+  if (error) {
+    console.error("Errore caricamento prenotazioni:", error.message);
   }
 
-  if (q) {
-    const safeQ = q.replace(/,/g, " ").replace(/\./g, " ").trim();
-    bookingsQuery = bookingsQuery.or(
-      [
-        `booking_source.ilike.%${safeQ}%`,
-        `booking_reference.ilike.%${safeQ}%`,
-        `customer_name.ilike.%${safeQ}%`,
-        `experience_name.ilike.%${safeQ}%`,
-        `customer_email.ilike.%${safeQ}%`,
-        `customer_phone.ilike.%${safeQ}%`,
-        `notes.ilike.%${safeQ}%`,
-      ].join(",")
-    );
-  }
+  let allBookings = bookings || [];
 
-  const [bookingsRes, suppliersRes] = await Promise.all([
-    bookingsQuery,
-    supabase.from("suppliers").select("id, phone").order("id", { ascending: true }),
-  ]);
-
-  const bookings = (bookingsRes.data || []) as BookingRow[];
-  const suppliers = (suppliersRes.data || []) as SupplierRow[];
-  const error = bookingsRes.error || suppliersRes.error;
-
-  const supplierPhoneById: Record<number, string> = {};
-  for (const supplier of suppliers) {
-    if (supplier.id && supplier.phone) {
-      supplierPhoneById[supplier.id] = supplier.phone;
+  allBookings = allBookings.filter((b) => {
+    if (!showPast && b.booking_date && b.booking_date < todayStr) {
+      return false;
     }
-  }
+
+    if (q) {
+      const term = q.toLowerCase();
+      const match =
+        (b.customer_name || "").toLowerCase().includes(term) ||
+        (b.booking_reference || "").toLowerCase().includes(term) ||
+        (b.experience_name || "").toLowerCase().includes(term) ||
+        (b.booking_source || "").toLowerCase().includes(term);
+      
+      if (!match) return false;
+    }
+
+    return true;
+  });
+
+  allBookings.sort((a, b) => {
+    let valA: any = a[sort as keyof typeof a] || "";
+    let valB: any = b[sort as keyof typeof b] || "";
+
+    if (["total_customer", "total_supplier_cost", "total_people"].includes(sort)) {
+      valA = Number(valA);
+      valB = Number(valB);
+    }
+
+    if (valA < valB) return dir === "asc" ? -1 : 1;
+    if (valA > valB) return dir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const buildSortUrl = (column: string) => {
+    const newDir = sort === column && dir === "asc" ? "desc" : "asc";
+    const searchParams = new URLSearchParams();
+    if (q) searchParams.set("q", q);
+    if (showPast) searchParams.set("past", "true");
+    searchParams.set("sort", column);
+    searchParams.set("dir", newDir);
+    return `?${searchParams.toString()}`;
+  };
+
+  const SortIcon = ({ column }: { column: string }) => {
+    if (sort !== column) return null;
+    return <span className="ml-1 text-zinc-900">{dir === "asc" ? "↑" : "↓"}</span>;
+  };
 
   return (
-    <AppShell title="Prenotazioni" subtitle="Elenco prenotazioni e stato pagamenti">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <form action="/prenotazioni" method="get" className="flex flex-1 items-center gap-2">
-            <input type="hidden" name="sort" value={sortColumn} />
-            <input type="hidden" name="dir" value={dir} />
-            <input type="hidden" name="showPast" value={showPast ? "1" : "0"} />
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="Cerca..."
-              className="w-full sm:w-[300px] lg:w-[360px] rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
-            />
-            <button
-              type="submit"
-              className="rounded-xl border border-zinc-300 px-4 py-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
-            >
-              Cerca
-            </button>
-          </form>
+    <main className="min-h-screen bg-zinc-50 p-6">
+      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[260px_1fr]">
+        <Sidebar />
 
-          <div className="flex gap-2">
+        <div className="space-y-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-zinc-900">Prenotazioni</h1>
+              <p className="mt-1 text-zinc-600">
+                Gestisci le prenotazioni, filtra e comunica con i fornitori
+              </p>
+            </div>
+            
             <Link
-              href={`/prenotazioni?sort=${sortColumn}&dir=${dir}&q=${encodeURIComponent(q)}&showPast=${showPast ? "0" : "1"}`}
-              className={`flex-1 sm:flex-none text-center rounded-xl border px-4 py-3 text-sm font-medium transition ${
-                showPast
-                  ? "border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100"
-                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-              }`}
+              href="/prenotazioni/nuova"
+              className="inline-flex items-center justify-center rounded-xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 shadow-sm"
             >
-              {showPast ? "Nascondi" : "Passate"}
+              + Nuova prenotazione
             </Link>
-
-            {(q || showPast) ? (
-              <Link
-                href="/prenotazioni"
-                className="flex-1 sm:flex-none text-center rounded-xl border border-zinc-300 px-4 py-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
-              >
-                Reset
-              </Link>
-            ) : null}
           </div>
-        </div>
 
-        <Link
-          href="/prenotazioni/nuova"
-          className="rounded-xl bg-zinc-900 px-4 py-3 text-center text-sm font-medium text-white transition hover:bg-zinc-700"
-        >
-          + Nuova prenotazione
-        </Link>
-      </div>
+          {/* FIX: Aggiunto il 'title' obbligatorio al SectionCard */}
+          <SectionCard title="Ricerca e Filtri">
+            <form method="GET" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <input type="hidden" name="sort" value={sort} />
+              <input type="hidden" name="dir" value={dir} />
+              {showPast && <input type="hidden" name="past" value="true" />}
+              
+              <div className="flex w-full max-w-md items-center overflow-hidden rounded-xl border border-zinc-300 bg-white focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-500 transition">
+                <div className="pl-3 text-zinc-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  name="q"
+                  defaultValue={q}
+                  placeholder="Cerca cliente, riferimento, esperienza..."
+                  className="w-full border-none px-3 py-2.5 outline-none text-sm placeholder:text-zinc-400"
+                />
+                <button type="submit" className="bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-200 border-l border-zinc-200 transition">
+                  Cerca
+                </button>
+              </div>
 
-      <SectionCard title="Lista prenotazioni">
-        {error ? (
-          <p className="text-sm text-red-600">Errore: {error.message}</p>
-        ) : bookings.length === 0 ? (
-          <p className="text-sm text-zinc-600">Nessuna prenotazione trovata.</p>
-        ) : (
-          <>
-            {/* --- ORDINAMENTO MOBILE (VISIBILE SOLO SU IPHONE) --- */}
-            <div className="mb-4 flex flex-wrap gap-x-4 gap-y-2 border-b border-zinc-100 pb-4 text-[11px] font-bold uppercase text-zinc-400 lg:hidden">
-              <SortLink label="Canale" column="booking_source" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
-              <SortLink label="Data Pren." column="booking_created_at" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
-              <SortLink label="Data Exp" column="booking_date" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
-              <SortLink label="Persone" column="total_people" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} />
-            </div>
+              <div className="flex gap-2">
+                {q && (
+                  <Link href={`?sort=${sort}&dir=${dir}${showPast ? '&past=true' : ''}`} className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 transition">
+                    X Rimuovi filtri
+                  </Link>
+                )}
+                <Link
+                  href={`?q=${q}&sort=${sort}&dir=${dir}&past=${showPast ? "false" : "true"}`}
+                  className={`inline-flex items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                    showPast 
+                      ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" 
+                      : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                  }`}
+                >
+                  {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
+                </Link>
+              </div>
+            </form>
+          </SectionCard>
 
-            {/* --- VERSIONE MOBILE (CARD) --- */}
-            <div className="grid grid-cols-1 gap-4 lg:hidden">
-              {bookings.map((booking) => {
-                const isCancelled = booking.is_cancelled === true;
-                const isToday = booking.booking_date === todayStr;
-                const isPast = !!booking.booking_date && booking.booking_date < todayStr;
-                const waLink = buildWhatsappLink(booking, supplierPhoneById);
-
-                return (
-                  <div key={booking.id} className={`rounded-xl border p-4 shadow-sm bg-white ${isCancelled ? 'border-red-100 opacity-75' : 'border-zinc-200'}`}>
-                    <div className="mb-3 flex items-start justify-between">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-bold uppercase text-zinc-400">ID #{booking.id}</span>
-                        <span className="font-bold text-zinc-900">{booking.customer_name}</span>
-                      </div>
-                      <div className={`rounded-lg px-2 py-1 text-xs font-bold ${
-                        isToday ? "bg-lime-200 text-lime-900" : isPast ? "bg-yellow-100 text-yellow-800" : "bg-zinc-100 text-zinc-600"
-                      }`}>
-                        {formatDate(booking.booking_date)}
-                      </div>
-                    </div>
-
-                    <div className="mb-3">
-                      <p className="text-sm font-medium text-zinc-700">{booking.experience_name}</p>
-                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                        <span>{booking.booking_time || "--:--"}</span>
-                        <span>•</span>
-                        <span>{booking.total_people ?? booking.pax} pax</span>
-                        <span>•</span>
-                        <span className="font-semibold text-zinc-900">{booking.booking_source}</span>
-                      </div>
-                      {isCancelled && (
-                        <span className="mt-2 inline-block rounded bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase text-red-700">
-                          Cancellata
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] uppercase text-zinc-400">Margine</span>
-                        <span className="text-sm font-bold text-zinc-900">{formatEuro(booking.margin_total)}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        {waLink && (
-                          <a href={waLink} target="_blank" className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700">
-                            WA
-                          </a>
-                        )}
-                        <Link href={`/prenotazioni/${booking.id}/modifica`} className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700">
-                          Edit
-                        </Link>
-                        {!isCancelled && (
-                          <form action={cancelBooking}>
-                            <input type="hidden" name="id" value={booking.id} />
-                            <button type="submit" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50">
-                              X
-                            </button>
-                          </form>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* --- VERSIONE DESKTOP (TABELLA) --- */}
-            <div className="hidden lg:block overflow-x-auto">
+          <SectionCard title="Elenco Dettagliato">
+            <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 text-zinc-500">
+                <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
                   <tr>
-                    <th className="py-3 pr-4">ID</th>
-                    <th className="py-3 pr-4"><SortLink label="Canale" column="booking_source" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4">Rif.</th>
-                    <th className="py-3 pr-4"><SortLink label="Data pren." column="booking_created_at" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4"><SortLink label="Cliente" column="customer_name" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4"><SortLink label="Esperienza" column="experience_name" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4"><SortLink label="Data" column="booking_date" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4"><SortLink label="Ora" column="booking_time" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4"><SortLink label="Persone" column="total_people" currentSort={sortColumn} currentDir={dir} q={q} showPast={showPast} /></th>
-                    <th className="py-3 pr-4 text-zinc-400 font-normal italic">Cliente €</th>
-                    <th className="py-3 pr-4 text-zinc-400 font-normal italic">A te €</th>
-                    <th className="py-3 pr-4 text-zinc-400 font-normal italic">Fornitore €</th>
-                    <th className="py-3 pr-4">Margine €</th>
-                    <th className="py-3 pr-4">Azioni</th>
+                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
+                      <Link href={buildSortUrl("booking_date")} className="flex items-center">
+                        Data Exp <SortIcon column="booking_date" />
+                      </Link>
+                    </th>
+                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
+                      <Link href={buildSortUrl("customer_name")} className="flex items-center">
+                        Cliente / Rif. <SortIcon column="customer_name" />
+                      </Link>
+                    </th>
+                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
+                      <Link href={buildSortUrl("booking_source")} className="flex items-center">
+                        Canale / Esperienza <SortIcon column="booking_source" />
+                      </Link>
+                    </th>
+                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
+                      <Link href={buildSortUrl("total_customer")} className="flex items-center">
+                        Lordo Agenzia <SortIcon column="total_customer" />
+                      </Link>
+                    </th>
+                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
+                      <Link href={buildSortUrl("customer_payment_status")} className="flex items-center">
+                        Pag. Agenzia <SortIcon column="customer_payment_status" />
+                      </Link>
+                    </th>
+                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
+                      <Link href={buildSortUrl("supplier_payment_status")} className="flex items-center">
+                        Pag. Fornitore <SortIcon column="supplier_payment_status" />
+                      </Link>
+                    </th>
+                    <th className="py-3 pr-4 text-right">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {bookings.map((booking) => {
+                  {allBookings.map((booking) => {
                     const isCancelled = booking.is_cancelled === true;
-                    const tomorrow = new Date();
-                    tomorrow.setDate(today.getDate() + 1);
-                    const tomorrowStr = tomorrow.toISOString().split("T")[0];
-                    const isToday = booking.booking_date === todayStr;
-                    const isTomorrow = booking.booking_date === tomorrowStr;
-                    const isPast = !!booking.booking_date && booking.booking_date < todayStr;
-                    const waLink = buildWhatsappLink(booking, supplierPhoneById);
+                    
+                    const customerStatus = booking.customer_payment_status;
+                    let customerBadgeClass = "bg-red-100 text-red-700";
+                    let customerBadgeText = "Da Incassare";
+                    if (customerStatus === "paid") {
+                      customerBadgeClass = "bg-green-100 text-green-700";
+                      customerBadgeText = "Incassato";
+                    } else if (customerStatus === "partial") {
+                      customerBadgeClass = "bg-blue-100 text-blue-700";
+                      customerBadgeText = "Acconto";
+                    }
+
+                    const costoFornitore = Number(booking.total_supplier_cost || 0);
+                    const pagatoFornitore = Number(booking.supplier_amount_paid || 0);
+                    const isSupplierPaid = booking.supplier_payment_status === "paid" || (pagatoFornitore > 0 && pagatoFornitore >= costoFornitore);
+                    const isSupplierPartial = pagatoFornitore > 0 && pagatoFornitore < costoFornitore && booking.supplier_payment_status !== "paid";
+                    
+                    let supplierBadgeClass = "bg-red-100 text-red-700";
+                    let supplierBadgeText = "Da Saldare";
+                    if (isSupplierPaid) {
+                      supplierBadgeClass = "bg-green-100 text-green-700";
+                      supplierBadgeText = "Pagato";
+                    } else if (isSupplierPartial) {
+                      supplierBadgeClass = "bg-blue-100 text-blue-700";
+                      supplierBadgeText = "Parziale";
+                    }
+
+                    // Testo WhatsApp: "2 da te 17/05/2026 ore 10:00 viator 1373597293 nome"
+                    const wPax = Number(booking.adults || 0) + Number(booking.children || 0);
+                    const wDate = formatDate(booking.booking_date);
+                    const wTime = booking.booking_time ? booking.booking_time.slice(0, 5) : "Orario da def.";
+                    const wChannel = booking.booking_source || "N/A";
+                    const wRef = booking.booking_reference || "N/A";
+                    const wName = booking.customer_name || "N/A";
+                    
+                    const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+                    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(waText)}`;
 
                     return (
-                      <tr key={booking.id} className={`border-b border-zinc-100 transition hover:bg-zinc-50/50 ${isCancelled ? 'bg-red-50/30' : ''}`}>
-                        <td className="py-3 pr-4">{booking.id}</td>
-                        <td className="py-3 pr-4">{booking.booking_source}</td>
-                        <td className="py-3 pr-4 text-xs font-mono">{booking.booking_reference || "-"}</td>
-                        <td className="py-3 pr-4">{formatDate(booking.booking_created_at)}</td>
-                        <td className="py-3 pr-4 font-medium">{booking.customer_name}</td>
-                        <td className="py-3 pr-4">
-                          <div className="flex flex-col">
-                            <span>{booking.experience_name}</span>
-                            {isCancelled && <span className="text-[10px] font-bold uppercase text-red-600">cancellata</span>}
+                      <tr 
+                        key={booking.id} 
+                        className={`border-b border-zinc-100 transition hover:bg-zinc-50 ${isCancelled ? 'bg-zinc-50/50' : ''}`}
+                      >
+                        <td className="py-4 pr-4 whitespace-nowrap">
+                          <div className={`font-bold ${isCancelled ? 'text-zinc-500 line-through' : 'text-zinc-900'}`}>
+                            {formatDate(booking.booking_date)}
+                          </div>
+                          <div className="text-[10px] text-zinc-400 font-medium mt-1">
+                            Ins: {formatDate(booking.booking_created_at)}
                           </div>
                         </td>
-                        <td className="py-3 pr-4">
-                          <span className={`rounded px-1.5 py-0.5 font-semibold ${
-                            isToday ? "bg-lime-200 text-lime-900" : isTomorrow ? "bg-fuchsia-200 text-fuchsia-900" : isPast ? "bg-yellow-100 text-yellow-800" : ""
-                          }`}>
-                            {formatDate(booking.booking_date)}
+                        
+                        <td className="py-4 pr-4">
+                          <div className={`font-medium ${isCancelled ? 'text-zinc-500 line-through' : 'text-zinc-900'}`}>
+                            {booking.customer_name}
+                          </div>
+                          <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                            {booking.booking_reference || "-"}
+                          </div>
+                          {isCancelled && (
+                            <span className="inline-block mt-1 text-[9px] font-bold uppercase text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                              Cancellata
+                            </span>
+                          )}
+                        </td>
+                        
+                        <td className="py-4 pr-4">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="inline-block rounded bg-zinc-100 border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600">
+                              {booking.booking_source || "-"}
+                            </span>
+                            <span className="text-[10px] font-medium text-zinc-500">
+                              {wPax} Pax
+                            </span>
+                          </div>
+                          <div className={`text-xs font-medium ${isCancelled ? 'text-zinc-400' : 'text-zinc-700'}`}>
+                            {booking.experience_name}
+                          </div>
+                        </td>
+                        
+                        <td className="py-4 pr-4">
+                          <div className={`font-bold ${isCancelled ? 'text-zinc-400 line-through' : 'text-zinc-900'}`}>
+                            {formatEuro(Number(booking.total_customer || 0))}
+                          </div>
+                        </td>
+                        
+                        <td className="py-4 pr-4">
+                          <span className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${isCancelled ? 'bg-zinc-200 text-zinc-400' : customerBadgeClass}`}>
+                            {isCancelled ? "-" : customerBadgeText}
                           </span>
                         </td>
-                        <td className="py-3 pr-4">{booking.booking_time || "-"}</td>
-                        <td className="py-3 pr-4 text-center">{booking.total_people ?? booking.pax}</td>
-                        <td className="py-3 pr-4 text-zinc-400 italic">{formatEuro(booking.total_customer)}</td>
-                        <td className="py-3 pr-4 text-zinc-400 italic">{formatEuro(booking.total_to_you)}</td>
-                        <td className="py-3 pr-4 text-zinc-400 italic">{formatEuro(booking.total_supplier_cost)}</td>
-                        <td className="py-3 pr-4 font-bold text-zinc-900">{formatEuro(booking.margin_total)}</td>
-                        <td className="py-3 pr-4">
-                          <div className="flex gap-2">
-                            {waLink && (
-                              <a href={waLink} target="_blank" className="rounded-lg border border-green-200 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50 transition">
+
+                        <td className="py-4 pr-4">
+                          <span className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${isCancelled ? 'bg-zinc-200 text-zinc-400' : supplierBadgeClass}`}>
+                            {isCancelled ? "-" : supplierBadgeText}
+                          </span>
+                        </td>
+                        
+                        <td className="py-4 pr-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Link
+                              href={`/prenotazioni/${booking.id}/modifica`}
+                              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 hover:text-blue-600 transition shadow-sm"
+                            >
+                              Modifica
+                            </Link>
+
+                            {!isCancelled && (
+                              <a
+                                href={waUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-[11px] font-bold text-green-700 hover:bg-green-100 transition shadow-sm"
+                              >
                                 WA
                               </a>
                             )}
-                            <Link href={`/prenotazioni/${booking.id}/modifica`} className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100 transition">
-                              Modifica
-                            </Link>
+
                             {!isCancelled && (
-                              <form action={cancelBooking}>
+                              <form action={cancelBooking} className="inline-block">
                                 <input type="hidden" name="id" value={booking.id} />
-                                <button type="submit" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 transition">
+                                <button
+                                  type="submit"
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 hover:bg-red-100 transition shadow-sm"
+                                >
                                   Cancella
                                 </button>
                               </form>
@@ -412,12 +338,20 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       </tr>
                     );
                   })}
+
+                  {allBookings.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-zinc-500">
+                        Nessuna prenotazione trovata per i criteri selezionati.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
-          </>
-        )}
-      </SectionCard>
-    </AppShell>
+          </SectionCard>
+        </div>
+      </div>
+    </main>
   );
 }
