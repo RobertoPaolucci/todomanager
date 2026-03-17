@@ -23,7 +23,7 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
       <div className="mb-4 flex items-center justify-end">
         <Link
           href="/fornitori"
-          className="rounded-xl border border-zinc-300 px-4 py-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+          className="rounded-xl border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 bg-white shadow-sm"
         >
           ← Torna ai fornitori
         </Link>
@@ -47,7 +47,7 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
                 type="text"
                 required
                 defaultValue={supplier.name}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
               />
             </div>
 
@@ -63,7 +63,7 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
                 name="contact_person"
                 type="text"
                 defaultValue={supplier.contact_person ?? ""}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
               />
             </div>
 
@@ -79,7 +79,7 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
                 name="email"
                 type="email"
                 defaultValue={supplier.email ?? ""}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
               />
             </div>
 
@@ -88,14 +88,15 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
                 htmlFor="phone"
                 className="mb-2 block text-sm font-medium text-zinc-700"
               >
-                Telefono
+                Telefono / WhatsApp
               </label>
               <input
                 id="phone"
                 name="phone"
                 type="text"
+                placeholder="Es. +39 333 1234567"
                 defaultValue={supplier.phone ?? ""}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
               />
             </div>
 
@@ -111,7 +112,7 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
                 name="website"
                 type="text"
                 defaultValue={supplier.website ?? ""}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
               />
             </div>
           </div>
@@ -128,7 +129,7 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
               name="notes"
               rows={4}
               defaultValue={supplier.notes ?? ""}
-              className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+              className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
             />
           </div>
 
@@ -138,17 +139,17 @@ export default async function ModificaFornitorePage({ params }: PageProps) {
               name="active"
               type="checkbox"
               defaultChecked={supplier.active}
-              className="h-4 w-4 rounded border-zinc-300"
+              className="h-5 w-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 cursor-pointer"
             />
-            <label htmlFor="active" className="text-sm text-zinc-700">
+            <label htmlFor="active" className="text-sm font-medium text-zinc-700 cursor-pointer">
               Fornitore attivo
             </label>
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-4 border-t border-zinc-100">
             <button
               type="submit"
-              className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-700"
+              className="rounded-xl bg-zinc-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 shadow-sm"
             >
               Aggiorna fornitore
             </button>
