@@ -11,6 +11,7 @@ const links = [
   { href: "/clienti", label: "Clienti" },
   { href: "/fornitori", label: "Fornitori" },
   { href: "/pagamenti", label: "Pagamenti" },
+  { href: "/report", label: "📊 Report e Analisi" },
 ];
 
 export default function Sidebar() {
@@ -25,15 +26,18 @@ export default function Sidebar() {
 
       <nav className="flex flex-col gap-2">
         {links.map((link) => {
-          const isActive = pathname === link.href;
+          // Miglioria: Mantiene il bottone scuro anche se navighi nelle sotto-pagine (es. /prenotazioni/import)
+          const isActive = link.href === "/" 
+            ? pathname === "/" 
+            : pathname.startsWith(link.href);
 
           return (
             <Link
               key={link.href}
               href={link.href}
-              className={`rounded-xl px-4 py-3 transition ${
+              className={`rounded-xl px-4 py-3 font-medium transition ${
                 isActive
-                  ? "bg-zinc-900 text-white"
+                  ? "bg-zinc-900 text-white shadow-sm"
                   : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
               }`}
             >

@@ -28,7 +28,7 @@ type PageProps = {
     sort?: string;
     dir?: string;
     past?: string;
-    highlight?: string; // AGGIUNTO
+    highlight?: string;
   }>;
 };
 
@@ -38,7 +38,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const sort = params.sort || "booking_date";
   const dir = params.dir || "asc";
   const showPast = params.past === "true";
-  const highlightId = params.highlight || ""; // AGGIUNTO
+  const highlightId = params.highlight || "";
 
   const todayStr = new Date().toISOString().split("T")[0];
   
@@ -118,12 +118,22 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               <h1 className="text-3xl font-bold text-zinc-900">Prenotazioni</h1>
             </div>
             
-            <Link
-              href="/prenotazioni/nuova"
-              className="inline-flex items-center justify-center rounded-xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 shadow-sm"
-            >
-              + Nuova prenotazione
-            </Link>
+            {/* NUOVO GRUPPO DI BOTTONI */}
+            <div className="flex gap-3">
+              <Link 
+                href="/prenotazioni/import" 
+                className="flex items-center gap-2 rounded-xl bg-white border-2 border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition shadow-sm"
+              >
+                ⚙️ Strumenti Dati
+              </Link>
+
+              <Link 
+                href="/prenotazioni/nuova" 
+                className="flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700 transition shadow-sm"
+              >
+                + Nuova Prenotazione
+              </Link>
+            </div>
           </div>
 
           <SectionCard title="Ricerca e Filtri">
@@ -194,7 +204,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 <tbody>
                   {allBookings.map((booking) => {
                     const isCancelled = booking.is_cancelled === true;
-                    const isHighlighted = String(booking.id) === highlightId; // AGGIUNTO
+                    const isHighlighted = String(booking.id) === highlightId;
 
                     const customerStatus = booking.customer_payment_status;
                     let customerBadgeClass = "bg-red-100 text-red-700";
@@ -260,7 +270,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         key={booking.id} 
                         className={`border-b border-zinc-100 transition duration-500 ${
                           isHighlighted 
-                            ? 'bg-amber-50 ring-2 ring-inset ring-amber-200' // STILE EVIDENZIATO
+                            ? 'bg-amber-50 ring-2 ring-inset ring-amber-200' 
                             : isCancelled ? 'bg-zinc-50/50' : 'hover:bg-zinc-50'
                         }`}
                       >
