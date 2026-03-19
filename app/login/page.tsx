@@ -14,21 +14,33 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { data, error: supabaseError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setError("Email o password non validi.");
+      if (supabaseError) {
+        // Mostriamo l'errore esatto che ci restituisce Supabase
+        setError(`Errore: ${supabaseError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      if (data.session) {
+        // Il login è andato a buon fine, creiamo il cookie
+        document.cookie = `tm-auth-token=${data.session.access_token}; path=/; max-age=604800; SameSite=Lax`;
+        
+        // Forziamo il reindirizzamento
+        window.location.replace("/");
+      } else {
+        // Supabase non ha dato errore, ma non ha fornito la sessione (es. email non confermata)
+        setError("Attenzione: Sessione vuota. Hai disabilitato la conferma email su Supabase?");
+        setLoading(false);
+      }
+    } catch (err: any) {
+      setError(`Errore imprevisto: ${err.message}`);
       setLoading(false);
-    } else if (data.session) {
-      // Magia: Salviamo un Cookie esplicito che il Middleware può leggere!
-      // Durerà 7 giorni (604800 secondi)
-      document.cookie = `tm-auth-token=${data.session.access_token}; path=/; max-age=604800; SameSite=Lax`;
-      
-      // Usiamo window.location per forzare un ricaricamento totale della pagina e azzerare il router
-      window.location.href = "/";
     }
   };
 
@@ -72,7 +84,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
               {error}
             </div>
           )}
