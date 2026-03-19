@@ -4,15 +4,25 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    // Peschiamo i dati fisicamente dal form HTML al momento del click.
+    // Infallibile contro i completamenti automatici e i password manager.
+    const formData = new FormData(e.currentTarget);
+    const email = String(formData.get("email") || "").trim();
+    const password = String(formData.get("password") || "");
+
+    if (!email || !password) {
+      setError("Per favore, compila sia l'email che la password.");
+      setLoading(false);
+      return;
+    }
 
     try {
       const { data, error: supabaseError } = await supabase.auth.signInWithPassword({
@@ -21,7 +31,6 @@ export default function LoginPage() {
       });
 
       if (supabaseError) {
-        // Mostriamo l'errore esatto che ci restituisce Supabase
         setError(`Errore: ${supabaseError.message}`);
         setLoading(false);
         return;
@@ -34,8 +43,7 @@ export default function LoginPage() {
         // Forziamo il reindirizzamento
         window.location.replace("/");
       } else {
-        // Supabase non ha dato errore, ma non ha fornito la sessione (es. email non confermata)
-        setError("Attenzione: Sessione vuota. Hai disabilitato la conferma email su Supabase?");
+        setError("Attenzione: Sessione vuota. Controlla le impostazioni di Supabase.");
         setLoading(false);
       }
     } catch (err: any) {
@@ -56,28 +64,28 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700">
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-zinc-700">
               Email
             </label>
             <input
+              id="email"
+              name="email"
               type="email"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none transition focus:border-zinc-500"
               placeholder="tu@email.com"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700">
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-zinc-700">
               Password
             </label>
             <input
+              id="password"
+              name="password"
               type="password"
               required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-xl border border-zinc-300 px-4 py-3 outline-none transition focus:border-zinc-500"
               placeholder="••••••••"
             />
