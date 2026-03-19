@@ -46,6 +46,9 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
   const bookings = bookingsRes.data || [];
   const payments = paymentsRes.data || [];
 
+  // REGOLE FORNITORE INTERNO
+  const isInternal = supplier.name.includes("Fattoria Madonna della Querce");
+
   // 1. Calcolo totale dei pagamenti effettuati
   const totalPagato = payments.reduce((sum, p) => sum + Number(p.amount), 0);
 
@@ -65,12 +68,17 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
         daPagareFuturo += costo;
       }
 
-      if (remainingPayment >= costo) {
+      // Se è interno, risulta sempre pagato per intero
+      if (isInternal) {
         coperto = costo;
-        remainingPayment -= costo;
-      } else if (remainingPayment > 0) {
-        coperto = remainingPayment;
-        remainingPayment = 0;
+      } else {
+        if (remainingPayment >= costo) {
+          coperto = costo;
+          remainingPayment -= costo;
+        } else if (remainingPayment > 0) {
+          coperto = remainingPayment;
+          remainingPayment = 0;
+        }
       }
     }
 
@@ -87,7 +95,9 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
     (a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
   );
 
-  const daPagareOggi = Math.max(0, costoTotaleMaturato - totalPagato);
+  // Se è interno, forziamo i debiti a zero
+  const daPagareOggi = isInternal ? 0 : Math.max(0, costoTotaleMaturato - totalPagato);
+  if (isInternal) daPagareFuturo = 0;
 
   return (
     <main className="min-h-screen bg-zinc-50 p-6">
@@ -102,7 +112,14 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
                   ← Torna a Pagamenti
                 </Link>
               </div>
-              <h1 className="text-3xl font-bold text-zinc-900">{supplier.name}</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-zinc-900">{supplier.name}</h1>
+                {isInternal && (
+                  <span className="rounded-lg bg-emerald-100 text-emerald-800 px-2 py-1 text-xs font-bold uppercase tracking-tight">
+                    Azienda Interna
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-zinc-600">Dettaglio prenotazioni e stato pagamenti</p>
             </div>
 
@@ -112,16 +129,26 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
                 <span className="text-xl font-bold text-amber-700">{formatEuro(daPagareFuturo)}</span>
               </div>
               
-              <Link 
-                href={`/pagamenti/${supplierId}?pay=true`}
-                className="flex-1 rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm min-w-[160px] transition hover:bg-red-100 hover:border-red-300 group cursor-pointer"
-              >
-                <span className="block text-sm font-bold text-red-800">Da Saldare (Scaduti/Oggi)</span>
-                <span className="text-2xl font-black text-red-700">{formatEuro(daPagareOggi)}</span>
-                <div className="mt-1 text-xs text-red-600 group-hover:text-red-800 font-medium">
-                  + Registra Pagamento
+              {isInternal ? (
+                <div className="flex-1 rounded-xl border border-emerald-200 bg-emerald-50 px-6 py-4 text-right shadow-sm min-w-[160px]">
+                  <span className="block text-sm font-bold text-emerald-800">Stato Pagamenti</span>
+                  <span className="text-2xl font-black text-emerald-700">Pareggiato</span>
+                  <div className="mt-1 text-xs text-emerald-600 font-medium">
+                    Gestione contabile interna
+                  </div>
                 </div>
-              </Link>
+              ) : (
+                <Link 
+                  href={`/pagamenti/${supplierId}?pay=true`}
+                  className="flex-1 rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm min-w-[160px] transition hover:bg-red-100 hover:border-red-300 group cursor-pointer"
+                >
+                  <span className="block text-sm font-bold text-red-800">Da Saldare (Scaduti/Oggi)</span>
+                  <span className="text-2xl font-black text-red-700">{formatEuro(daPagareOggi)}</span>
+                  <div className="mt-1 text-xs text-red-600 group-hover:text-red-800 font-medium">
+                    + Registra Pagamento
+                  </div>
+                </Link>
+              )}
             </div>
           </div>
 
@@ -149,7 +176,7 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
                     return (
                       <tr key={booking.id} className={`border-b border-zinc-100 transition hover:bg-zinc-50 ${isCancelled ? 'opacity-50 bg-zinc-50/50' : ''}`}>
                         <td className="py-4 pr-4 whitespace-nowrap">
-                          <span className={`font-medium ${isFuture && !isFullyPaid && !isCancelled ? 'text-amber-600' : 'text-zinc-900'}`}>
+                          <span className={`font-medium ${isFuture && !isFullyPaid && !isCancelled && !isInternal ? 'text-amber-600' : 'text-zinc-900'}`}>
                             {formatDate(booking.booking_date)}
                           </span>
                         </td>
@@ -163,7 +190,7 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
                         </td>
                         <td className="py-4 pr-4">
                           <div className="font-bold text-zinc-900">{formatEuro(booking.costo)}</div>
-                          {isPartial && !isCancelled && (
+                          {isPartial && !isCancelled && !isInternal && (
                             <div className="text-[11px] font-medium text-blue-600 mt-0.5">
                               Coperti: {formatEuro(booking.coperto)}
                             </div>
@@ -172,11 +199,12 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
                         <td className="py-4 pr-4">
                           <span className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
                             isCancelled ? "bg-zinc-200 text-zinc-500" :
+                            isInternal  ? "bg-emerald-100 text-emerald-700" :
                             isFullyPaid ? "bg-green-100 text-green-700" :
                             isPartial   ? "bg-blue-100 text-blue-700" :
                             isFuture    ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
                           }`}>
-                            {isCancelled ? "Annullato" : isFullyPaid ? "Pagato" : isPartial ? "Parziale" : isFuture ? "Futuro" : "Da Saldare"}
+                            {isCancelled ? "Annullato" : isInternal ? "Auto-Saldato" : isFullyPaid ? "Pagato" : isPartial ? "Parziale" : isFuture ? "Futuro" : "Da Saldare"}
                           </span>
                         </td>
                         <td className="py-4 pr-4 text-right">
@@ -202,53 +230,54 @@ export default async function DettaglioPagamentiFornitorePage({ params, searchPa
             </div>
           </SectionCard>
 
-          {/* NUOVA SEZIONE: Storico Pagamenti Registrati */}
-          <SectionCard title="Storico Pagamenti Effettuati">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
-                  <tr>
-                    <th className="py-3 pr-4">Data Pagamento</th>
-                    <th className="py-3 pr-4">Importo</th>
-                    <th className="py-3 pr-4">Metodo</th>
-                    <th className="py-3 pr-4">Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayPayments.map((payment) => (
-                    <tr key={payment.id} className="border-b border-zinc-100 transition hover:bg-zinc-50">
-                      <td className="py-4 pr-4 font-medium text-zinc-900 whitespace-nowrap">
-                        {formatDate(payment.payment_date)}
-                      </td>
-                      <td className="py-4 pr-4 font-bold text-green-700">
-                        {formatEuro(Number(payment.amount))}
-                      </td>
-                      <td className="py-4 pr-4">
-                        <span className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-bold uppercase text-zinc-700">
-                          {payment.payment_method}
-                        </span>
-                      </td>
-                      <td className="py-4 pr-4 text-xs text-zinc-600">
-                        {payment.notes || "-"}
-                      </td>
-                    </tr>
-                  ))}
-                  {displayPayments.length === 0 && (
+          {!isInternal && (
+            <SectionCard title="Storico Pagamenti Effettuati">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-zinc-500">
-                        Ancora nessun pagamento registrato per questo fornitore.
-                      </td>
+                      <th className="py-3 pr-4">Data Pagamento</th>
+                      <th className="py-3 pr-4">Importo</th>
+                      <th className="py-3 pr-4">Metodo</th>
+                      <th className="py-3 pr-4">Note</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </SectionCard>
+                  </thead>
+                  <tbody>
+                    {displayPayments.map((payment) => (
+                      <tr key={payment.id} className="border-b border-zinc-100 transition hover:bg-zinc-50">
+                        <td className="py-4 pr-4 font-medium text-zinc-900 whitespace-nowrap">
+                          {formatDate(payment.payment_date)}
+                        </td>
+                        <td className="py-4 pr-4 font-bold text-green-700">
+                          {formatEuro(Number(payment.amount))}
+                        </td>
+                        <td className="py-4 pr-4">
+                          <span className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-bold uppercase text-zinc-700">
+                            {payment.payment_method}
+                          </span>
+                        </td>
+                        <td className="py-4 pr-4 text-xs text-zinc-600">
+                          {payment.notes || "-"}
+                        </td>
+                      </tr>
+                    ))}
+                    {displayPayments.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-zinc-500">
+                          Ancora nessun pagamento registrato per questo fornitore.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          )}
         </div>
       </div>
 
-      {/* Finestra Modale Pagamento */}
-      {showPayModal && (
+      {/* Finestra Modale Pagamento (Nascosta se è interno) */}
+      {showPayModal && !isInternal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
             <h2 className="text-xl font-bold text-zinc-900 mb-4">Registra Pagamento</h2>

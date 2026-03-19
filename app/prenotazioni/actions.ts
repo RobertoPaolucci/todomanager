@@ -16,19 +16,6 @@ function normalizeText(value: FormDataEntryValue | null) {
   return text === "" ? null : text;
 }
 
-// Funzioni di calcolo aggiornate per ignorare gli infanti nel prezzo
-function yourUnitPriceFix(unitPrice: number, paganti: number) {
-  return unitPrice * paganti;
-}
-
-function yourPublicPriceFix(unitPrice: number, paganti: number) {
-  return unitPrice * paganti;
-}
-
-function yourSupplierCostFix(unitCost: number, paganti: number) {
-  return unitCost * paganti;
-}
-
 export async function createBooking(formData: FormData) {
   const returnTo = String(formData.get("returnTo") || "/prenotazioni").trim();
   const intent = formData.get("intent"); 
@@ -47,15 +34,13 @@ export async function createBooking(formData: FormData) {
   const booking_date = String(formData.get("booking_date") || "").trim();
   const booking_time = String(formData.get("booking_time") || "").trim();
 
-  // --- LOGICA PAX (ADULTI + BAMBINI + INFANTI) ---
+  // --- LOGICA PAX ---
   const adults = Number(formData.get("adults") || 0);
   const children = Number(formData.get("children") || 0);
   const infants = Number(formData.get("infants") || 0);
   
-  const total_people = adults + children + infants; // Posti occupati totali
-  const pricing_pax = adults + children;           // Solo chi paga (Infanti = 0)
-
-  const total_amount = Number(formData.get("total_amount") || 0);
+  const total_people = adults + children + infants;
+  const pricing_pax = adults + children;
 
   const customer_payment_status = String(formData.get("customer_payment_status") || "pending").trim();
   const supplier_payment_status = String(formData.get("supplier_payment_status") || "pending").trim();
@@ -67,24 +52,19 @@ export async function createBooking(formData: FormData) {
     throw new Error("Compila i campi obbligatori");
   }
 
-  if (total_people <= 0) {
-    throw new Error("Inserisci almeno 1 persona");
-  }
-
+  // Recupero esperienza con il nuovo flag
   const { data: experience, error: experienceError } = await supabase
-    .from("experiences").select("id, name, supplier_id, supplier_unit_cost").eq("id", experience_id).single();
+    .from("experiences")
+    .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
+    .eq("id", experience_id)
+    .single();
+  
   if (experienceError || !experience) throw new Error("Esperienza non trovata");
 
-  const { data: channel, error: channelError } = await supabase
-    .from("channels").select("id, name").eq("id", channel_id).single();
-  if (channelError || !channel) throw new Error("Canale non trovato");
+  const isGroupPricing = experience.is_group_pricing === true;
 
-  const { data: priceRowData } = await supabase
-    .from("experience_channel_prices")
-    .select("your_unit_price, public_unit_price")
-    .eq("experience_id", experience_id)
-    .eq("channel_id", channel_id)
-    .single();
+  const { data: channel } = await supabase.from("channels").select("id, name").eq("id", channel_id).single();
+  const { data: priceRowData } = await supabase.from("experience_channel_prices").select("your_unit_price, public_unit_price").eq("experience_id", experience_id).eq("channel_id", channel_id).single();
 
   let your_unit_price = 0;
   let public_unit_price = 0;
@@ -93,38 +73,29 @@ export async function createBooking(formData: FormData) {
     your_unit_price = Number(priceRowData.your_unit_price || 0);
     public_unit_price = Number(priceRowData.public_unit_price || 0);
   } else {
-    const new_your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
-    const new_public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
-
-    if (new_your_unit_price > 0) {
-      const { error: insertPriceError } = await supabase
-        .from("experience_channel_prices")
-        .insert({
-          experience_id,
-          channel_id,
-          your_unit_price: new_your_unit_price,
-          public_unit_price: new_public_unit_price,
-        });
-
-      if (insertPriceError) throw new Error(`Errore creazione nuovo listino: ${insertPriceError.message}`);
-      your_unit_price = new_your_unit_price;
-      public_unit_price = new_public_unit_price;
+    your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
+    public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
+    
+    if (your_unit_price > 0) {
+      await supabase.from("experience_channel_prices").insert({
+        experience_id, channel_id, your_unit_price, public_unit_price
+      });
     } else {
-      throw new Error("⚠️ Prezzo mancante per questa combinazione.");
+      throw new Error("⚠️ Prezzo mancante.");
     }
   }
 
   const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
   
-  // Calcoliamo i totali basandoci sui pricing_pax (Adulti + Bambini)
-  const total_to_you = yourUnitPriceFix(your_unit_price, pricing_pax);
-  const total_customer = total_amount > 0 ? total_amount : yourPublicPriceFix(public_unit_price, pricing_pax);
-  const total_supplier_cost = yourSupplierCostFix(supplier_unit_cost, pricing_pax);
+  // CALCOLO SERVER-SIDE BLINDATO
+  const total_to_you = isGroupPricing ? your_unit_price : (your_unit_price * pricing_pax);
+  const total_customer = isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax);
+  const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
   const margin_total = total_to_you - total_supplier_cost;
 
   const { error } = await supabase.from("bookings").insert({
     channel_id,
-    booking_source: channel.name,
+    booking_source: channel?.name,
     experience_id,
     supplier_id: experience.supplier_id,
     booking_reference: booking_reference || null,
@@ -137,9 +108,9 @@ export async function createBooking(formData: FormData) {
     booking_time: booking_time || null,
     adults,
     children,
-    infants, // Salviamo il nuovo campo
+    infants,
     total_people,
-    pax: total_people, // Il numero totale per la logistica
+    pax: total_people,
     total_amount: total_customer,
     your_unit_price,
     public_unit_price,
@@ -158,40 +129,30 @@ export async function createBooking(formData: FormData) {
   if (error) throw new Error(`Errore: ${error.message}`);
 
   revalidatePath("/prenotazioni");
-  
-  if (intent === "save_and_new") {
-    redirect("/prenotazioni/nuova");
-  } else {
-    redirect(returnTo);
-  }
+  if (intent === "save_and_new") redirect("/prenotazioni/nuova");
+  else redirect(returnTo);
 }
 
 export async function updateBooking(formData: FormData) {
   const returnTo = String(formData.get("returnTo") || "/prenotazioni").trim();
-
   const id = Number(formData.get("id") || 0);
   const channel_id = Number(formData.get("channel_id") || 0);
   const experience_id = Number(formData.get("experience_id") || 0);
 
   const booking_reference = normalizeText(formData.get("booking_reference"));
   const booking_created_at = String(formData.get("booking_created_at") || "").trim();
-
   const customer_name = String(formData.get("customer_name") || "").trim();
   const customer_phone = normalizeText(formData.get("customer_phone"));
   const customer_email = normalizeText(formData.get("customer_email"));
-
   const booking_date = String(formData.get("booking_date") || "").trim();
   const booking_time = normalizeText(formData.get("booking_time"));
 
-  // Logica Pax anche in modifica
   const adults = parseNumber(formData.get("adults"), 0);
   const children = parseNumber(formData.get("children"), 0);
   const infants = parseNumber(formData.get("infants"), 0);
   
   const total_people = adults + children + infants;
   const pricing_pax = adults + children;
-
-  const total_amount = parseNumber(formData.get("total_amount"), 0);
 
   const customer_payment_status = String(formData.get("customer_payment_status") || "pending").trim();
   const supplier_payment_status = String(formData.get("supplier_payment_status") || "pending").trim();
@@ -200,58 +161,65 @@ export async function updateBooking(formData: FormData) {
 
   if (!id) throw new Error("ID non valido");
 
+  // Recupero esperienza per verificare il flag is_group_pricing
   const { data: experience } = await supabase
-    .from("experiences").select("id, name, supplier_id, supplier_unit_cost").eq("id", experience_id).single();
-  const { data: channel } = await supabase
-    .from("channels").select("id, name").eq("id", channel_id).single();
-  const { data: priceRow } = await supabase
-    .from("experience_channel_prices").select("your_unit_price, public_unit_price").eq("experience_id", experience_id).eq("channel_id", channel_id).single();
+    .from("experiences")
+    .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
+    .eq("id", experience_id)
+    .single();
+
+  const isGroupPricing = experience?.is_group_pricing === true;
+
+  const { data: channel } = await supabase.from("channels").select("id, name").eq("id", channel_id).single();
+  const { data: priceRow } = await supabase.from("experience_channel_prices").select("your_unit_price, public_unit_price").eq("experience_id", experience_id).eq("channel_id", channel_id).single();
 
   const your_unit_price = Number(priceRow?.your_unit_price || 0);
   const public_unit_price = Number(priceRow?.public_unit_price || 0);
   const supplier_unit_cost = Number(experience?.supplier_unit_cost || 0);
 
-  const total_to_you = yourUnitPriceFix(your_unit_price, pricing_pax);
-  const total_customer = total_amount > 0 ? total_amount : yourPublicPriceFix(public_unit_price, pricing_pax);
-  const total_supplier_cost = yourSupplierCostFix(supplier_unit_cost, pricing_pax);
+  // CALCOLO SERVER-SIDE AGGIORNATO PER PREZZO A GRUPPO
+  const total_to_you = isGroupPricing ? your_unit_price : (your_unit_price * pricing_pax);
+  const total_customer = isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax);
+  const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
   const margin_total = total_to_you - total_supplier_cost;
 
   const { error } = await supabase.from("bookings").update({
-      channel_id,
-      booking_source: channel?.name,
-      experience_id,
-      supplier_id: experience?.supplier_id,
-      booking_reference,
-      booking_created_at,
-      customer_name,
-      customer_phone,
-      customer_email,
-      experience_name: experience?.name,
-      booking_date,
-      booking_time,
-      adults,
-      children,
-      infants, // Aggiorniamo il campo infants
-      total_people,
-      pax: total_people,
-      total_amount: total_customer,
-      your_unit_price,
-      public_unit_price,
-      supplier_unit_cost,
-      total_to_you,
-      total_customer,
-      total_supplier_cost,
-      margin_total,
-      customer_payment_status,
-      supplier_payment_status,
-      supplier_amount_paid,
-      notes,
-    }).eq("id", id);
+    channel_id,
+    booking_source: channel?.name,
+    experience_id,
+    supplier_id: experience?.supplier_id,
+    booking_reference,
+    booking_created_at,
+    customer_name,
+    customer_phone,
+    customer_email,
+    experience_name: experience?.name,
+    booking_date,
+    booking_time,
+    adults,
+    children,
+    infants,
+    total_people,
+    pax: total_people,
+    total_amount: total_customer,
+    your_unit_price,
+    public_unit_price,
+    supplier_unit_cost,
+    total_to_you,
+    total_customer,
+    total_supplier_cost,
+    margin_total,
+    customer_payment_status,
+    supplier_payment_status,
+    supplier_amount_paid,
+    notes,
+  }).eq("id", id);
 
   if (error) throw new Error(`Errore: ${error.message}`);
 
   revalidatePath("/prenotazioni");
   revalidatePath(`/prenotazioni/${id}/modifica`);
+  revalidatePath("/pagamenti");
   redirect(returnTo);
 }
 

@@ -20,9 +20,9 @@ export async function createExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
-  // base_price rimosso perché non più utilizzato
   const notes = String(formData.get("notes") || "").trim();
   const active = formData.get("active") === "on";
+  const is_group_pricing = formData.get("is_group_pricing") === "on";
 
   if (!name) {
     throw new Error("Il nome esperienza è obbligatorio");
@@ -34,6 +34,7 @@ export async function createExperience(formData: FormData) {
     supplier_unit_cost,
     notes: notes || null,
     active,
+    is_group_pricing,
   });
 
   if (error) {
@@ -49,9 +50,9 @@ export async function updateExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
-  // base_price rimosso
   const notes = String(formData.get("notes") || "").trim();
   const active = formData.get("active") === "on";
+  const is_group_pricing = formData.get("is_group_pricing") === "on";
 
   if (!id) {
     throw new Error("ID esperienza non valido");
@@ -69,6 +70,7 @@ export async function updateExperience(formData: FormData) {
       supplier_unit_cost,
       notes: notes || null,
       active,
+      is_group_pricing,
     })
     .eq("id", id);
 

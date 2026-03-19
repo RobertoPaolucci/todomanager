@@ -27,17 +27,27 @@ export default async function PagamentiPage() {
   const payments = paymentsRes.data || [];
 
   const supplierBalances = suppliers.map((supplier) => {
+    // REGOLE FORNITORE INTERNO
+    const isInternal = supplier.name.includes("Fattoria Madonna della Querce");
+
     const supplierBookings = bookings.filter((b) => b.supplier_id === supplier.id && !b.is_cancelled);
     const supplierPayments = payments.filter((p) => p.supplier_id === supplier.id);
     
     const totalCosto = supplierBookings.reduce((sum, b) => sum + Number(b.total_supplier_cost || 0), 0);
-    const totalPagato = supplierPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    
+    // Se è interno, il pagato è sempre uguale al costo (pareggio automatico)
+    const totalPagato = isInternal 
+      ? totalCosto 
+      : supplierPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     
     const costoMaturatoOggi = supplierBookings
       .filter(b => b.booking_date && b.booking_date <= todayStr)
       .reduce((sum, b) => sum + Number(b.total_supplier_cost || 0), 0);
 
-    const daPagareOggi = Math.max(0, costoMaturatoOggi - totalPagato);
+    // Se è interno, da pagare oggi è sempre 0
+    const daPagareOggi = isInternal 
+      ? 0 
+      : Math.max(0, costoMaturatoOggi - totalPagato);
 
     return {
       ...supplier,
@@ -45,6 +55,7 @@ export default async function PagamentiPage() {
       totalPagato,
       daPagareOggi,
       prenotazioniCount: supplierBookings.length,
+      isInternal
     };
   });
 
@@ -82,8 +93,13 @@ export default async function PagamentiPage() {
                       className="border-b border-zinc-100 transition hover:bg-zinc-50 cursor-pointer group"
                     >
                       <td className="py-4 pr-4 font-medium text-zinc-900 group-hover:text-blue-600">
-                        <Link href={`/pagamenti/${supplier.id}`} className="block w-full">
+                        <Link href={`/pagamenti/${supplier.id}`} className="flex items-center gap-2 w-full">
                           {supplier.name}
+                          {supplier.isInternal && (
+                            <span className="rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight">
+                              Interno
+                            </span>
+                          )}
                         </Link>
                       </td>
                       <td className="py-4 pr-4 text-center">
@@ -103,7 +119,11 @@ export default async function PagamentiPage() {
                       </td>
                       <td className="py-4 pr-4 text-right font-bold text-red-600">
                         <Link href={`/pagamenti/${supplier.id}`} className="block w-full">
-                          {formatEuro(supplier.daPagareOggi)}
+                          {supplier.isInternal ? (
+                            <span className="text-emerald-600 font-medium">Auto-saldato</span>
+                          ) : (
+                            formatEuro(supplier.daPagareOggi)
+                          )}
                         </Link>
                       </td>
                     </tr>

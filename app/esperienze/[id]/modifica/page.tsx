@@ -94,6 +94,21 @@ export default async function ModificaEsperienzaPage({ params }: PageProps) {
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
               />
             </div>
+            
+            <div className="flex items-center pt-8">
+              <div className="flex items-center gap-3 bg-zinc-50 px-4 py-3 rounded-xl border border-zinc-200 w-full">
+                <input
+                  id="is_group_pricing"
+                  name="is_group_pricing"
+                  type="checkbox"
+                  defaultChecked={experience.is_group_pricing}
+                  className="h-5 w-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                />
+                <label htmlFor="is_group_pricing" className="text-sm font-medium text-zinc-800">
+                  Costo a gruppo <span className="text-zinc-500 font-normal">(non moltiplicare per pax)</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div>

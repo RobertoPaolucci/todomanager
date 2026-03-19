@@ -23,6 +23,7 @@ type Experience = {
   name: string;
   supplier_id: number | null;
   supplier_unit_cost: number;
+  is_group_pricing: boolean; // Nuova colonna
   experience_channel_prices: ExperiencePrice[];
 };
 
@@ -49,7 +50,7 @@ export default function BookingForm({
   const [experienceId, setExperienceId] = useState(initialData?.experience_id ? String(initialData.experience_id) : "");
   const [adults, setAdults] = useState(initialData?.adults ?? 1);
   const [children, setChildren] = useState(initialData?.children ?? 0);
-  const [infants, setInfants] = useState(initialData?.infants ?? 0); // NUOVO STATO
+  const [infants, setInfants] = useState(initialData?.infants ?? 0);
   
   const [manualYourPrice, setManualYourPrice] = useState(0);
   const [manualPublicPrice, setManualPublicPrice] = useState(0);
@@ -73,19 +74,22 @@ export default function BookingForm({
     setManualPublicPrice(0);
   }, [channelId, experienceId]);
 
-  // LOGICA PAX: 
-  // totalCapacity = tutti i posti occupati (per logistica)
-  // pricingPax = solo adulti e bambini (per calcolo soldi)
+  // LOGICA PAX
   const totalCapacity = adults + children + infants;
   const pricingPax = adults + children;
 
   const yourUnitPrice = selectedPrice ? Number(selectedPrice.your_unit_price) : manualYourPrice;
   const publicUnitPrice = selectedPrice ? Number(selectedPrice.public_unit_price) : manualPublicPrice;
+  
   const supplierUnitCost = Number(selectedExperience?.supplier_unit_cost || 0);
+  const isGroupPricing = selectedExperience?.is_group_pricing === true;
 
-  const totalToYou = yourUnitPrice * pricingPax;
-  const totalCustomer = publicUnitPrice * pricingPax;
-  const totalSupplierCost = supplierUnitCost * pricingPax;
+  // CALCOLO TOTALE CORRETTO: 
+  // Se l'esperienza è "A Gruppo", NESSUN costo viene moltiplicato per i Pax.
+  const totalToYou = isGroupPricing ? yourUnitPrice : (yourUnitPrice * pricingPax);
+  const totalCustomer = isGroupPricing ? publicUnitPrice : (publicUnitPrice * pricingPax);
+  const totalSupplierCost = isGroupPricing ? supplierUnitCost : (supplierUnitCost * pricingPax);
+  
   const marginTotal = totalToYou - totalSupplierCost;
 
   return (
@@ -178,7 +182,7 @@ export default function BookingForm({
         <div className="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
           <div className="flex items-start gap-3">
             <div className="flex-1">
-              <h4 className="text-sm font-bold text-amber-800">Prezzi non configurati (€/persona)</h4>
+              <h4 className="text-sm font-bold text-amber-800">Prezzi non configurati (€/{isGroupPricing ? 'gruppo' : 'persona'})</h4>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-bold text-amber-800 uppercase">Tuo Netto</label>
@@ -212,7 +216,14 @@ export default function BookingForm({
 
       {/* DATI ESPERIENZA */}
       <div>
-        <label className="mb-1 block text-sm font-medium text-zinc-700">Esperienza</label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm font-medium text-zinc-700">Esperienza</label>
+          {isGroupPricing && (
+            <span className="text-[10px] font-bold uppercase text-purple-600 bg-purple-100 px-1.5 py-0.5 rounded">
+              Costo a Gruppo
+            </span>
+          )}
+        </div>
         <select
           name="experience_id"
           required
@@ -292,7 +303,7 @@ export default function BookingForm({
         </div>
       </div>
 
-      {/* PAGAMENTI */}
+      {/* PAGAMENTI E FORNITORI */}
       <div className="md:col-span-2 grid gap-4 md:grid-cols-3 mt-2">
         <div>
           <label className="mb-1 block text-sm font-medium text-zinc-700">Lordo Totale Autom.</label>
@@ -318,6 +329,13 @@ export default function BookingForm({
             <option value="paid">Incassato</option>
           </select>
         </div>
+        
+        {/* INVIO CAMPI NASCOSTI AL DB */}
+        <input type="hidden" name="total_customer" value={totalCustomer} />
+        <input type="hidden" name="total_supplier_cost" value={totalSupplierCost} />
+        <input type="hidden" name="total_to_you" value={totalToYou} />
+        <input type="hidden" name="margin_total" value={marginTotal} />
+
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-500">Stato Forn.</label>
@@ -355,15 +373,30 @@ export default function BookingForm({
           </span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3">
+          <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3 relative overflow-hidden">
+            {isGroupPricing && (
+              <div className="absolute top-0 right-0 bg-purple-100 px-1 py-0.5 text-[8px] font-bold text-purple-700 uppercase rounded-bl-lg">
+                Fisso
+              </div>
+            )}
             <p className="text-[10px] uppercase font-bold text-zinc-400">Incasso Lordo</p>
             <p className="mt-1 text-lg font-black text-zinc-900">€ {totalCustomer.toFixed(2)}</p>
           </div>
-          <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3">
+          <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3 relative overflow-hidden">
+            {isGroupPricing && (
+              <div className="absolute top-0 right-0 bg-purple-100 px-1 py-0.5 text-[8px] font-bold text-purple-700 uppercase rounded-bl-lg">
+                Fisso
+              </div>
+            )}
             <p className="text-[10px] uppercase font-bold text-zinc-400">Netto a te</p>
             <p className="mt-1 text-lg font-black text-zinc-900">€ {totalToYou.toFixed(2)}</p>
           </div>
-          <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3">
+          <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3 relative overflow-hidden">
+            {isGroupPricing && (
+              <div className="absolute top-0 right-0 bg-purple-100 px-1 py-0.5 text-[8px] font-bold text-purple-700 uppercase rounded-bl-lg">
+                Fisso
+              </div>
+            )}
             <p className="text-[10px] uppercase font-bold text-zinc-400">Costo Fornitore</p>
             <p className="mt-1 text-lg font-black text-red-600">€ {totalSupplierCost.toFixed(2)}</p>
           </div>
@@ -374,9 +407,9 @@ export default function BookingForm({
         </div>
         <div className="mt-4 flex flex-wrap gap-4 text-[11px] text-zinc-400 font-medium border-t border-zinc-50 pt-3 italic">
           <div>Paganti (A+B): {pricingPax}</div>
-          <div>Unit. Te: €{yourUnitPrice.toFixed(2)}</div>
-          <div>Unit. Lordo: €{publicUnitPrice.toFixed(2)}</div>
-          <div>Unit. Forn: €{supplierUnitCost.toFixed(2)}</div>
+          <div>Unit. Te: €{yourUnitPrice.toFixed(2)} {isGroupPricing ? "(Totale)" : "(x Pax)"}</div>
+          <div>Unit. Lordo: €{publicUnitPrice.toFixed(2)} {isGroupPricing ? "(Totale)" : "(x Pax)"}</div>
+          <div>Unit. Forn: €{supplierUnitCost.toFixed(2)} {isGroupPricing ? "(Totale)" : "(x Pax)"}</div>
         </div>
       </div>
 

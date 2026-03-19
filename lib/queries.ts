@@ -23,6 +23,7 @@ export async function getExperiences() {
       supplier_unit_cost,
       notes,
       active,
+      is_group_pricing,
       suppliers (
         id,
         name
@@ -112,7 +113,8 @@ export async function getExperienceById(id: number) {
       supplier_id,
       supplier_unit_cost,
       notes,
-      active
+      active,
+      is_group_pricing
     `)
     .eq("id", id)
     .single();
