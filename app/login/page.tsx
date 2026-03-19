@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -9,14 +8,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -24,10 +22,13 @@ export default function LoginPage() {
     if (error) {
       setError("Email o password non validi.");
       setLoading(false);
-    } else {
-      // Se il login ha successo, ricarichiamo la pagina per far scattare il middleware
-      router.push("/");
-      router.refresh();
+    } else if (data.session) {
+      // Magia: Salviamo un Cookie esplicito che il Middleware può leggere!
+      // Durerà 7 giorni (604800 secondi)
+      document.cookie = `tm-auth-token=${data.session.access_token}; path=/; max-age=604800; SameSite=Lax`;
+      
+      // Usiamo window.location per forzare un ricaricamento totale della pagina e azzerare il router
+      window.location.href = "/";
     }
   };
 
