@@ -29,6 +29,8 @@ type PageProps = {
     dir?: string;
     past?: string;
     highlight?: string;
+    from?: string;
+    to?: string;
   }>;
 };
 
@@ -39,13 +41,21 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const dir = params.dir || "asc";
   const showPast = params.past === "true";
   const highlightId = params.highlight || "";
+  const fromDate = params.from || "";
+  const toDate = params.to || "";
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Date di riferimento per pulsanti e logica
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
   
   const tomorrowObj = new Date();
   tomorrowObj.setDate(tomorrowObj.getDate() + 1);
   const tomorrowStr = tomorrowObj.toISOString().split("T")[0];
 
+  const firstDayMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  const lastDayMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+
+  // Recupero dati (manteniamo la struttura esistente)
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("*, suppliers(phone)");
@@ -56,14 +66,24 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
   let allBookings = bookings || [];
 
+  // LOGICA FILTRAGGIO BLINDATA
   allBookings = allBookings.filter((b) => {
-    // Se è la prenotazione evidenziata, la mostriamo sempre a prescindere dai filtri data
+    // 1. Sempre visibile se evidenziata (es. dopo modifica)
     if (String(b.id) === highlightId) return true;
 
-    if (!showPast && b.booking_date && b.booking_date < todayStr) {
-      return false;
+    // 2. Filtro per data (Calendario o "Mostra Passate")
+    if (b.booking_date) {
+      // Se l'utente ha scelto un range specifico, usiamo quello
+      if (fromDate && b.booking_date < fromDate) return false;
+      if (toDate && b.booking_date > toDate) return false;
+
+      // Se non c'è un range e "showPast" è off, nascondi il passato
+      if (!fromDate && !toDate && !showPast && b.booking_date < todayStr) {
+        return false;
+      }
     }
 
+    // 3. Ricerca testuale
     if (q) {
       const term = q.toLowerCase();
       const match =
@@ -78,6 +98,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     return true;
   });
 
+  // Ordinamento
   allBookings.sort((a, b) => {
     let valA: any = a[sort as keyof typeof a] || "";
     let valB: any = b[sort as keyof typeof b] || "";
@@ -94,12 +115,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
   const buildSortUrl = (column: string) => {
     const newDir = sort === column && dir === "asc" ? "desc" : "asc";
-    const searchParams = new URLSearchParams();
-    if (q) searchParams.set("q", q);
-    if (showPast) searchParams.set("past", "true");
-    searchParams.set("sort", column);
-    searchParams.set("dir", newDir);
-    return `?${searchParams.toString()}`;
+    const sp = new URLSearchParams();
+    if (q) sp.set("q", q);
+    if (showPast) sp.set("past", "true");
+    if (fromDate) sp.set("from", fromDate);
+    if (toDate) sp.set("to", toDate);
+    sp.set("sort", column);
+    sp.set("dir", newDir);
+    return `?${sp.toString()}`;
   };
 
   const SortIcon = ({ column }: { column: string }) => {
@@ -118,7 +141,6 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               <h1 className="text-3xl font-bold text-zinc-900">Prenotazioni</h1>
             </div>
             
-            {/* NUOVO GRUPPO DI BOTTONI */}
             <div className="flex gap-3">
               <Link 
                 href="/prenotazioni/import" 
@@ -137,40 +159,107 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
           </div>
 
           <SectionCard title="Ricerca e Filtri">
-            <form method="GET" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <input type="hidden" name="sort" value={sort} />
-              <input type="hidden" name="dir" value={dir} />
-              {showPast && <input type="hidden" name="past" value="true" />}
-              
-              <div className="flex w-full max-w-md items-center overflow-hidden rounded-xl border border-zinc-300 bg-white focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-500 transition">
-                <div className="pl-3 text-zinc-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                  </svg>
+            <div className="space-y-4">
+              {/* RIGA 1: RICERCA E PASSATE */}
+              <form method="GET" className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <input type="hidden" name="sort" value={sort} />
+                <input type="hidden" name="dir" value={dir} />
+                <input type="hidden" name="from" value={fromDate} />
+                <input type="hidden" name="to" value={toDate} />
+                
+                <div className="flex w-full max-w-md items-center overflow-hidden rounded-xl border border-zinc-300 bg-white focus-within:border-zinc-500 transition">
+                  <div className="pl-3 text-zinc-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    name="q"
+                    defaultValue={q}
+                    placeholder="Cerca cliente, riferimento..."
+                    className="w-full border-none px-3 py-2.5 outline-none text-sm"
+                  />
+                  <button type="submit" className="bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-200 border-l border-zinc-200">
+                    Cerca
+                  </button>
                 </div>
-                <input
-                  type="text"
-                  name="q"
-                  defaultValue={q}
-                  placeholder="Cerca cliente, riferimento..."
-                  className="w-full border-none px-3 py-2.5 outline-none text-sm"
-                />
-                <button type="submit" className="bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-200 border-l border-zinc-200 transition">
-                  Cerca
-                </button>
-              </div>
 
-              <div className="flex gap-2">
-                <Link
-                  href={`?q=${q}&sort=${sort}&dir=${dir}&past=${showPast ? "false" : "true"}`}
-                  className={`inline-flex items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
-                    showPast ? "border-blue-200 bg-blue-50 text-blue-700" : "border-zinc-300 bg-white text-zinc-700"
-                  }`}
-                >
-                  {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
-                </Link>
+                <div className="flex gap-2">
+                  <Link
+                    href={`?q=${q}&sort=${sort}&dir=${dir}&past=${showPast ? "false" : "true"}`}
+                    className={`inline-flex items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                      showPast ? "border-blue-200 bg-blue-50 text-blue-700" : "border-zinc-300 bg-white text-zinc-700"
+                    }`}
+                  >
+                    {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
+                  </Link>
+                  {(fromDate || toDate || q) && (
+                    <Link href="/prenotazioni" className="text-zinc-500 text-xs flex items-center hover:underline">
+                      Reset filtri
+                    </Link>
+                  )}
+                </div>
+              </form>
+
+              {/* RIGA 2: CALENDARIO E BOTTONI RAPIDI */}
+              <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-end">
+                <form method="GET" className="flex flex-wrap items-end gap-3">
+                  <input type="hidden" name="q" value={q} />
+                  <input type="hidden" name="sort" value={sort} />
+                  <input type="hidden" name="dir" value={dir} />
+                  
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">Dal</label>
+                    <input 
+                      type="date" 
+                      name="from" 
+                      defaultValue={fromDate} 
+                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">Al</label>
+                    <input 
+                      type="date" 
+                      name="to" 
+                      defaultValue={toDate} 
+                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                  <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700 transition">
+                    Applica Date
+                  </button>
+                </form>
+
+                <div className="flex flex-wrap gap-2">
+                  <Link 
+                    href={`?from=${todayStr}&to=${todayStr}`}
+                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
+                  >
+                    Oggi
+                  </Link>
+                  <Link 
+                    href={`?from=${tomorrowStr}&to=${tomorrowStr}`}
+                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
+                  >
+                    Domani
+                  </Link>
+                  <Link 
+                    href={`?from=${firstDayMonth}&to=${lastDayMonth}`}
+                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
+                  >
+                    Questo Mese
+                  </Link>
+                  <Link 
+                    href={`?from=2026-01-01&to=2026-12-31`}
+                    className="rounded-lg bg-zinc-100 border border-zinc-300 px-3 py-2 text-[11px] font-bold text-zinc-800 hover:bg-zinc-200 shadow-sm"
+                  >
+                    Tutto 2026
+                  </Link>
+                </div>
               </div>
-            </form>
+            </div>
           </SectionCard>
 
           <SectionCard title="Elenco Dettagliato">
