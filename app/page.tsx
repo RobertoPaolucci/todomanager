@@ -16,11 +16,11 @@ function formatEuro(value: number) {
 
 function formatDate(value: string | null) {
   if (!value) return "-";
+  const d = new Date(value);
   return new Intl.DateTimeFormat("it-IT", {
     day: "2-digit",
     month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+  }).format(d);
 }
 
 function getMonthName(monthIndex: number) {
@@ -125,8 +125,8 @@ export default async function Home({ searchParams }: PageProps) {
     >
       <div className="grid gap-6 lg:grid-cols-[1fr_350px] items-start">
         
+        {/* COLONNA SINISTRA */}
         <div className="space-y-6">
-          {/* SELETTORE MESE */}
           <div className="flex items-center justify-between rounded-full border border-zinc-200 bg-white p-2 shadow-sm max-w-md mx-auto">
             <Link 
               href={`/?m=${prevMonth}&y=${prevYear}`}
@@ -156,7 +156,6 @@ export default async function Home({ searchParams }: PageProps) {
             </Link>
           </div>
 
-          {/* CARD BILANCIO MENSILE */}
           <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-md max-w-md mx-auto">
             <div className="bg-blue-600 py-3 text-center text-white font-medium">
               Bilancio mensile
@@ -227,58 +226,72 @@ export default async function Home({ searchParams }: PageProps) {
           </div>
         </div>
 
+        {/* COLONNA DESTRA */}
         <div className="space-y-6">
           <SectionCard title="Agenda (Prossimi 10 giorni)">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
+            <div className="overflow-hidden">
+              <table className="w-full text-left text-sm table-fixed">
+                <colgroup>
+                  <col className="w-[50px]" />
+                  <col className="w-[30px]" />
+                  <col className="w-auto" />
+                  <col className="w-[60px]" />
+                </colgroup>
                 <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
                   <tr>
-                    <th className="py-2 pr-2">Data/Ora</th>
-                    <th className="py-2 pr-2">Pax</th>
-                    <th className="py-2 pr-2">Cliente</th>
-                    <th className="py-2 pr-2 text-right">Stato</th>
+                    <th className="py-2">Data</th>
+                    <th className="py-2 text-center">Pax</th>
+                    <th className="py-2">Cliente</th>
+                    <th className="py-2 text-right">Stato</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-zinc-100">
                   {prossimePrenotazioni.map((booking) => {
                     const isToday = booking.booking_date === todayStr;
                     return (
-                      <tr 
-                        key={booking.id} 
-                        className="group relative border-b border-zinc-100 transition hover:bg-zinc-50"
-                      >
-                        <td className="py-3 pr-2 whitespace-nowrap">
-                          <div className={`font-bold ${isToday ? 'text-blue-700' : 'text-zinc-900'}`}>
+                      <tr key={booking.id} className="group hover:bg-zinc-50 transition-colors">
+                        <td className="py-3 align-top pr-1">
+                          <div className={`font-bold text-xs ${isToday ? 'text-blue-700' : 'text-zinc-900'}`}>
                             {isToday ? "OGGI" : formatDate(booking.booking_date)}
                           </div>
-                          <div className="text-[10px] text-zinc-500">
+                          <div className="text-[10px] text-zinc-500 mt-0.5">
                             {booking.booking_time ? booking.booking_time.slice(0, 5) : "-"}
                           </div>
                         </td>
-                        <td className="py-3 pr-2 whitespace-nowrap">
+                        
+                        <td className="py-3 align-top text-center pr-1">
                           <div className="text-xs font-bold text-zinc-700">{booking.total_people}</div>
                         </td>
-                        <td className="py-3 pr-2">
-                          <div className="font-medium text-zinc-900 truncate max-w-[100px]">
-                            {/* Link invisibile per evidenziare la riga nell'elenco */}
+                        
+                        <td className="py-3 align-top pr-2">
+                          <div className="flex flex-col min-w-0">
+                            {/* NOME CLIENTE */}
                             <Link 
                               href={`/prenotazioni?highlight=${booking.id}`} 
-                              className="after:absolute after:inset-0"
+                              className="font-bold text-[13px] text-zinc-900 truncate hover:underline"
                             >
                               {booking.customer_name}
                             </Link>
+                            
+                            {/* ESPERIENZA E CANALE AFFIANCATI */}
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                              <span className="text-[11px] text-zinc-500 truncate max-w-full">
+                                {booking.experience_name}
+                              </span>
+                              
+                              {booking.booking_source && (
+                                <span className="shrink-0 inline-block text-[8px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 uppercase tracking-tight">
+                                  {booking.booking_source}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-zinc-500 truncate max-w-[100px]">{booking.experience_name}</div>
                         </td>
                         
-                        {/* CELLA STATO: 
-                          Usiamo 'relative z-20' per far sì che questo link stia SOPRA 
-                          al link invisibile della riga e rimanga cliccabile singolarmente.
-                        */}
-                        <td className="py-3 pr-2 text-right relative z-20">
+                        <td className="py-3 align-top text-right">
                           <Link 
                             href={`/prenotazioni/${booking.id}/modifica`}
-                            className={`inline-block rounded-lg px-2 py-1 text-[10px] font-bold uppercase transition hover:scale-105 active:scale-95 ${
+                            className={`inline-block rounded-lg px-2 py-1 text-[9px] font-bold uppercase transition hover:scale-105 ${
                               booking.customer_payment_status === "paid" 
                                 ? "bg-green-100 text-green-700" 
                                 : "bg-red-100 text-red-700"
