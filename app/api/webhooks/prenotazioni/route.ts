@@ -33,6 +33,8 @@ export async function POST(req: Request) {
       channel_id,
       experience_id,
       customer_name,
+      customer_email,
+      customer_phone,
       booking_date,
       booking_time,
       adults = 0,
@@ -46,10 +48,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Dati obbligatori mancanti" }, { status: 400 });
     }
 
-    // Recupero dati esperienza
+    // Recupero dati esperienza dalla tabella 'experiences' (dove la colonna è 'name')
     const { data: experience, error: expError } = await supabase
       .from("experiences")
-      .select("*")
+      .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
       .eq("id", experience_id)
       .single();
 
@@ -58,10 +60,10 @@ export async function POST(req: Request) {
     // Recupero dati canale
     const { data: channel } = await supabase.from("channels").select("name").eq("id", channel_id).single();
     
-    // Calcolo prezzi e margini
+    // Recupero prezzi
     const { data: priceRow } = await supabase
       .from("experience_channel_prices")
-      .select("*")
+      .select("your_unit_price, public_unit_price")
       .eq("experience_id", experience_id)
       .eq("channel_id", channel_id)
       .single();
@@ -76,7 +78,7 @@ export async function POST(req: Request) {
     const total_customer = total_amount > 0 ? total_amount : (isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax));
     const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
 
-    // SALVATAGGIO (Rettificato con experience_name)
+    // SALVATAGGIO NELLA TABELLA 'bookings'
     const { error: insertError } = await supabase.from("bookings").insert({
       channel_id,
       booking_source: channel?.name || "Bokun",
@@ -85,7 +87,12 @@ export async function POST(req: Request) {
       booking_reference,
       booking_created_at: new Date().toISOString().split("T")[0],
       customer_name,
-      experience_name: experience.name, // <-- QUI: Corretto il nome della colonna
+      customer_email: customer_email || null,
+      customer_phone: customer_phone || null,
+      // CORREZIONE DEFINITIVA: 
+      // La colonna nel DB si chiama 'experience_name'
+      // Il valore lo prendiamo da 'experience.name'
+      experience_name: experience.name, 
       booking_date,
       booking_time,
       adults,
@@ -97,6 +104,9 @@ export async function POST(req: Request) {
       total_customer,
       total_supplier_cost,
       margin_total: total_to_you - total_supplier_cost,
+      customer_payment_status: "pending",
+      supplier_payment_status: "pending",
+      supplier_amount_paid: 0,
       is_cancelled: false,
       notes
     });
@@ -106,6 +116,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, message: "Prenotazione creata!" }, { status: 201 });
 
   } catch (error: any) {
+    console.error("Errore Webhook:", error);
     return NextResponse.json({ error: "Errore interno", details: error.message }, { status: 500 });
   }
 }
