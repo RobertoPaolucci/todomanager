@@ -41,6 +41,24 @@ export default async function NuovaEsperienzaPage() {
               />
             </div>
 
+            {/* NUOVO CAMPO: BOKUN ID */}
+            <div>
+              <label
+                htmlFor="bokun_id"
+                className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-700"
+              >
+                Bokun ID
+                <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">Opzionale</span>
+              </label>
+              <input
+                id="bokun_id"
+                name="bokun_id"
+                type="text"
+                className="w-full rounded-xl border border-zinc-300 bg-orange-50/30 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 focus:bg-white"
+                placeholder="Es. 956472"
+              />
+            </div>
+
             <div>
               <label
                 htmlFor="supplier_id"
@@ -80,6 +98,21 @@ export default async function NuovaEsperienzaPage() {
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
                 placeholder="0.00"
               />
+            </div>
+            
+            <div className="flex items-center pt-8">
+              <div className="flex items-center gap-3 bg-zinc-50 px-4 py-3 rounded-xl border border-zinc-200 w-full">
+                <input
+                  id="is_group_pricing"
+                  name="is_group_pricing"
+                  type="checkbox"
+                  defaultChecked={false}
+                  className="h-5 w-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
+                />
+                <label htmlFor="is_group_pricing" className="text-sm font-medium text-zinc-800">
+                  Costo a gruppo <span className="text-zinc-500 font-normal">(non moltiplicare per pax)</span>
+                </label>
+              </div>
             </div>
           </div>
 

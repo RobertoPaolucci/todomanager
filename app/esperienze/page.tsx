@@ -38,6 +38,8 @@ export default async function EsperienzePage() {
               <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[11px] font-bold">
                 <tr>
                   <th className="py-3 pr-4">Esperienza</th>
+                  {/* NUOVA COLONNA BOKUN ID */}
+                  <th className="py-3 pr-4">Bokun ID</th>
                   <th className="py-3 pr-4">Fornitore</th>
                   <th className="py-3 pr-4 text-right">Costo Fornitore</th>
                   <th className="py-3 pr-4 text-center">Stato</th>
@@ -47,7 +49,6 @@ export default async function EsperienzePage() {
 
               <tbody>
                 {experiences.map((experience) => {
-                  // Estrazione sicura del nome del fornitore
                   const supplier = (experience as any).suppliers;
                   let supplierName = "Non assegnato";
                   
@@ -57,10 +58,23 @@ export default async function EsperienzePage() {
                       : (supplier.name || "Non assegnato");
                   }
 
+                  const bokunId = (experience as any).bokun_id;
+
                   return (
                     <tr key={experience.id} className="border-b border-zinc-100 transition hover:bg-zinc-50/50">
                       <td className="py-3 pr-4 font-medium text-zinc-900">
                         {experience.name}
+                      </td>
+
+                      {/* CELLA BOKUN ID */}
+                      <td className="py-3 pr-4">
+                        {bokunId ? (
+                          <span className="font-mono text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-100 px-2 py-0.5 rounded">
+                            {bokunId}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-zinc-400 italic">Non collegato</span>
+                        )}
                       </td>
 
                       <td className="py-3 pr-4">
@@ -71,7 +85,7 @@ export default async function EsperienzePage() {
                         )}
                       </td>
 
-                      <td className="py-3 pr-4 text-right">
+                      <td className="py-3 pr-4 text-right font-mono">
                         {formatEuro(Number(experience.supplier_unit_cost || 0))}
                       </td>
 

@@ -19,6 +19,7 @@ export async function getExperiences() {
     .select(`
       id,
       name,
+      bokun_id,
       supplier_id,
       supplier_unit_cost,
       notes,
@@ -110,6 +111,7 @@ export async function getExperienceById(id: number) {
     .select(`
       id,
       name,
+      bokun_id,
       supplier_id,
       supplier_unit_cost,
       notes,

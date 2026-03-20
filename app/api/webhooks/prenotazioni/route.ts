@@ -11,7 +11,9 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { booking_reference, status, action } = body;
+    
+    // Ora catturiamo bokun_id al posto di experience_id, più status e action dinamici
+    const { booking_reference, status, action, bokun_id } = body;
 
     // --- 1. LOGICA CANCELLAZIONE (Semaforo Rosso) ---
     if (status === "CANCELLED" && booking_reference) {
@@ -31,7 +33,6 @@ export async function POST(req: Request) {
     // --- 2. LOGICA CREAZIONE O AGGIORNAMENTO ---
     const {
       channel_id,
-      experience_id,
       customer_name,
       customer_email,
       customer_phone,
@@ -43,17 +44,24 @@ export async function POST(req: Request) {
       total_amount = 0,
     } = body;
 
-    if (!channel_id || !experience_id || !booking_date || !customer_name) {
-      return NextResponse.json({ error: "Dati obbligatori mancanti" }, { status: 400 });
+    // Se manca bokun_id blocchiamo tutto
+    if (!channel_id || !bokun_id || !booking_date || !customer_name) {
+      return NextResponse.json({ error: "Dati obbligatori mancanti (Bokun ID, Canale, Data o Nome)" }, { status: 400 });
     }
 
+    // IL PONTE: Cerchiamo l'esperienza tramite il bokun_id
     const { data: experience, error: expError } = await supabase
       .from("experiences")
       .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
-      .eq("id", experience_id)
+      .eq("bokun_id", String(bokun_id))
       .single();
 
-    if (expError || !experience) return NextResponse.json({ error: "Esperienza non trovata" }, { status: 404 });
+    if (expError || !experience) {
+      return NextResponse.json({ error: `Esperienza non trovata per Bokun ID: ${bokun_id}` }, { status: 404 });
+    }
+
+    // Da qui in poi, usiamo l'ID interno del tuo Todo Manager
+    const experience_id = experience.id;
 
     const { data: channel } = await supabase.from("channels").select("name").eq("id", channel_id).single();
     
@@ -77,7 +85,7 @@ export async function POST(req: Request) {
     const bookingData = {
       channel_id,
       booking_source: channel?.name || "Bokun",
-      experience_id,
+      experience_id, // Usiamo l'ID interno mappato!
       supplier_id: experience.supplier_id,
       booking_reference,
       customer_name,

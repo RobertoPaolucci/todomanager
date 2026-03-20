@@ -18,6 +18,8 @@ function parseNullableNumber(value: FormDataEntryValue | null) {
 
 export async function createExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
+  // Aggiunto recupero bokun_id
+  const bokun_id = String(formData.get("bokun_id") || "").trim() || null; 
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
   const notes = String(formData.get("notes") || "").trim();
@@ -30,6 +32,7 @@ export async function createExperience(formData: FormData) {
 
   const { error } = await supabase.from("experiences").insert({
     name,
+    bokun_id, // Salviamo il dato nel database
     supplier_id,
     supplier_unit_cost,
     notes: notes || null,
@@ -48,6 +51,8 @@ export async function createExperience(formData: FormData) {
 export async function updateExperience(formData: FormData) {
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") || "").trim();
+  // Aggiunto recupero bokun_id
+  const bokun_id = String(formData.get("bokun_id") || "").trim() || null;
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
   const notes = String(formData.get("notes") || "").trim();
@@ -66,6 +71,7 @@ export async function updateExperience(formData: FormData) {
     .from("experiences")
     .update({
       name,
+      bokun_id, // Aggiorniamo il dato nel database
       supplier_id,
       supplier_unit_cost,
       notes: notes || null,

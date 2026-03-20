@@ -55,6 +55,25 @@ export default async function ModificaEsperienzaPage({ params }: PageProps) {
               />
             </div>
 
+            {/* NUOVO CAMPO: BOKUN ID (Con bypass TypeScript) */}
+            <div>
+              <label
+                htmlFor="bokun_id"
+                className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-700"
+              >
+                Bokun ID
+                <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">Opzionale</span>
+              </label>
+              <input
+                id="bokun_id"
+                name="bokun_id"
+                type="text"
+                defaultValue={(experience as any).bokun_id ?? ""}
+                className="w-full rounded-xl border border-zinc-300 bg-orange-50/30 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 focus:bg-white"
+                placeholder="Es. 956472"
+              />
+            </div>
+
             <div>
               <label
                 htmlFor="supplier_id"
