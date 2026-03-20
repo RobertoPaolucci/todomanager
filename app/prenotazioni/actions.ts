@@ -232,3 +232,20 @@ export async function cancelBooking(formData: FormData) {
   if (error) throw new Error(`Errore: ${error.message}`);
   revalidatePath("/prenotazioni");
 }
+
+// --- NUOVA AZIONE: SPEGNI SEMAFORO ---
+export async function clearAlert(formData: FormData) {
+  const id = Number(formData.get("id") || 0);
+  if (!id) return;
+
+  const { error } = await supabase
+    .from("bookings")
+    .update({ notes: null }) // Cancella la nota
+    .eq("id", id);
+
+  if (error) throw new Error(`Errore: ${error.message}`);
+  
+  // Ricarica la pagina prenotazioni e la dashboard (se è sulla home "/")
+  revalidatePath("/prenotazioni");
+  revalidatePath("/"); 
+}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
 import { supabase } from "@/lib/supabase";
-import { cancelBooking } from "./actions";
+import { cancelBooking, clearAlert } from "./actions"; // AGGIUNTO clearAlert
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -55,7 +55,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const firstDayMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
   const lastDayMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
 
-  // Recupero dati (manteniamo la struttura esistente)
+  // Recupero dati
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("*, suppliers(phone)");
@@ -68,22 +68,16 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
   // LOGICA FILTRAGGIO BLINDATA
   allBookings = allBookings.filter((b) => {
-    // 1. Sempre visibile se evidenziata (es. dopo modifica)
     if (String(b.id) === highlightId) return true;
 
-    // 2. Filtro per data (Calendario o "Mostra Passate")
     if (b.booking_date) {
-      // Se l'utente ha scelto un range specifico, usiamo quello
       if (fromDate && b.booking_date < fromDate) return false;
       if (toDate && b.booking_date > toDate) return false;
-
-      // Se non c'è un range e "showPast" è off, nascondi il passato
       if (!fromDate && !toDate && !showPast && b.booking_date < todayStr) {
         return false;
       }
     }
 
-    // 3. Ricerca testuale
     if (q) {
       const term = q.toLowerCase();
       const match =
@@ -160,7 +154,6 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
           <SectionCard title="Ricerca e Filtri">
             <div className="space-y-4">
-              {/* RIGA 1: RICERCA E PASSATE */}
               <form method="GET" className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <input type="hidden" name="sort" value={sort} />
                 <input type="hidden" name="dir" value={dir} />
@@ -202,7 +195,6 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 </div>
               </form>
 
-              {/* RIGA 2: CALENDARIO E BOTTONI RAPIDI */}
               <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-end">
                 <form method="GET" className="flex flex-wrap items-end gap-3">
                   <input type="hidden" name="q" value={q} />
@@ -233,30 +225,10 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 </form>
 
                 <div className="flex flex-wrap gap-2">
-                  <Link 
-                    href={`?from=${todayStr}&to=${todayStr}`}
-                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
-                  >
-                    Oggi
-                  </Link>
-                  <Link 
-                    href={`?from=${tomorrowStr}&to=${tomorrowStr}`}
-                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
-                  >
-                    Domani
-                  </Link>
-                  <Link 
-                    href={`?from=${firstDayMonth}&to=${lastDayMonth}`}
-                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
-                  >
-                    Questo Mese
-                  </Link>
-                  <Link 
-                    href={`?from=2026-01-01&to=2026-12-31`}
-                    className="rounded-lg bg-zinc-100 border border-zinc-300 px-3 py-2 text-[11px] font-bold text-zinc-800 hover:bg-zinc-200 shadow-sm"
-                  >
-                    Tutto 2026
-                  </Link>
+                  <Link href={`?from=${todayStr}&to=${todayStr}`} className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm">Oggi</Link>
+                  <Link href={`?from=${tomorrowStr}&to=${tomorrowStr}`} className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm">Domani</Link>
+                  <Link href={`?from=${firstDayMonth}&to=${lastDayMonth}`} className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm">Questo Mese</Link>
+                  <Link href={`?from=2026-01-01&to=2026-12-31`} className="rounded-lg bg-zinc-100 border border-zinc-300 px-3 py-2 text-[11px] font-bold text-zinc-800 hover:bg-zinc-200 shadow-sm">Tutto 2026</Link>
                 </div>
               </div>
             </div>
@@ -268,21 +240,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
                   <tr>
                     <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      <Link href={buildSortUrl("booking_date")} className="flex items-center">
-                        Data / Ora <SortIcon column="booking_date" />
-                      </Link>
+                      <Link href={buildSortUrl("booking_date")} className="flex items-center">Data / Ora <SortIcon column="booking_date" /></Link>
                     </th>
                     <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      <Link href={buildSortUrl("customer_name")} className="flex items-center">
-                        Cliente / Rif. <SortIcon column="customer_name" />
-                      </Link>
+                      <Link href={buildSortUrl("customer_name")} className="flex items-center">Cliente / Rif. <SortIcon column="customer_name" /></Link>
                     </th>
                     <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      <Link href={buildSortUrl("booking_source")} className="flex items-center">
-                        Canale / Esperienza <SortIcon column="booking_source" />
-                      </Link>
+                      <Link href={buildSortUrl("booking_source")} className="flex items-center">Canale / Esperienza <SortIcon column="booking_source" /></Link>
                     </th>
-                    {/* NUOVA COLONNA: STATO / NOTE */}
                     <th className="py-3 pr-4">Stato / Note</th>
                     <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
                       Lordo <SortIcon column="total_customer" />
@@ -356,6 +321,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       isTomorrow = true;
                     }
 
+                    // Determina se c'è un semaforo attivo
+                    const hasAlert = booking.notes && (booking.notes.includes('🔴') || booking.notes.includes('🟡') || booking.notes.includes('🟢'));
+
                     return (
                       <tr 
                         key={booking.id} 
@@ -402,19 +370,28 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                           <div className="text-xs font-medium text-zinc-700 truncate max-w-[150px]">{booking.experience_name}</div>
                         </td>
                         
-                        {/* NUOVA CELLA: STATO / NOTE (Semafori) */}
+                        {/* CELLA STATO / NOTE (Cliccabile per spegnere l'alert) */}
                         <td className="py-4 pr-4">
-                          {booking.notes ? (
-                            <div className={`text-[11px] font-bold leading-tight max-w-[130px] whitespace-normal ${
-                              booking.notes.includes('🔴') ? 'text-red-600' :
-                              booking.notes.includes('🟡') ? 'text-amber-600' :
-                              booking.notes.includes('🟢') ? 'text-green-600' :
-                              'text-zinc-600'
-                            }`}>
-                              {booking.notes}
-                            </div>
+                          {hasAlert ? (
+                            <form action={clearAlert}>
+                              <input type="hidden" name="id" value={booking.id} />
+                              <button 
+                                type="submit"
+                                title="Clicca per confermare la presa visione"
+                                className={`group text-[11px] font-bold leading-tight max-w-[130px] whitespace-normal text-left transition-all cursor-pointer rounded p-1.5 -ml-1.5 hover:bg-zinc-200 ${
+                                  booking.notes.includes('🔴') ? 'text-red-600 hover:bg-red-50' :
+                                  booking.notes.includes('🟡') ? 'text-amber-600 hover:bg-amber-50' :
+                                  'text-green-600 hover:bg-green-50'
+                                }`}
+                              >
+                                {booking.notes}
+                                <span className="block mt-1 text-[9px] font-medium text-zinc-400 group-hover:text-zinc-600 underline">
+                                  Segna come letto
+                                </span>
+                              </button>
+                            </form>
                           ) : (
-                            <div className="text-zinc-300">-</div>
+                            <div className="text-zinc-400 text-[11px] max-w-[130px] whitespace-normal">{booking.notes || "-"}</div>
                           )}
                         </td>
 

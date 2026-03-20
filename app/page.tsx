@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
+import NotificationCenter from "@/components/NotificationCenter"; // <--- AGGIUNTO L'IMPORT
 import { getDashboardStats } from "@/lib/dashboard";
 import { supabase } from "@/lib/supabase";
 
@@ -228,6 +229,10 @@ export default async function Home({ searchParams }: PageProps) {
 
         {/* COLONNA DESTRA */}
         <div className="space-y-6">
+          
+          {/* COMPONENTE NOTIFICHE QUI IN CIMA */}
+          <NotificationCenter />
+
           <SectionCard title="Agenda (Prossimi 10 giorni)">
             <div className="overflow-hidden">
               <table className="w-full text-left text-sm table-fixed">
