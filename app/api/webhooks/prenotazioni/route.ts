@@ -11,18 +11,16 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    
-    // Ora accettiamo anche "action" per intercettare le modifiche
     const { booking_reference, status, action } = body;
 
-    // --- 1. LOGICA CANCELLAZIONE ---
+    // --- 1. LOGICA CANCELLAZIONE (Semaforo Rosso) ---
     if (status === "CANCELLED" && booking_reference) {
       const { error: updateError } = await supabase
         .from("bookings")
         .update({ 
           is_cancelled: true,
           customer_payment_status: "cancelled",
-          notes: "Cancellata automaticamente tramite Bokun/Make" 
+          notes: "🔴 CANCELLATA" 
         })
         .eq("booking_reference", booking_reference);
 
@@ -43,14 +41,12 @@ export async function POST(req: Request) {
       children = 0,
       infants = 0,
       total_amount = 0,
-      notes = "Importata/Aggiornata tramite Webhook",
     } = body;
 
     if (!channel_id || !experience_id || !booking_date || !customer_name) {
       return NextResponse.json({ error: "Dati obbligatori mancanti" }, { status: 400 });
     }
 
-    // Recupero dati essenziali dal DB (Esperienza e Canale)
     const { data: experience, error: expError } = await supabase
       .from("experiences")
       .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -61,7 +57,6 @@ export async function POST(req: Request) {
 
     const { data: channel } = await supabase.from("channels").select("name").eq("id", channel_id).single();
     
-    // Recupero prezzi e calcolo nuovi margini
     const { data: priceRow } = await supabase
       .from("experience_channel_prices")
       .select("your_unit_price, public_unit_price")
@@ -79,7 +74,6 @@ export async function POST(req: Request) {
     const total_customer = total_amount > 0 ? total_amount : (isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax));
     const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
 
-    // Dati pronti da inserire o aggiornare
     const bookingData = {
       channel_id,
       booking_source: channel?.name || "Bokun",
@@ -101,21 +95,23 @@ export async function POST(req: Request) {
       total_customer,
       total_supplier_cost,
       margin_total: total_to_you - total_supplier_cost,
-      notes
     };
 
-    // Se l'azione è un aggiornamento, modifichiamo la riga esistente
+    // --- MODIFICA (Semaforo Giallo) ---
     if (action === "BOOKING_UPDATED" && booking_reference) {
        const { error: updateError } = await supabase
         .from("bookings")
-        .update(bookingData)
+        .update({
+            ...bookingData,
+            notes: "🟡 MODIFICATA (Controllare dettagli)"
+        })
         .eq("booking_reference", booking_reference);
 
       if (updateError) throw new Error(updateError.message);
-      return NextResponse.json({ success: true, message: "Prenotazione aggiornata con successo!" });
+      return NextResponse.json({ success: true, message: "Prenotazione aggiornata!" });
     }
 
-    // Altrimenti, è una creazione (Creiamo riga nuova)
+    // --- CREAZIONE (Semaforo Verde) ---
     const { error: insertError } = await supabase.from("bookings").insert({
       ...bookingData,
       booking_created_at: new Date().toISOString().split("T")[0],
@@ -123,10 +119,10 @@ export async function POST(req: Request) {
       supplier_payment_status: "pending",
       supplier_amount_paid: 0,
       is_cancelled: false,
+      notes: "🟢 NUOVA PRENOTAZIONE"
     });
 
     if (insertError) throw new Error(insertError.message);
-
     return NextResponse.json({ success: true, message: "Prenotazione creata!" }, { status: 201 });
 
   } catch (error: any) {

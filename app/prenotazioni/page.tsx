@@ -282,6 +282,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         Canale / Esperienza <SortIcon column="booking_source" />
                       </Link>
                     </th>
+                    {/* NUOVA COLONNA: STATO / NOTE */}
+                    <th className="py-3 pr-4">Stato / Note</th>
                     <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
                       Lordo <SortIcon column="total_customer" />
                     </th>
@@ -400,6 +402,22 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                           <div className="text-xs font-medium text-zinc-700 truncate max-w-[150px]">{booking.experience_name}</div>
                         </td>
                         
+                        {/* NUOVA CELLA: STATO / NOTE (Semafori) */}
+                        <td className="py-4 pr-4">
+                          {booking.notes ? (
+                            <div className={`text-[11px] font-bold leading-tight max-w-[130px] whitespace-normal ${
+                              booking.notes.includes('🔴') ? 'text-red-600' :
+                              booking.notes.includes('🟡') ? 'text-amber-600' :
+                              booking.notes.includes('🟢') ? 'text-green-600' :
+                              'text-zinc-600'
+                            }`}>
+                              {booking.notes}
+                            </div>
+                          ) : (
+                            <div className="text-zinc-300">-</div>
+                          )}
+                        </td>
+
                         <td className="py-4 pr-4">
                           <div className="font-bold text-zinc-900">{formatEuro(Number(booking.total_customer || 0))}</div>
                         </td>
