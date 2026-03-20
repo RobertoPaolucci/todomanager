@@ -11,7 +11,9 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { booking_reference, status } = body;
+    
+    // Ora accettiamo anche "action" per intercettare le modifiche
+    const { booking_reference, status, action } = body;
 
     // --- 1. LOGICA CANCELLAZIONE ---
     if (status === "CANCELLED" && booking_reference) {
@@ -28,7 +30,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: "Prenotazione cancellata!" });
     }
 
-    // --- 2. LOGICA CREAZIONE ---
+    // --- 2. LOGICA CREAZIONE O AGGIORNAMENTO ---
     const {
       channel_id,
       experience_id,
@@ -41,14 +43,14 @@ export async function POST(req: Request) {
       children = 0,
       infants = 0,
       total_amount = 0,
-      notes = "Importata tramite Webhook",
+      notes = "Importata/Aggiornata tramite Webhook",
     } = body;
 
     if (!channel_id || !experience_id || !booking_date || !customer_name) {
       return NextResponse.json({ error: "Dati obbligatori mancanti" }, { status: 400 });
     }
 
-    // Recupero dati esperienza dalla tabella 'experiences' (dove la colonna è 'name')
+    // Recupero dati essenziali dal DB (Esperienza e Canale)
     const { data: experience, error: expError } = await supabase
       .from("experiences")
       .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -57,10 +59,9 @@ export async function POST(req: Request) {
 
     if (expError || !experience) return NextResponse.json({ error: "Esperienza non trovata" }, { status: 404 });
 
-    // Recupero dati canale
     const { data: channel } = await supabase.from("channels").select("name").eq("id", channel_id).single();
     
-    // Recupero prezzi
+    // Recupero prezzi e calcolo nuovi margini
     const { data: priceRow } = await supabase
       .from("experience_channel_prices")
       .select("your_unit_price, public_unit_price")
@@ -78,20 +79,16 @@ export async function POST(req: Request) {
     const total_customer = total_amount > 0 ? total_amount : (isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax));
     const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
 
-    // SALVATAGGIO NELLA TABELLA 'bookings'
-    const { error: insertError } = await supabase.from("bookings").insert({
+    // Dati pronti da inserire o aggiornare
+    const bookingData = {
       channel_id,
       booking_source: channel?.name || "Bokun",
       experience_id,
       supplier_id: experience.supplier_id,
       booking_reference,
-      booking_created_at: new Date().toISOString().split("T")[0],
       customer_name,
       customer_email: customer_email || null,
       customer_phone: customer_phone || null,
-      // CORREZIONE DEFINITIVA: 
-      // La colonna nel DB si chiama 'experience_name'
-      // Il valore lo prendiamo da 'experience.name'
       experience_name: experience.name, 
       booking_date,
       booking_time,
@@ -104,11 +101,28 @@ export async function POST(req: Request) {
       total_customer,
       total_supplier_cost,
       margin_total: total_to_you - total_supplier_cost,
+      notes
+    };
+
+    // Se l'azione è un aggiornamento, modifichiamo la riga esistente
+    if (action === "BOOKING_UPDATED" && booking_reference) {
+       const { error: updateError } = await supabase
+        .from("bookings")
+        .update(bookingData)
+        .eq("booking_reference", booking_reference);
+
+      if (updateError) throw new Error(updateError.message);
+      return NextResponse.json({ success: true, message: "Prenotazione aggiornata con successo!" });
+    }
+
+    // Altrimenti, è una creazione (Creiamo riga nuova)
+    const { error: insertError } = await supabase.from("bookings").insert({
+      ...bookingData,
+      booking_created_at: new Date().toISOString().split("T")[0],
       customer_payment_status: "pending",
       supplier_payment_status: "pending",
       supplier_amount_paid: 0,
       is_cancelled: false,
-      notes
     });
 
     if (insertError) throw new Error(insertError.message);
