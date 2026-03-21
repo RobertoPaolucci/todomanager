@@ -11,10 +11,9 @@ function formatDate(value: string | null) {
 }
 
 export default async function NotificationCenter() {
-  // Recupera tutte le prenotazioni che hanno una nota (il semaforo acceso)
   const { data: bookings, error } = await supabase
     .from("bookings")
-    .select("id, customer_name, experience_name, notes, booking_date")
+    .select("id, customer_name, experience_name, notes, booking_date, total_people, booking_source")
     .not("notes", "is", null)
     .order("id", { ascending: false });
 
@@ -22,7 +21,6 @@ export default async function NotificationCenter() {
     console.error("Errore notifiche:", error.message);
   }
 
-  // Filtra solo quelle che contengono fisicamente l'emoji del semaforo
   const alerts = bookings?.filter(b => 
     b.notes.includes('🔴') || b.notes.includes('🟡') || b.notes.includes('🟢')
   ) || [];
@@ -59,32 +57,50 @@ export default async function NotificationCenter() {
           return (
             <Link 
               key={alert.id}
-              // QUI LA MAGIA: Cliccando porta alla riga evidenziata!
               href={`/prenotazioni?highlight=${alert.id}`}
               className={`block rounded-lg border p-3 transition hover:shadow-md ${bgClass}`}
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex justify-between items-center mb-1">
-                    <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                      Tour: {formatDate(alert.booking_date)}
+              <div className="flex items-start justify-between gap-3">
+                
+                <div className="flex-1 min-w-0">
+                  {/* RIGA 1: SEMAFORO E DATA */}
+                  <div className="flex justify-between items-start mb-1.5 gap-2">
+                    <div className="text-[11px] font-bold leading-tight text-zinc-800">
+                      {alert.notes}
+                    </div>
+                    <div className="text-[10px] font-bold text-zinc-500 whitespace-nowrap pt-0.5">
+                      {formatDate(alert.booking_date)}
                     </div>
                   </div>
-                  <div className="text-sm font-bold text-zinc-900 truncate">
-                    {alert.customer_name}
+
+                  {/* RIGA 2: CLIENTE • PAX • CANALE */}
+                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                    <span className="text-sm font-bold text-zinc-900 truncate max-w-full">
+                      {alert.customer_name}
+                    </span>
+                    <span className="text-zinc-300 text-[10px]">●</span>
+                    <span className="text-xs font-bold text-zinc-700 whitespace-nowrap">
+                      {alert.total_people || 0} Pax
+                    </span>
+                    <span className="text-zinc-300 text-[10px]">●</span>
+                    <span className="text-[9px] font-bold text-blue-600 uppercase tracking-wider whitespace-nowrap">
+                      {alert.booking_source || "Bokun"}
+                    </span>
                   </div>
-                  <div className="text-xs font-medium text-zinc-600 mt-0.5 truncate">
+
+                  {/* RIGA 3: ESPERIENZA */}
+                  <div className="text-[11px] font-medium text-zinc-500 truncate">
                     {alert.experience_name}
                   </div>
-                  <div className="text-xs font-bold mt-2 text-zinc-800 bg-white/50 inline-block px-2 py-1 rounded">
-                    {alert.notes}
-                  </div>
                 </div>
-                <div className="text-zinc-400 self-center">
+
+                {/* ICONA FRECCIA */}
+                <div className="text-zinc-400 self-center shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                     <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                   </svg>
                 </div>
+                
               </div>
             </Link>
           );
