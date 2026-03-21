@@ -12,7 +12,6 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     
-    // Ora catturiamo bokun_id al posto di experience_id, più status e action dinamici
     const { booking_reference, status, action, bokun_id } = body;
 
     // --- 1. LOGICA CANCELLAZIONE (Semaforo Rosso) ---
@@ -38,18 +37,19 @@ export async function POST(req: Request) {
       customer_phone,
       booking_date,
       booking_time,
-      adults = 0,
-      children = 0,
-      infants = 0,
       total_amount = 0,
     } = body;
 
-    // Se manca bokun_id blocchiamo tutto
+    // FORZATURA NUMERICA (Evita che Make.com mandi stringhe o dati strani)
+    const adults = Number(body.adults) || 0;
+    const children = Number(body.children) || 0;
+    const infants = Number(body.infants) || 0;
+    const total_people = adults + children + infants;
+
     if (!channel_id || !bokun_id || !booking_date || !customer_name) {
-      return NextResponse.json({ error: "Dati obbligatori mancanti (Bokun ID, Canale, Data o Nome)" }, { status: 400 });
+      return NextResponse.json({ error: "Dati obbligatori mancanti" }, { status: 400 });
     }
 
-    // IL PONTE: Cerchiamo l'esperienza tramite il bokun_id
     const { data: experience, error: expError } = await supabase
       .from("experiences")
       .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -60,7 +60,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Esperienza non trovata per Bokun ID: ${bokun_id}` }, { status: 404 });
     }
 
-    // Da qui in poi, usiamo l'ID interno del tuo Todo Manager
     const experience_id = experience.id;
 
     const { data: channel } = await supabase.from("channels").select("name").eq("id", channel_id).single();
@@ -85,7 +84,7 @@ export async function POST(req: Request) {
     const bookingData = {
       channel_id,
       booking_source: channel?.name || "Bokun",
-      experience_id, // Usiamo l'ID interno mappato!
+      experience_id, 
       supplier_id: experience.supplier_id,
       booking_reference,
       customer_name,
@@ -97,8 +96,8 @@ export async function POST(req: Request) {
       adults,
       children,
       infants,
-      total_people: adults + children + infants,
-      pax: adults + children + infants,
+      total_people,
+      pax: total_people,
       total_to_you,
       total_customer,
       total_supplier_cost,

@@ -4,7 +4,7 @@ import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
 import { supabase } from "@/lib/supabase";
-import { cancelBooking, clearAlert } from "./actions"; // AGGIUNTO clearAlert
+import { cancelBooking, clearAlert } from "./actions";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -55,7 +55,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const firstDayMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
   const lastDayMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
 
-  // Recupero dati
+  // Recupero dati 
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("*, suppliers(phone)");
@@ -92,8 +92,18 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     return true;
   });
 
-  // Ordinamento
+  // ORDINAMENTO (Con priorità assoluta ai semafori)
   allBookings.sort((a, b) => {
+    // 1. Controllo Semafori (Se c'è una notifica da leggere)
+    const hasAlertA = a.notes && (a.notes.includes('🔴') || a.notes.includes('🟡') || a.notes.includes('🟢'));
+    const hasAlertB = b.notes && (b.notes.includes('🔴') || b.notes.includes('🟡') || b.notes.includes('🟢'));
+
+    // Se 'A' ha un semaforo e 'B' no, 'A' va in cima
+    if (hasAlertA && !hasAlertB) return -1;
+    // Se 'B' ha un semaforo e 'A' no, 'B' va in cima
+    if (!hasAlertA && hasAlertB) return 1;
+
+    // 2. Ordinamento standard (se entrambi hanno il semaforo o nessuno dei due ce l'ha)
     let valA: any = a[sort as keyof typeof a] || "";
     let valB: any = b[sort as keyof typeof b] || "";
 
