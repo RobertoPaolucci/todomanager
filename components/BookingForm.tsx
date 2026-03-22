@@ -23,7 +23,7 @@ type Experience = {
   name: string;
   supplier_id: number | null;
   supplier_unit_cost: number;
-  is_group_pricing: boolean; // Nuova colonna
+  is_group_pricing: boolean;
   experience_channel_prices: ExperiencePrice[];
 };
 
@@ -55,6 +55,9 @@ export default function BookingForm({
   const [manualYourPrice, setManualYourPrice] = useState(0);
   const [manualPublicPrice, setManualPublicPrice] = useState(0);
 
+  // STATO PER GESTIRE L'ERRORE VISIVO
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const selectedExperience = useMemo(
     () => experiences.find((experience) => String(experience.id) === experienceId),
     [experiences, experienceId]
@@ -74,7 +77,6 @@ export default function BookingForm({
     setManualPublicPrice(0);
   }, [channelId, experienceId]);
 
-  // LOGICA PAX
   const totalCapacity = adults + children + infants;
   const pricingPax = adults + children;
 
@@ -84,18 +86,36 @@ export default function BookingForm({
   const supplierUnitCost = Number(selectedExperience?.supplier_unit_cost || 0);
   const isGroupPricing = selectedExperience?.is_group_pricing === true;
 
-  // CALCOLO TOTALE CORRETTO: 
-  // Se l'esperienza è "A Gruppo", NESSUN costo viene moltiplicato per i Pax.
   const totalToYou = isGroupPricing ? yourUnitPrice : (yourUnitPrice * pricingPax);
   const totalCustomer = isGroupPricing ? publicUnitPrice : (publicUnitPrice * pricingPax);
   const totalSupplierCost = isGroupPricing ? supplierUnitCost : (supplierUnitCost * pricingPax);
-  
   const marginTotal = totalToYou - totalSupplierCost;
 
+  // FUNZIONE PER INTERCETTARE L'ERRORE SENZA CRASHARE
+  async function handleFormAction(formData: FormData) {
+    setErrorMessage(null); // Resetta l'errore precedente
+    const action = isEditing && !viewOnly ? updateBooking : createBooking;
+    
+    const result = await action(formData);
+    
+    // Se c'è un errore restituito dal server, mostralo e scrolla in alto
+    if (result?.error) {
+      setErrorMessage(result.error);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
   return (
-    <form action={isEditing && !viewOnly ? updateBooking : createBooking} className="grid gap-4 md:grid-cols-2">
+    <form action={handleFormAction} className="grid gap-4 md:grid-cols-2">
       {isEditing && <input type="hidden" name="id" value={initialData.id} />}
       <input type="hidden" name="returnTo" value={returnTo} />
+
+      {/* BOX ERRORE */}
+      {errorMessage && (
+        <div className="md:col-span-2 rounded-xl bg-red-50 border border-red-200 p-4 shadow-sm mb-2">
+          <p className="text-sm font-bold text-red-700">{errorMessage}</p>
+        </div>
+      )}
 
       {/* CANALE E RIFERIMENTO */}
       <div>

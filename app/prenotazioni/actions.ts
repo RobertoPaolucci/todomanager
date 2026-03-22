@@ -34,7 +34,6 @@ export async function createBooking(formData: FormData) {
   const booking_date = String(formData.get("booking_date") || "").trim();
   const booking_time = String(formData.get("booking_time") || "").trim();
 
-  // --- LOGICA PAX ---
   const adults = Number(formData.get("adults") || 0);
   const children = Number(formData.get("children") || 0);
   const infants = Number(formData.get("infants") || 0);
@@ -49,17 +48,16 @@ export async function createBooking(formData: FormData) {
   const notes = String(formData.get("notes") || "").trim();
 
   if (!channel_id || !experience_id || !experience_name || !booking_date || !customer_name || !booking_created_at) {
-    throw new Error("Compila i campi obbligatori");
+    return { error: "Compila tutti i campi obbligatori." };
   }
 
-  // Recupero esperienza con il nuovo flag
   const { data: experience, error: experienceError } = await supabase
     .from("experiences")
     .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
     .eq("id", experience_id)
     .single();
   
-  if (experienceError || !experience) throw new Error("Esperienza non trovata");
+  if (experienceError || !experience) return { error: "Esperienza non trovata." };
 
   const isGroupPricing = experience.is_group_pricing === true;
 
@@ -81,13 +79,12 @@ export async function createBooking(formData: FormData) {
         experience_id, channel_id, your_unit_price, public_unit_price
       });
     } else {
-      throw new Error("⚠️ Prezzo mancante.");
+      return { error: "⚠️ Prezzo mancante. Inserisci i prezzi per procedere." };
     }
   }
 
   const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
   
-  // CALCOLO SERVER-SIDE BLINDATO
   const total_to_you = isGroupPricing ? your_unit_price : (your_unit_price * pricing_pax);
   const total_customer = isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax);
   const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
@@ -126,7 +123,13 @@ export async function createBooking(formData: FormData) {
     is_cancelled: false,
   });
 
-  if (error) throw new Error(`Errore: ${error.message}`);
+  // GESTIONE ERRORE DOPPIONE (Codice Postgres 23505)
+  if (error) {
+    if (error.code === '23505' || error.message.includes('unique_booking_ref') || error.message.includes('duplicate')) {
+      return { error: "⚠️ Attenzione: Questo Numero di Riferimento esiste già. Usa un codice diverso." };
+    }
+    return { error: `Errore durante il salvataggio: ${error.message}` };
+  }
 
   revalidatePath("/prenotazioni");
   if (intent === "save_and_new") redirect("/prenotazioni/nuova");
@@ -159,9 +162,8 @@ export async function updateBooking(formData: FormData) {
   const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
   const notes = normalizeText(formData.get("notes"));
 
-  if (!id) throw new Error("ID non valido");
+  if (!id) return { error: "ID prenotazione non valido." };
 
-  // Recupero esperienza per verificare il flag is_group_pricing
   const { data: experience } = await supabase
     .from("experiences")
     .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -177,7 +179,6 @@ export async function updateBooking(formData: FormData) {
   const public_unit_price = Number(priceRow?.public_unit_price || 0);
   const supplier_unit_cost = Number(experience?.supplier_unit_cost || 0);
 
-  // CALCOLO SERVER-SIDE AGGIORNATO PER PREZZO A GRUPPO
   const total_to_you = isGroupPricing ? your_unit_price : (your_unit_price * pricing_pax);
   const total_customer = isGroupPricing ? public_unit_price : (public_unit_price * pricing_pax);
   const total_supplier_cost = isGroupPricing ? supplier_unit_cost : (supplier_unit_cost * pricing_pax);
@@ -215,7 +216,13 @@ export async function updateBooking(formData: FormData) {
     notes,
   }).eq("id", id);
 
-  if (error) throw new Error(`Errore: ${error.message}`);
+  // GESTIONE ERRORE DOPPIONE IN MODIFICA
+  if (error) {
+    if (error.code === '23505' || error.message.includes('unique_booking_ref') || error.message.includes('duplicate')) {
+      return { error: "⚠️ Attenzione: Questo Numero di Riferimento è già usato da un'altra prenotazione." };
+    }
+    return { error: `Errore durante la modifica: ${error.message}` };
+  }
 
   revalidatePath("/prenotazioni");
   revalidatePath(`/prenotazioni/${id}/modifica`);
@@ -233,19 +240,17 @@ export async function cancelBooking(formData: FormData) {
   revalidatePath("/prenotazioni");
 }
 
-// --- NUOVA AZIONE: SPEGNI SEMAFORO ---
 export async function clearAlert(formData: FormData) {
   const id = Number(formData.get("id") || 0);
   if (!id) return;
 
   const { error } = await supabase
     .from("bookings")
-    .update({ notes: null }) // Cancella la nota
+    .update({ notes: null })
     .eq("id", id);
 
   if (error) throw new Error(`Errore: ${error.message}`);
   
-  // Ricarica la pagina prenotazioni e la dashboard (se è sulla home "/")
   revalidatePath("/prenotazioni");
   revalidatePath("/"); 
 }
