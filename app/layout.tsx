@@ -20,6 +20,10 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "ToDo Manager",
   },
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({
