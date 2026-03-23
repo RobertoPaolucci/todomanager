@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ToDo Manager",
   description: "Gestionale prenotazioni, clienti, fornitori e pagamenti",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ToDo Manager",
+  },
 };
 
 export default function RootLayout({
