@@ -26,12 +26,10 @@ export const metadata: Metadata = {
   },
 };
 
-// LA BLINDATURA PER IPHONE / SMARTPHONE
+// Viewport pulito: niente blocchi, massima libertà di scorrimento
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({
