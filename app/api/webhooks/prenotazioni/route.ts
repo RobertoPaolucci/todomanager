@@ -11,11 +11,10 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     
-    // PULIZIA AGGRESSIVA: togliamo ogni spazio bianco dall'ID in arrivo
     const raw_bokun_id = String(body.bokun_id || "").trim();
     const booking_reference = String(body.booking_reference || "").trim();
 
-    // CERCHIAMO L'ESPERIENZA (Usiamo ILIKE per essere meno rigidi con le stringhe)
+    // 1. Cerchiamo l'esperienza
     const { data: experience, error: expError } = await supabase
       .from("experiences")
       .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -23,13 +22,11 @@ export async function POST(req: Request) {
       .single();
 
     if (expError || !experience) {
-      // Se fallisce, facciamo un secondo tentativo "sporco" per sicurezza
       return NextResponse.json({ 
-        error: `Esperienza non trovata per bokun_id: [${raw_bokun_id}]. Verifica che in Supabase non ci siano spazi vuoti nella cella.` 
+        error: `Esperienza non trovata per bokun_id: [${raw_bokun_id}]` 
       }, { status: 404 });
     }
 
-    // ... (Il resto del codice rimane identico al precedente per il calcolo dei prezzi)
     const channel_id = Number(body.channel_id || 0);
     const { data: priceRow } = await supabase
       .from("experience_channel_prices")
@@ -45,6 +42,7 @@ export async function POST(req: Request) {
     const public_unit_price = Number(priceRow?.public_unit_price || 0);
     const total_customer = experience.is_group_pricing ? public_unit_price : (public_unit_price * pricing_pax);
 
+    // 2. Prepariamo i dati (aggiungendo il timestamp di aggiornamento)
     const bookingData = {
       channel_id,
       experience_id: experience.id,
@@ -58,16 +56,40 @@ export async function POST(req: Request) {
       total_people: adults + children + Number(body.infants || 0),
       total_amount: total_customer,
       total_customer,
-      is_cancelled: String(body.status).toUpperCase() === "CANCELLED"
+      is_cancelled: String(body.status).toUpperCase() === "CANCELLED",
+      updated_at: new Date().toISOString() // <-- FONDAMENTALE PER IL SEMAFORO GIALLO
     };
 
-    const { data: existing } = await supabase.from("bookings").select("id").eq("booking_reference", booking_reference).single();
+    const { data: existing } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("booking_reference", booking_reference)
+      .single();
 
     if (existing) {
-      await supabase.from("bookings").update(bookingData).eq("id", existing.id);
+      // Eseguiamo l'UPDATE (Giallo)
+      const { error: updateError } = await supabase
+        .from("bookings")
+        .update(bookingData)
+        .eq("id", existing.id);
+      
+      if (updateError) throw updateError;
     } else {
-      await supabase.from("bookings").insert({ ...bookingData, booking_reference, booking_created_at: new Date().toISOString().split("T")[0] });
+      // Eseguiamo l'INSERT (Verde)
+      const { error: insertError } = await supabase
+        .from("bookings")
+        .insert({ 
+          ...bookingData, 
+          booking_reference, 
+          booking_created_at: new Date().toISOString().split("T")[0] 
+        });
+      
+      if (insertError) throw insertError;
     }
+
+    // 3. AGGIORNAMENTO DELLA CACHE (Fondamentale per vedere i dati subito)
+    revalidatePath("/");
+    revalidatePath("/prenotazioni");
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
