@@ -65,7 +65,7 @@ export async function POST(req: Request) {
 
     const { data: existing, error: existingError } = await supabase
       .from("bookings")
-      .select("id, notes")
+      .select("id, notes, was_modified")
       .eq("booking_reference", bookingReference)
       .maybeSingle();
 
@@ -88,11 +88,16 @@ export async function POST(req: Request) {
     const finalNotes = cleanNotes ? `${systemAlert}\n${cleanNotes}` : systemAlert;
 
     if (existing) {
+      const nextWasModified = isCancelled
+        ? Boolean(existing.was_modified)
+        : true;
+
       const { error: updateError } = await supabase
         .from("bookings")
         .update({
           ...bookingData,
           notes: finalNotes,
+          was_modified: nextWasModified,
         })
         .eq("id", existing.id);
 
@@ -107,6 +112,7 @@ export async function POST(req: Request) {
           booking_reference: bookingReference,
           booking_created_at: new Date().toISOString().split("T")[0],
           notes: finalNotes,
+          was_modified: false,
         });
 
       if (insertError) {
