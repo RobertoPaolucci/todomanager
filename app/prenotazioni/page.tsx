@@ -34,6 +34,13 @@ type PageProps = {
   }>;
 };
 
+function getChannelName(booking: any) {
+  if (Array.isArray(booking.channels)) {
+    return booking.channels[0]?.name || booking.booking_source || "";
+  }
+  return booking.channels?.name || booking.booking_source || "";
+}
+
 export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const q = params.q || "";
@@ -61,7 +68,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
   const { data: bookings, error } = await supabase
     .from("bookings")
-    .select("*, suppliers(phone)");
+    .select("*, suppliers(phone), channels(name)");
 
   if (error) {
     console.error("Errore caricamento prenotazioni:", error.message);
@@ -80,13 +87,15 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
       }
     }
 
+    const bookingChannelName = getChannelName(b);
+
     if (q) {
       const term = q.toLowerCase();
       const match =
         (b.customer_name || "").toLowerCase().includes(term) ||
         (b.booking_reference || "").toLowerCase().includes(term) ||
         (b.experience_name || "").toLowerCase().includes(term) ||
-        (b.booking_source || "").toLowerCase().includes(term);
+        (bookingChannelName || "").toLowerCase().includes(term);
 
       if (!match) return false;
     }
@@ -106,8 +115,16 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     if (hasAlertA && !hasAlertB) return -1;
     if (!hasAlertA && hasAlertB) return 1;
 
-    let valA: any = a[sort as keyof typeof a] || "";
-    let valB: any = b[sort as keyof typeof b] || "";
+    let valA: any;
+    let valB: any;
+
+    if (sort === "booking_source") {
+      valA = getChannelName(a);
+      valB = getChannelName(b);
+    } else {
+      valA = a[sort as keyof typeof a] || "";
+      valB = b[sort as keyof typeof b] || "";
+    }
 
     if (["total_customer", "total_supplier_cost", "total_people"].includes(sort)) {
       valA = Number(valA);
@@ -318,9 +335,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       </Link>
                     </th>
                     <th className="py-3 pr-4">Stato / Note</th>
-                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      Lordo <SortIcon column="total_customer" />
-                    </th>
+                    <th className="py-3 pr-4">Lordo</th>
                     <th className="py-3 pr-4">Pag. Agenzia</th>
                     <th className="py-3 pr-4">Pag. Fornitore</th>
                     <th className="py-3 pr-4 text-right">Azioni</th>
@@ -331,6 +346,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const isCancelled = booking.is_cancelled === true;
                     const isHighlighted = String(booking.id) === highlightId;
                     const isModifiedPermanent = booking.was_modified === true;
+                    const bookingChannelName = getChannelName(booking);
 
                     const customerStatus = booking.customer_payment_status;
                     let customerBadgeClass = "bg-red-100 text-red-700";
@@ -369,7 +385,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const wTime = booking.booking_time
                       ? booking.booking_time.slice(0, 5)
                       : "Orario da def.";
-                    const wChannel = booking.booking_source || "N/A";
+                    const wChannel = bookingChannelName || "N/A";
                     const wRef = booking.booking_reference || "N/A";
                     const wName = booking.customer_name || "N/A";
                     const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
@@ -478,7 +494,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         <td className="py-4 pr-4">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="inline-block rounded bg-zinc-100 border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600">
-                              {booking.booking_source || "-"}
+                              {bookingChannelName || "-"}
                             </span>
                             <span className="text-[10px] font-medium text-zinc-500">
                               {wPax} Pax

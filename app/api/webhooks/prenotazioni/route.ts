@@ -19,6 +19,24 @@ function buildSystemAlert(type: "new" | "modified" | "cancelled") {
   return "🟢 Nuova prenotazione";
 }
 
+function getBookingSourceFromChannelId(channelId: number) {
+  switch (channelId) {
+    case 2:
+      return "Viator";
+    case 3:
+      return "GetYourGuide";
+    case 4:
+      return "Todointheworld";
+    case 5:
+      return "Freedome";
+    case 6:
+      return "Fattoria Madonna della Querce";
+    case 1:
+    default:
+      return "Direct";
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const authHeader = req.headers.get("authorization");
@@ -30,6 +48,7 @@ export async function POST(req: Request) {
 
     const rawBokunId = String(body.bokun_id || "").trim();
     const bookingReference = String(body.booking_reference || "").trim();
+    const channelId = Number(body.channel_id || 1);
 
     const { data: experience, error: experienceError } = await supabase
       .from("experiences")
@@ -44,12 +63,17 @@ export async function POST(req: Request) {
     const isCancelled =
       String(body.status || "").toUpperCase() === "CANCELLED";
 
+    const bookingSource = String(
+      body.booking_source || getBookingSourceFromChannelId(channelId)
+    ).trim();
+
     const bookingData = {
-      channel_id: Number(body.channel_id),
+      channel_id: channelId,
       experience_id: experience.id,
       experience_name: experience.name,
       customer_name: String(body.customer_name || "").trim(),
       customer_email: String(body.customer_email || "").trim(),
+      customer_phone: String(body.customer_phone || "").trim(),
       booking_date: String(body.booking_date || ""),
       booking_time: String(body.booking_time || ""),
       adults: Number(body.adults || 0),
@@ -60,7 +84,7 @@ export async function POST(req: Request) {
         Number(body.children || 0) +
         Number(body.infants || 0),
       is_cancelled: isCancelled,
-      booking_source: String(body.booking_source || "Bokun").trim(),
+      booking_source: bookingSource,
     };
 
     const { data: existing, error: existingError } = await supabase
