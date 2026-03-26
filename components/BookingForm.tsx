@@ -126,7 +126,19 @@ export default function BookingForm({
     "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
 
   const compactInputStyle =
-    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-3 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
+    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
+
+  const dateTimeInputStyle =
+    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
+
+  const paxInputStyle =
+    "w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500";
+
+  const infantPaxInputStyle =
+    "w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-center text-[16px] text-blue-800 sm:px-4 sm:text-sm outline-none focus:border-blue-500";
+
+  const readonlyCompactStyle =
+    "w-full rounded-xl border border-zinc-200 bg-zinc-100/80 px-4 py-2.5 text-[16px] font-bold text-zinc-600 sm:text-sm";
 
   const sectionClass =
     "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5 md:col-span-2";
@@ -198,7 +210,7 @@ export default function BookingForm({
               required
               disabled={viewOnly}
               defaultValue={initialData?.booking_created_at ?? today}
-              className={inputBaseStyle}
+              className={dateTimeInputStyle}
             />
           </div>
 
@@ -272,7 +284,7 @@ export default function BookingForm({
                   required
                   value={manualYourPrice || ""}
                   onChange={(e) => setManualYourPrice(Number(e.target.value))}
-                  className="w-full min-w-0 rounded-lg border border-amber-300 bg-white px-3 py-3 text-[16px] sm:text-sm outline-none focus:border-amber-500"
+                  className="w-full min-w-0 rounded-lg border border-amber-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none focus:border-amber-500"
                 />
               </div>
 
@@ -287,7 +299,7 @@ export default function BookingForm({
                   required
                   value={manualPublicPrice || ""}
                   onChange={(e) => setManualPublicPrice(Number(e.target.value))}
-                  className="w-full min-w-0 rounded-lg border border-amber-300 bg-white px-3 py-3 text-[16px] sm:text-sm outline-none focus:border-amber-500"
+                  className="w-full min-w-0 rounded-lg border border-amber-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none focus:border-amber-500"
                 />
               </div>
             </div>
@@ -313,7 +325,7 @@ export default function BookingForm({
           )}
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <div className="min-w-0 md:col-span-2">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
               Esperienza
@@ -345,7 +357,7 @@ export default function BookingForm({
               required
               disabled={viewOnly}
               defaultValue={initialData?.booking_date ?? ""}
-              className={inputBaseStyle}
+              className={dateTimeInputStyle}
             />
           </div>
 
@@ -358,7 +370,7 @@ export default function BookingForm({
               type="time"
               disabled={viewOnly}
               defaultValue={initialData?.booking_time ?? ""}
-              className={inputBaseStyle}
+              className={dateTimeInputStyle}
             />
           </div>
         </div>
@@ -374,7 +386,7 @@ export default function BookingForm({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3">
           <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
             <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
               Adulti
@@ -386,7 +398,7 @@ export default function BookingForm({
               value={adults}
               onChange={(e) => setAdults(Number(e.target.value))}
               disabled={viewOnly}
-              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500"
+              className={paxInputStyle}
             />
           </div>
 
@@ -401,7 +413,7 @@ export default function BookingForm({
               value={children}
               onChange={(e) => setChildren(Number(e.target.value))}
               disabled={viewOnly}
-              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500"
+              className={paxInputStyle}
             />
           </div>
 
@@ -416,7 +428,7 @@ export default function BookingForm({
               value={infants}
               onChange={(e) => setInfants(Number(e.target.value))}
               disabled={viewOnly}
-              className="w-full rounded-xl border border-blue-200 bg-white px-3 py-3 text-center text-[16px] text-blue-800 sm:px-4 sm:text-sm outline-none focus:border-blue-500"
+              className={infantPaxInputStyle}
             />
           </div>
         </div>
@@ -445,7 +457,7 @@ export default function BookingForm({
           </p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-3 lg:grid-cols-3">
           <div className="min-w-0">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
               Lordo Totale Autom.
@@ -456,7 +468,7 @@ export default function BookingForm({
               step="0.01"
               value={totalCustomer}
               readOnly
-              className="w-full rounded-xl border border-zinc-200 bg-zinc-100/80 px-4 py-3 text-[16px] font-bold text-zinc-600 sm:text-sm"
+              className={readonlyCompactStyle}
             />
           </div>
 
@@ -468,7 +480,7 @@ export default function BookingForm({
               name="customer_payment_status"
               disabled={viewOnly}
               defaultValue={initialData?.customer_payment_status ?? "pending"}
-              className={inputBaseStyle}
+              className={compactInputStyle}
             >
               <option value="pending">Da incassare</option>
               <option value="partial">Acconto</option>

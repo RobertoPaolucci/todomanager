@@ -72,11 +72,11 @@ export default function Sidebar() {
               key={link.href}
               href={link.href}
               aria-label={link.label}
-              className={`shrink-0 whitespace-nowrap rounded-xl px-4 py-3 text-sm font-medium transition lg:whitespace-normal lg:text-base ${
-                isActive
-                  ? "bg-zinc-900 text-white shadow-sm"
-                  : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 lg:bg-transparent"
-              }`}
+className={`shrink-0 whitespace-nowrap rounded-2xl px-5 py-3.5 text-[15px] font-semibold transition lg:whitespace-normal lg:rounded-xl lg:px-4 lg:py-3 lg:text-base ${
+  isActive
+    ? "bg-zinc-900 text-white shadow-sm"
+    : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 lg:bg-transparent"
+}`}
             >
               <span className="lg:hidden">{link.mobileLabel ?? link.label}</span>
               <span className="hidden lg:inline">{link.label}</span>
