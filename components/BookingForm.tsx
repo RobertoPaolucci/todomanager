@@ -129,13 +129,13 @@ export default function BookingForm({
     "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
 
   const dateTimeInputStyle =
-    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
+    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-[15px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
 
   const paxInputStyle =
-    "w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500";
+    "w-full rounded-xl border border-zinc-300 bg-white px-2 py-2 text-center text-[18px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500";
 
   const infantPaxInputStyle =
-    "w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-center text-[16px] text-blue-800 sm:px-4 sm:text-sm outline-none focus:border-blue-500";
+    "w-full rounded-xl border border-blue-200 bg-white px-2 py-2 text-center text-[18px] text-blue-800 sm:px-4 sm:text-sm outline-none focus:border-blue-500";
 
   const readonlyCompactStyle =
     "w-full rounded-xl border border-zinc-200 bg-zinc-100/80 px-4 py-2.5 text-[16px] font-bold text-zinc-600 sm:text-sm";
@@ -325,8 +325,8 @@ export default function BookingForm({
           )}
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="min-w-0 md:col-span-2">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
+          <div className="min-w-0 col-span-2">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
               Esperienza
             </label>
@@ -349,7 +349,7 @@ export default function BookingForm({
 
           <div className="min-w-0">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
-              Data esperienza
+              Data
             </label>
             <input
               name="booking_date"
@@ -363,7 +363,7 @@ export default function BookingForm({
 
           <div className="min-w-0">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
-              Ora inizio
+              Ora
             </label>
             <input
               name="booking_time"
@@ -386,9 +386,9 @@ export default function BookingForm({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3">
-          <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
-            <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-2.5">
+            <label className="mb-1 block text-center text-[11px] font-bold uppercase text-zinc-500">
               Adulti
             </label>
             <input
@@ -402,8 +402,8 @@ export default function BookingForm({
             />
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
-            <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
+          <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-2.5">
+            <label className="mb-1 block text-center text-[11px] font-bold uppercase text-zinc-500">
               Bambini
             </label>
             <input
@@ -417,8 +417,8 @@ export default function BookingForm({
             />
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
-            <label className="mb-1 block text-xs font-bold uppercase text-blue-600">
+          <div className="min-w-0 rounded-2xl border border-blue-100 bg-blue-50/50 p-2.5">
+            <label className="mb-1 block text-center text-[11px] font-bold uppercase text-blue-600">
               Infanti
             </label>
             <input
@@ -488,7 +488,7 @@ export default function BookingForm({
             </select>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
+          <div className="grid grid-cols-2 gap-3">
             <div className="min-w-0">
               <label className="mb-1 block text-xs font-medium text-zinc-500">
                 Stato Forn.

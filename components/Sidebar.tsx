@@ -10,7 +10,7 @@ const links = [
   { href: "/esperienze", label: "Esperienze", mobileLabel: "Esper." },
   { href: "/canali", label: "Canali", mobileLabel: "Canali" },
   { href: "/clienti", label: "Clienti", mobileLabel: "Clienti" },
-  { href: "/fornitori", label: "Fornitori", mobileLabel: "Fornitori" },
+  { href: "/fornitori", label: "Fornitori", mobileLabel: "Fornit." },
   { href: "/pagamenti", label: "Pagamenti", mobileLabel: "Pagam." },
   { href: "/report", label: "📊 Report e Analisi", mobileLabel: "📊 Report" },
 ];
@@ -25,20 +25,20 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="sticky top-0 z-30 flex w-full flex-col rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-sm backdrop-blur lg:top-6 lg:h-[calc(100vh-48px)] lg:max-w-xs lg:rounded-2xl lg:bg-white lg:p-4 lg:backdrop-blur-0">
-      <div className="mb-3 flex items-center justify-between lg:mb-6 lg:block">
+    <aside className="sticky top-0 z-30 flex w-full flex-col rounded-2xl border border-zinc-200 bg-white/95 p-4 shadow-sm backdrop-blur lg:top-6 lg:h-[calc(100vh-48px)] lg:max-w-xs lg:bg-white lg:p-4 lg:backdrop-blur-0">
+      <div className="mb-4 flex items-center justify-between lg:mb-6 lg:block">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500 lg:text-sm lg:normal-case lg:tracking-normal">
+          <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-zinc-500 lg:text-sm lg:normal-case lg:tracking-normal">
             ToDo Manager
           </p>
-          <h1 className="text-lg font-bold text-zinc-900 lg:text-2xl">
+          <h1 className="text-2xl font-bold text-zinc-900 lg:text-2xl">
             Gestionale
           </h1>
         </div>
 
         <button
           onClick={handleLogout}
-          className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-red-600 transition hover:bg-red-100 lg:hidden"
+          className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-600 transition hover:bg-red-100 lg:hidden"
           title="Esci dal gestionale"
           aria-label="Esci dal gestionale"
         >
@@ -48,7 +48,7 @@ export default function Sidebar() {
             viewBox="0 0 24 24"
             strokeWidth={2}
             stroke="currentColor"
-            className="h-5 w-5"
+            className="h-6 w-6"
           >
             <path
               strokeLinecap="round"
@@ -60,7 +60,7 @@ export default function Sidebar() {
       </div>
 
       <nav
-        className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-1 lg:flex-col lg:overflow-y-auto lg:pb-0"
+        className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-1 lg:flex-col lg:overflow-y-auto lg:gap-2 lg:pb-0"
         style={{ scrollbarWidth: "none" }}
       >
         {links.map((link) => {
@@ -72,11 +72,11 @@ export default function Sidebar() {
               key={link.href}
               href={link.href}
               aria-label={link.label}
-className={`shrink-0 whitespace-nowrap rounded-2xl px-5 py-3.5 text-[15px] font-semibold transition lg:whitespace-normal lg:rounded-xl lg:px-4 lg:py-3 lg:text-base ${
-  isActive
-    ? "bg-zinc-900 text-white shadow-sm"
-    : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 lg:bg-transparent"
-}`}
+              className={`flex min-h-[56px] shrink-0 items-center justify-center whitespace-nowrap rounded-2xl px-6 text-[18px] font-semibold transition lg:min-h-0 lg:justify-start lg:whitespace-normal lg:rounded-xl lg:px-4 lg:py-3 lg:text-base ${
+                isActive
+                  ? "bg-zinc-900 text-white shadow-sm"
+                  : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 lg:bg-transparent"
+              }`}
             >
               <span className="lg:hidden">{link.mobileLabel ?? link.label}</span>
               <span className="hidden lg:inline">{link.label}</span>
