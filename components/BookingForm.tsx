@@ -63,14 +63,13 @@ export default function BookingForm({
 
   const selectedExperience = useMemo(
     () =>
-      experiences.find(
-        (experience) => String(experience.id) === experienceId
-      ),
+      experiences.find((experience) => String(experience.id) === experienceId),
     [experiences, experienceId]
   );
 
   const selectedPrice = useMemo(() => {
     if (!selectedExperience || !channelId) return null;
+
     return (
       selectedExperience.experience_channel_prices.find(
         (price) => String(price.channel_id) === channelId
@@ -124,10 +123,13 @@ export default function BookingForm({
   }
 
   const inputBaseStyle =
-    "w-full min-w-0 rounded-xl border border-zinc-300 px-4 py-3 text-[16px] sm:text-sm outline-none focus:border-zinc-500 disabled:bg-zinc-50 bg-white transition-colors";
+    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
 
   const compactInputStyle =
-    "w-full min-w-0 rounded-xl border border-zinc-300 px-3 py-3 text-[16px] sm:text-sm outline-none focus:border-zinc-500 disabled:bg-zinc-50 bg-white transition-colors";
+    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-3 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
+
+  const sectionClass =
+    "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5 md:col-span-2";
 
   return (
     <form action={handleFormAction} className="grid gap-4 md:grid-cols-2">
@@ -140,104 +142,123 @@ export default function BookingForm({
         </div>
       )}
 
-      <div className="min-w-0">
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Canale di prenotazione
-        </label>
-        <select
-          name="channel_id"
-          required
-          disabled={viewOnly}
-          value={channelId}
-          onChange={(e) => setChannelId(e.target.value)}
-          className={inputBaseStyle}
-        >
-          <option value="">Seleziona canale</option>
-          {channels.map((channel) => (
-            <option key={channel.id} value={channel.id}>
-              {channel.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <div className={sectionClass}>
+        <div className="mb-4">
+          <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
+            Cliente e canale
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500 sm:text-sm">
+            Dati principali della prenotazione
+          </p>
+        </div>
 
-      <div className="min-w-0">
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Numero prenotazione (Rif)
-        </label>
-        <input
-          name="booking_reference"
-          type="text"
-          disabled={viewOnly}
-          defaultValue={initialData?.booking_reference ?? ""}
-          placeholder="Es. VIATOR-847392"
-          className={inputBaseStyle}
-        />
-      </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Canale di prenotazione
+            </label>
+            <select
+              name="channel_id"
+              required
+              disabled={viewOnly}
+              value={channelId}
+              onChange={(e) => setChannelId(e.target.value)}
+              className={inputBaseStyle}
+            >
+              <option value="">Seleziona canale</option>
+              {channels.map((channel) => (
+                <option key={channel.id} value={channel.id}>
+                  {channel.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <div className="min-w-0">
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Data inserimento
-        </label>
-        <input
-          name="booking_created_at"
-          type="date"
-          required
-          disabled={viewOnly}
-          defaultValue={initialData?.booking_created_at ?? today}
-          className={inputBaseStyle}
-        />
-      </div>
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Numero prenotazione (Rif)
+            </label>
+            <input
+              name="booking_reference"
+              type="text"
+              disabled={viewOnly}
+              defaultValue={initialData?.booking_reference ?? ""}
+              placeholder="Es. VIATOR-847392"
+              className={inputBaseStyle}
+            />
+          </div>
 
-      <div className="min-w-0">
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Nome cliente principale
-        </label>
-        <input
-          name="customer_name"
-          type="text"
-          required
-          disabled={viewOnly}
-          defaultValue={initialData?.customer_name ?? ""}
-          placeholder="Es. John Smith"
-          className={inputBaseStyle}
-        />
-      </div>
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Data inserimento
+            </label>
+            <input
+              name="booking_created_at"
+              type="date"
+              required
+              disabled={viewOnly}
+              defaultValue={initialData?.booking_created_at ?? today}
+              className={inputBaseStyle}
+            />
+          </div>
 
-      <div className="min-w-0">
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Telefono
-        </label>
-        <input
-          name="customer_phone"
-          type="text"
-          disabled={viewOnly}
-          defaultValue={initialData?.customer_phone ?? ""}
-          placeholder="Es. +39 333 1234567"
-          className={inputBaseStyle}
-        />
-      </div>
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Nome cliente principale
+            </label>
+            <input
+              name="customer_name"
+              type="text"
+              required
+              disabled={viewOnly}
+              defaultValue={initialData?.customer_name ?? ""}
+              placeholder="Es. John Smith"
+              className={inputBaseStyle}
+            />
+          </div>
 
-      <div className="min-w-0">
-        <label className="mb-1 block text-sm font-medium text-zinc-700">
-          Email
-        </label>
-        <input
-          name="customer_email"
-          type="email"
-          disabled={viewOnly}
-          defaultValue={initialData?.customer_email ?? ""}
-          placeholder="Es. john@email.com"
-          className={inputBaseStyle}
-        />
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Telefono
+            </label>
+            <input
+              name="customer_phone"
+              type="text"
+              disabled={viewOnly}
+              defaultValue={initialData?.customer_phone ?? ""}
+              placeholder="Es. +39 333 1234567"
+              className={inputBaseStyle}
+            />
+          </div>
+
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Email
+            </label>
+            <input
+              name="customer_email"
+              type="email"
+              disabled={viewOnly}
+              defaultValue={initialData?.customer_email ?? ""}
+              placeholder="Es. john@email.com"
+              className={inputBaseStyle}
+            />
+          </div>
+        </div>
       </div>
 
       {channelId && experienceId && !selectedPrice && !viewOnly && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm md:col-span-2">
           <div className="flex flex-col gap-3">
-            <h4 className="text-sm font-bold text-amber-800">
-              Prezzi non configurati (€/{isGroupPricing ? "gruppo" : "persona"})
-            </h4>
+            <div>
+              <h4 className="text-sm font-bold text-amber-800">
+                Prezzi non configurati (€/{isGroupPricing ? "gruppo" : "persona"})
+              </h4>
+              <p className="mt-1 text-xs text-amber-700">
+                Inseriscili ora: verranno usati per calcolare automaticamente la
+                prenotazione.
+              </p>
+            </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="min-w-0">
@@ -274,183 +295,232 @@ export default function BookingForm({
         </div>
       )}
 
-      <div className="min-w-0">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <label className="block text-sm font-medium text-zinc-700">
-            Esperienza
-          </label>
+      <div className={sectionClass}>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
+              Esperienza e data
+            </h3>
+            <p className="mt-1 text-xs text-zinc-500 sm:text-sm">
+              Selezione attività, giorno e ora
+            </p>
+          </div>
+
           {isGroupPricing && (
-            <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-purple-600">
-              A Gruppo
+            <span className="rounded-lg bg-purple-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-purple-700">
+              Prezzo a gruppo
             </span>
           )}
         </div>
 
-        <select
-          name="experience_id"
-          required
-          disabled={viewOnly}
-          value={experienceId}
-          onChange={(e) => setExperienceId(e.target.value)}
-          className={inputBaseStyle}
-        >
-          <option value="">Seleziona esperienza</option>
-          {experiences.map((experience: any) => (
-            <option key={experience.id} value={experience.id}>
-              {experience.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="min-w-0">
-          <label className="mb-1 block text-sm font-medium text-zinc-700">
-            Data esp.
-          </label>
-          <input
-            name="booking_date"
-            type="date"
-            required
-            disabled={viewOnly}
-            defaultValue={initialData?.booking_date ?? ""}
-            className={inputBaseStyle}
-          />
-        </div>
-
-        <div className="min-w-0">
-          <label className="mb-1 block text-sm font-medium text-zinc-700">
-            Ora inizio
-          </label>
-          <input
-            name="booking_time"
-            type="time"
-            disabled={viewOnly}
-            defaultValue={initialData?.booking_time ?? ""}
-            className={inputBaseStyle}
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 rounded-2xl border border-zinc-100 bg-zinc-50 p-3 md:col-span-2 sm:grid-cols-3 sm:gap-4 sm:p-4">
-        <div className="min-w-0">
-          <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
-            Adulti
-          </label>
-          <input
-            name="adults"
-            type="number"
-            min="0"
-            value={adults}
-            onChange={(e) => setAdults(Number(e.target.value))}
-            disabled={viewOnly}
-            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        <div className="min-w-0">
-          <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
-            Bambini
-          </label>
-          <input
-            name="children"
-            type="number"
-            min="0"
-            value={children}
-            onChange={(e) => setChildren(Number(e.target.value))}
-            disabled={viewOnly}
-            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        <div className="min-w-0">
-          <label className="mb-1 block text-xs font-bold uppercase text-blue-600">
-            Infanti
-          </label>
-          <input
-            name="infants"
-            type="number"
-            min="0"
-            value={infants}
-            onChange={(e) => setInfants(Number(e.target.value))}
-            disabled={viewOnly}
-            className="w-full rounded-xl border border-blue-200 bg-blue-50/50 px-3 py-3 text-center text-[16px] text-blue-800 sm:px-4 sm:text-sm outline-none focus:border-blue-500"
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:col-span-2 lg:grid-cols-3">
-        <div className="min-w-0">
-          <label className="mb-1 block text-sm font-medium text-zinc-700">
-            Lordo Totale Autom.
-          </label>
-          <input
-            name="total_amount"
-            type="number"
-            step="0.01"
-            value={totalCustomer}
-            readOnly
-            className="w-full rounded-xl border border-zinc-200 bg-zinc-100/80 px-4 py-3 text-[16px] font-bold text-zinc-600 sm:text-sm"
-          />
-        </div>
-
-        <div className="min-w-0">
-          <label className="mb-1 block text-sm font-medium text-zinc-700">
-            Pagamento Agenzia
-          </label>
-          <select
-            name="customer_payment_status"
-            disabled={viewOnly}
-            defaultValue={initialData?.customer_payment_status ?? "pending"}
-            className={inputBaseStyle}
-          >
-            <option value="pending">Da incassare</option>
-            <option value="partial">Acconto</option>
-            <option value="paid">Incassato</option>
-          </select>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
-          <div className="min-w-0">
-            <label className="mb-1 block text-xs font-medium text-zinc-500">
-              Stato Forn.
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="min-w-0 md:col-span-2">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Esperienza
             </label>
             <select
-              name="supplier_payment_status"
+              name="experience_id"
+              required
               disabled={viewOnly}
-              defaultValue={initialData?.supplier_payment_status ?? "pending"}
-              className={compactInputStyle}
+              value={experienceId}
+              onChange={(e) => setExperienceId(e.target.value)}
+              className={inputBaseStyle}
             >
-              <option value="pending">In attesa</option>
-              <option value="partial">Parziale</option>
-              <option value="paid">Saldato</option>
+              <option value="">Seleziona esperienza</option>
+              {experiences.map((experience) => (
+                <option key={experience.id} value={experience.id}>
+                  {experience.name}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="min-w-0">
-            <label className="mb-1 block text-xs font-medium text-zinc-500">
-              Pagato (€)
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Data esperienza
             </label>
             <input
-              name="supplier_amount_paid"
-              type="number"
-              step="0.01"
+              name="booking_date"
+              type="date"
+              required
               disabled={viewOnly}
-              defaultValue={initialData?.supplier_amount_paid ?? 0}
-              className={compactInputStyle}
+              defaultValue={initialData?.booking_date ?? ""}
+              className={inputBaseStyle}
+            />
+          </div>
+
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Ora inizio
+            </label>
+            <input
+              name="booking_time"
+              type="time"
+              disabled={viewOnly}
+              defaultValue={initialData?.booking_time ?? ""}
+              className={inputBaseStyle}
             />
           </div>
         </div>
       </div>
 
-      <input type="hidden" name="total_customer" value={totalCustomer} />
-      <input type="hidden" name="total_supplier_cost" value={totalSupplierCost} />
-      <input type="hidden" name="total_to_you" value={totalToYou} />
-      <input type="hidden" name="margin_total" value={marginTotal} />
+      <div className={sectionClass}>
+        <div className="mb-4">
+          <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
+            Partecipanti
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500 sm:text-sm">
+            I paganti sono adulti + bambini. Gli infanti non incidono sul prezzo.
+          </p>
+        </div>
 
-      <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+            <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
+              Adulti
+            </label>
+            <input
+              name="adults"
+              type="number"
+              min="0"
+              value={adults}
+              onChange={(e) => setAdults(Number(e.target.value))}
+              disabled={viewOnly}
+              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500"
+            />
+          </div>
+
+          <div className="min-w-0 rounded-2xl border border-zinc-100 bg-zinc-50 p-3">
+            <label className="mb-1 block text-xs font-bold uppercase text-zinc-500">
+              Bambini
+            </label>
+            <input
+              name="children"
+              type="number"
+              min="0"
+              value={children}
+              onChange={(e) => setChildren(Number(e.target.value))}
+              disabled={viewOnly}
+              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-3 text-center text-[16px] sm:px-4 sm:text-sm outline-none focus:border-zinc-500"
+            />
+          </div>
+
+          <div className="min-w-0 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
+            <label className="mb-1 block text-xs font-bold uppercase text-blue-600">
+              Infanti
+            </label>
+            <input
+              name="infants"
+              type="number"
+              min="0"
+              value={infants}
+              onChange={(e) => setInfants(Number(e.target.value))}
+              disabled={viewOnly}
+              className="w-full rounded-xl border border-blue-200 bg-white px-3 py-3 text-center text-[16px] text-blue-800 sm:px-4 sm:text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl bg-zinc-900 px-4 py-3 text-white">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-zinc-300">
+              Posti totali
+            </span>
+            <span className="text-xl font-black">{totalCapacity}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-3 text-sm">
+            <span className="text-zinc-300">Paganti</span>
+            <span className="font-bold">{pricingPax}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={sectionClass}>
+        <div className="mb-4">
+          <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
+            Pagamenti e calcoli
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500 sm:text-sm">
+            Totali automatici e stato incasso/saldo
+          </p>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Lordo Totale Autom.
+            </label>
+            <input
+              name="total_amount"
+              type="number"
+              step="0.01"
+              value={totalCustomer}
+              readOnly
+              className="w-full rounded-xl border border-zinc-200 bg-zinc-100/80 px-4 py-3 text-[16px] font-bold text-zinc-600 sm:text-sm"
+            />
+          </div>
+
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Pagamento Agenzia
+            </label>
+            <select
+              name="customer_payment_status"
+              disabled={viewOnly}
+              defaultValue={initialData?.customer_payment_status ?? "pending"}
+              className={inputBaseStyle}
+            >
+              <option value="pending">Da incassare</option>
+              <option value="partial">Acconto</option>
+              <option value="paid">Incassato</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
+            <div className="min-w-0">
+              <label className="mb-1 block text-xs font-medium text-zinc-500">
+                Stato Forn.
+              </label>
+              <select
+                name="supplier_payment_status"
+                disabled={viewOnly}
+                defaultValue={initialData?.supplier_payment_status ?? "pending"}
+                className={compactInputStyle}
+              >
+                <option value="pending">In attesa</option>
+                <option value="partial">Parziale</option>
+                <option value="paid">Saldato</option>
+              </select>
+            </div>
+
+            <div className="min-w-0">
+              <label className="mb-1 block text-xs font-medium text-zinc-500">
+                Pagato (€)
+              </label>
+              <input
+                name="supplier_amount_paid"
+                type="number"
+                step="0.01"
+                disabled={viewOnly}
+                defaultValue={initialData?.supplier_amount_paid ?? 0}
+                className={compactInputStyle}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-base font-bold text-zinc-900">Riepilogo</h3>
+          <div>
+            <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
+              Riepilogo economico
+            </h3>
+            <p className="mt-1 text-xs text-zinc-500 sm:text-sm">
+              Controllo finale prima del salvataggio
+            </p>
+          </div>
+
           <span className="w-fit rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-black uppercase tracking-tight text-zinc-600 sm:text-xs">
             Posti totali: {totalCapacity}
           </span>
@@ -517,7 +587,7 @@ export default function BookingForm({
         </div>
       </div>
 
-      <div className="min-w-0 md:col-span-2">
+      <div className={sectionClass}>
         <label className="mb-1 block text-sm font-medium text-zinc-700">
           Note interne
         </label>
@@ -531,43 +601,49 @@ export default function BookingForm({
         />
       </div>
 
+      <input type="hidden" name="total_customer" value={totalCustomer} />
+      <input type="hidden" name="total_supplier_cost" value={totalSupplierCost} />
+      <input type="hidden" name="total_to_you" value={totalToYou} />
+      <input type="hidden" name="margin_total" value={marginTotal} />
       <input
         type="hidden"
         name="experience_name"
         value={selectedExperience?.name || ""}
       />
 
-      <div className="flex flex-col gap-3 border-t border-zinc-200 pt-5 pb-6 md:col-span-2 sm:flex-row sm:flex-wrap">
-        {!viewOnly && (
-          <>
-            <button
-              type="submit"
-              name="intent"
-              value="save"
-              className="w-full rounded-xl bg-zinc-900 px-5 py-3 text-[16px] font-bold text-white shadow-md transition hover:bg-zinc-700 sm:w-auto sm:px-8 sm:text-sm"
-            >
-              {isEditing ? "Aggiorna" : "Salva prenotazione"}
-            </button>
-
-            {!isEditing && (
+      <div className="sticky bottom-0 z-20 -mx-3 border-t border-zinc-200 bg-white/95 px-3 pt-3 pb-[calc(12px+env(safe-area-inset-bottom))] backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:pt-1 md:pb-0 md:backdrop-blur-0">
+        <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row sm:flex-wrap">
+          {!viewOnly && (
+            <>
               <button
                 type="submit"
                 name="intent"
-                value="save_and_new"
-                className="w-full rounded-xl border border-zinc-900 bg-white px-5 py-3 text-[16px] font-bold text-zinc-900 shadow-sm transition hover:bg-zinc-50 sm:w-auto sm:px-8 sm:text-sm"
+                value="save"
+                className="w-full rounded-xl bg-zinc-900 px-5 py-3 text-[16px] font-bold text-white shadow-md transition hover:bg-zinc-700 sm:w-auto sm:px-8 sm:text-sm"
               >
-                Salva e Nuova
+                {isEditing ? "Aggiorna" : "Salva prenotazione"}
               </button>
-            )}
-          </>
-        )}
 
-        <Link
-          href={returnTo}
-          className="flex w-full items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 py-3 text-[16px] font-bold text-zinc-700 transition hover:bg-zinc-100 sm:w-auto sm:px-8 sm:text-sm"
-        >
-          Annulla
-        </Link>
+              {!isEditing && (
+                <button
+                  type="submit"
+                  name="intent"
+                  value="save_and_new"
+                  className="w-full rounded-xl border border-zinc-900 bg-white px-5 py-3 text-[16px] font-bold text-zinc-900 shadow-sm transition hover:bg-zinc-50 sm:w-auto sm:px-8 sm:text-sm"
+                >
+                  Salva e Nuova
+                </button>
+              )}
+            </>
+          )}
+
+          <Link
+            href={returnTo}
+            className="flex w-full items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 py-3 text-[16px] font-bold text-zinc-700 transition hover:bg-zinc-100 sm:w-auto sm:px-8 sm:text-sm"
+          >
+            Annulla
+          </Link>
+        </div>
       </div>
     </form>
   );

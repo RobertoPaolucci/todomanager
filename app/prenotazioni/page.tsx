@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { supabase } from "@/lib/supabase";
 import { cancelBooking, clearAlert } from "./actions";
@@ -136,16 +136,37 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     return 0;
   });
 
-  const buildSortUrl = (column: string) => {
-    const newDir = sort === column && dir === "asc" ? "desc" : "asc";
+  const buildQuery = (
+    updates: Record<string, string | null | undefined> = {}
+  ) => {
     const sp = new URLSearchParams();
+
     if (q) sp.set("q", q);
+    if (sort) sp.set("sort", sort);
+    if (dir) sp.set("dir", dir);
     if (showPast) sp.set("past", "true");
     if (fromDate) sp.set("from", fromDate);
     if (toDate) sp.set("to", toDate);
-    sp.set("sort", column);
-    sp.set("dir", newDir);
-    return `?${sp.toString()}`;
+    if (highlightId) sp.set("highlight", highlightId);
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === "") {
+        sp.delete(key);
+      } else {
+        sp.set(key, value);
+      }
+    });
+
+    const query = sp.toString();
+    return query ? `?${query}` : "?";
+  };
+
+  const buildSortUrl = (column: string) => {
+    const newDir = sort === column && dir === "asc" ? "desc" : "asc";
+    return buildQuery({
+      sort: column,
+      dir: newDir,
+    });
   };
 
   const SortIcon = ({ column }: { column: string }) => {
@@ -154,53 +175,55 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   };
 
   return (
-    <main className="min-h-screen bg-zinc-50 p-6">
-      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[260px_1fr]">
-        <Sidebar />
-
-        <div className="space-y-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-zinc-900">Prenotazioni</h1>
-            </div>
-
-            <div className="flex gap-3">
-              <Link
-                href="/prenotazioni/import"
-                className="flex items-center gap-2 rounded-xl bg-white border-2 border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition shadow-sm"
-              >
-                ⚙️ Strumenti Dati
-              </Link>
-
-              <Link
-                href="/prenotazioni/nuova"
-                className="flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700 transition shadow-sm"
-              >
-                + Nuova Prenotazione
-              </Link>
-            </div>
+    <AppShell
+      title="Prenotazioni"
+      subtitle="Gestisci prenotazioni, incassi, fornitori e notifiche operative"
+    >
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm lg:hidden">
+            <p className="text-sm text-zinc-500">
+              Totale visibile:{" "}
+              <span className="font-bold text-zinc-900">{allBookings.length}</span>
+            </p>
           </div>
 
-          <SectionCard title="Ricerca e Filtri">
-            <div className="space-y-4">
-              <form
-                method="GET"
-                className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
-              >
-                <input type="hidden" name="sort" value={sort} />
-                <input type="hidden" name="dir" value={dir} />
-                <input type="hidden" name="from" value={fromDate} />
-                <input type="hidden" name="to" value={toDate} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex lg:gap-3">
+            <Link
+              href="/prenotazioni/import"
+              className="flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 border-zinc-200 bg-white px-4 py-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
+            >
+              ⚙️ Strumenti Dati
+            </Link>
 
-                <div className="flex w-full max-w-md items-center overflow-hidden rounded-xl border border-zinc-300 bg-white focus-within:border-zinc-500 transition">
-                  <div className="pl-3 text-zinc-400">
+            <Link
+              href="/prenotazioni/nuova"
+              className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-zinc-700"
+            >
+              + Nuova Prenotazione
+            </Link>
+          </div>
+        </div>
+
+        <SectionCard title="Ricerca e Filtri">
+          <div className="space-y-4">
+            <form method="GET" className="space-y-3">
+              <input type="hidden" name="sort" value={sort} />
+              <input type="hidden" name="dir" value={dir} />
+              {showPast && <input type="hidden" name="past" value="true" />}
+              {fromDate && <input type="hidden" name="from" value={fromDate} />}
+              {toDate && <input type="hidden" name="to" value={toDate} />}
+
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex w-full overflow-hidden rounded-xl border border-zinc-300 bg-white transition focus-within:border-zinc-500 lg:max-w-xl">
+                  <div className="flex items-center pl-3 text-zinc-400">
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       fill="none"
                       viewBox="0 0 24 24"
                       strokeWidth={2}
                       stroke="currentColor"
-                      className="w-5 h-5"
+                      className="h-5 w-5"
                     >
                       <path
                         strokeLinecap="round"
@@ -209,27 +232,31 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       />
                     </svg>
                   </div>
+
                   <input
                     type="text"
                     name="q"
                     defaultValue={q}
-                    placeholder="Cerca cliente, riferimento..."
-                    className="w-full border-none px-3 py-2.5 outline-none text-sm"
+                    placeholder="Cerca cliente, riferimento, esperienza, canale..."
+                    className="w-full border-none px-3 py-3 text-[16px] outline-none sm:text-sm"
                   />
+
                   <button
                     type="submit"
-                    className="bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-200 border-l border-zinc-200"
+                    className="border-l border-zinc-200 bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-200"
                   >
                     Cerca
                   </button>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Link
-                    href={`?q=${q}&sort=${sort}&dir=${dir}&past=${
-                      showPast ? "false" : "true"
-                    }`}
-                    className={`inline-flex items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                    href={buildQuery({
+                      past: showPast ? null : "true",
+                      from: null,
+                      to: null,
+                    })}
+                    className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
                       showPast
                         ? "border-blue-200 bg-blue-50 text-blue-700"
                         : "border-zinc-300 bg-white text-zinc-700"
@@ -237,100 +264,437 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   >
                     {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
                   </Link>
-                  {(fromDate || toDate || q) && (
+
+                  {(fromDate || toDate || q || showPast) && (
                     <Link
                       href="/prenotazioni"
-                      className="text-zinc-500 text-xs flex items-center hover:underline"
+                      className="inline-flex min-h-11 items-center rounded-xl px-2 text-sm font-medium text-zinc-500 hover:text-zinc-800 hover:underline"
                     >
                       Reset filtri
                     </Link>
                   )}
                 </div>
-              </form>
+              </div>
+            </form>
 
-              <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-end">
-                <form method="GET" className="flex flex-wrap items-end gap-3">
+            <div className="border-t border-zinc-100 pt-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <form method="GET" className="grid gap-3 sm:grid-cols-3 xl:flex">
                   <input type="hidden" name="q" value={q} />
                   <input type="hidden" name="sort" value={sort} />
                   <input type="hidden" name="dir" value={dir} />
+                  {showPast && <input type="hidden" name="past" value="true" />}
 
                   <div>
-                    <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">
+                    <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-400">
                       Dal
                     </label>
                     <input
                       type="date"
                       name="from"
                       defaultValue={fromDate}
-                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                      className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-[16px] outline-none focus:border-zinc-500 sm:text-sm"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">
+                    <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-400">
                       Al
                     </label>
                     <input
                       type="date"
                       name="to"
                       defaultValue={toDate}
-                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500"
+                      className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-[16px] outline-none focus:border-zinc-500 sm:text-sm"
                     />
                   </div>
+
                   <button
                     type="submit"
-                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700 transition"
+                    className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-700"
                   >
                     Applica Date
                   </button>
                 </form>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <Link
-                    href={`?from=${todayStr}&to=${todayStr}`}
-                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
+                    href={buildQuery({
+                      from: todayStr,
+                      to: todayStr,
+                      past: null,
+                    })}
+                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
                     Oggi
                   </Link>
+
                   <Link
-                    href={`?from=${tomorrowStr}&to=${tomorrowStr}`}
-                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
+                    href={buildQuery({
+                      from: tomorrowStr,
+                      to: tomorrowStr,
+                      past: null,
+                    })}
+                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
                     Domani
                   </Link>
+
                   <Link
-                    href={`?from=${firstDayMonth}&to=${lastDayMonth}`}
-                    className="rounded-lg bg-white border border-zinc-200 px-3 py-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 shadow-sm"
+                    href={buildQuery({
+                      from: firstDayMonth,
+                      to: lastDayMonth,
+                      past: null,
+                    })}
+                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
                     Questo Mese
                   </Link>
+
                   <Link
-                    href={`?from=2026-01-01&to=2026-12-31`}
-                    className="rounded-lg bg-zinc-100 border border-zinc-300 px-3 py-2 text-[11px] font-bold text-zinc-800 hover:bg-zinc-200 shadow-sm"
+                    href={buildQuery({
+                      from: "2026-01-01",
+                      to: "2026-12-31",
+                      past: null,
+                    })}
+                    className="shrink-0 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-[11px] font-bold text-zinc-800 shadow-sm hover:bg-zinc-200"
                   >
                     Tutto 2026
                   </Link>
                 </div>
               </div>
             </div>
-          </SectionCard>
+          </div>
+        </SectionCard>
 
-          <SectionCard title="Elenco Dettagliato">
-            <div className="overflow-x-auto">
+        <SectionCard title={`Elenco Prenotazioni (${allBookings.length})`}>
+          <>
+            <div className="space-y-4 md:hidden">
+              {allBookings.map((booking) => {
+                const isCancelled = booking.is_cancelled === true;
+                const isHighlighted = String(booking.id) === highlightId;
+                const isModifiedPermanent = booking.was_modified === true;
+                const bookingChannelName = getChannelName(booking);
+
+                const customerStatus = booking.customer_payment_status;
+                let customerBadgeClass = "bg-red-100 text-red-700";
+                let customerBadgeText = "Da Incassare";
+                if (customerStatus === "paid") {
+                  customerBadgeClass = "bg-green-100 text-green-700";
+                  customerBadgeText = "Incassato";
+                } else if (customerStatus === "partial") {
+                  customerBadgeClass = "bg-blue-100 text-blue-700";
+                  customerBadgeText = "Acconto";
+                }
+
+                const costoFornitore = Number(booking.total_supplier_cost || 0);
+                const pagatoFornitore = Number(booking.supplier_amount_paid || 0);
+                const isSupplierPaid =
+                  booking.supplier_payment_status === "paid" ||
+                  (pagatoFornitore > 0 && pagatoFornitore >= costoFornitore);
+                const isSupplierPartial =
+                  pagatoFornitore > 0 &&
+                  pagatoFornitore < costoFornitore &&
+                  booking.supplier_payment_status !== "paid";
+
+                let supplierBadgeClass = "bg-red-100 text-red-700";
+                let supplierBadgeText = "Da Saldare";
+                if (isSupplierPaid) {
+                  supplierBadgeClass = "bg-green-100 text-green-700";
+                  supplierBadgeText = "Pagato";
+                } else if (isSupplierPartial) {
+                  supplierBadgeClass = "bg-blue-100 text-blue-700";
+                  supplierBadgeText = "Parziale";
+                }
+
+                const wPax =
+                  Number(booking.adults || 0) + Number(booking.children || 0);
+                const wDate = formatDate(booking.booking_date);
+                const wTime = booking.booking_time
+                  ? booking.booking_time.slice(0, 5)
+                  : "Orario da def.";
+                const wChannel = bookingChannelName || "N/A";
+                const wRef = booking.booking_reference || "N/A";
+                const wName = booking.customer_name || "N/A";
+                const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+
+                const rawSupplier = booking.suppliers;
+                let rawPhone = "";
+                if (Array.isArray(rawSupplier)) {
+                  rawPhone = rawSupplier[0]?.phone || "";
+                } else if (rawSupplier) {
+                  rawPhone = rawSupplier.phone || "";
+                }
+                const cleanPhone = rawPhone.replace(/\D/g, "");
+                const waUrl = cleanPhone
+                  ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(
+                      waText
+                    )}`
+                  : `https://api.whatsapp.com/send?text=${encodeURIComponent(
+                      waText
+                    )}`;
+
+                let dateColorClass = "text-zinc-900";
+                let isToday = false;
+                let isTomorrow = false;
+                if (isCancelled) {
+                  dateColorClass = "text-zinc-500 line-through";
+                } else if (booking.booking_date === todayStr) {
+                  dateColorClass = "text-green-600";
+                  isToday = true;
+                } else if (booking.booking_date === tomorrowStr) {
+                  dateColorClass = "text-orange-500";
+                  isTomorrow = true;
+                }
+
+                const hasAlert =
+                  booking.notes &&
+                  (booking.notes.includes("🔴") ||
+                    booking.notes.includes("🟡") ||
+                    booking.notes.includes("🟢"));
+
+                return (
+                  <div
+                    key={booking.id}
+                    className={`overflow-hidden rounded-2xl border shadow-sm transition ${
+                      isHighlighted
+                        ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
+                        : isCancelled
+                        ? "border-zinc-200 bg-zinc-50/70"
+                        : "border-zinc-200 bg-white"
+                    }`}
+                  >
+                    <div className="space-y-4 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className={`text-sm font-black ${dateColorClass}`}>
+                              {formatDate(booking.booking_date)}
+                            </div>
+
+                            {isToday && (
+                              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-700">
+                                Oggi
+                              </span>
+                            )}
+
+                            {isTomorrow && (
+                              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">
+                                Domani
+                              </span>
+                            )}
+
+                            {booking.booking_time && (
+                              <span
+                                className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
+                                  isCancelled
+                                    ? "bg-zinc-200 text-zinc-400"
+                                    : "bg-blue-50 text-blue-700"
+                                }`}
+                              >
+                                {booking.booking_time.slice(0, 5)}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-1 text-[11px] text-zinc-400">
+                            Inserita: {formatDate(booking.booking_created_at)}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="text-right text-base font-black text-zinc-900">
+                            {formatEuro(Number(booking.total_customer || 0))}
+                          </div>
+
+                          {isModifiedPermanent && !isCancelled && (
+                            <span className="inline-flex rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                              Modificata
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div
+                          className={`text-base font-bold ${
+                            isCancelled
+                              ? "text-zinc-500 line-through"
+                              : "text-zinc-900"
+                          }`}
+                        >
+                          {booking.customer_name || "-"}
+                        </div>
+
+                        <div className="text-xs font-mono text-zinc-500">
+                          {booking.booking_reference || "-"}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-lg border border-zinc-200 bg-zinc-100 px-2 py-1 text-[11px] font-bold text-zinc-700">
+                          {bookingChannelName || "-"}
+                        </span>
+
+                        <span className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">
+                          {wPax} Pax
+                        </span>
+                      </div>
+
+                      <div className="rounded-xl bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                        {booking.experience_name || "-"}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3">
+                          <div className="text-[10px] font-bold uppercase text-zinc-400">
+                            Pag. Agenzia
+                          </div>
+                          <div
+                            className={`mt-2 inline-flex rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
+                              isCancelled
+                                ? "bg-zinc-200 text-zinc-400"
+                                : customerBadgeClass
+                            }`}
+                          >
+                            {isCancelled ? "-" : customerBadgeText}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3">
+                          <div className="text-[10px] font-bold uppercase text-zinc-400">
+                            Pag. Fornitore
+                          </div>
+                          <div
+                            className={`mt-2 inline-flex rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
+                              isCancelled
+                                ? "bg-zinc-200 text-zinc-400"
+                                : supplierBadgeClass
+                            }`}
+                          >
+                            {isCancelled ? "-" : supplierBadgeText}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="mb-2 text-[10px] font-bold uppercase text-zinc-400">
+                          Note / Alert
+                        </div>
+
+                        {hasAlert ? (
+                          <form action={clearAlert}>
+                            <input type="hidden" name="id" value={booking.id} />
+                            <button
+                              type="submit"
+                              title="Clicca per confermare la presa visione"
+                              className={`w-full rounded-xl p-3 text-left text-[12px] font-bold leading-tight transition ${
+                                booking.notes.includes("🔴")
+                                  ? "bg-red-50 text-red-700 hover:bg-red-100"
+                                  : booking.notes.includes("🟡")
+                                  ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                  : "bg-green-50 text-green-700 hover:bg-green-100"
+                              }`}
+                            >
+                              <div>{booking.notes}</div>
+                              <div className="mt-2 text-[10px] font-medium underline opacity-80">
+                                Segna come letto
+                              </div>
+                            </button>
+                          </form>
+                        ) : (
+                          <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3 text-sm text-zinc-500">
+                            {booking.notes || "-"}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="border-t border-zinc-100 pt-3">
+                        {!isCancelled && !cleanPhone && (
+                          <div className="mb-3 text-[11px] font-bold text-red-500">
+                            Manca numero fornitore
+                          </div>
+                        )}
+
+                        {!isCancelled && cleanPhone && (
+                          <div className="mb-3 text-[11px] text-zinc-500">
+                            Tel fornitore: <span className="font-semibold">+{cleanPhone}</span>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <Link
+                            href={`/prenotazioni/${booking.id}/modifica`}
+                            className="flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-3 text-sm font-bold text-zinc-700 shadow-sm hover:bg-zinc-100"
+                          >
+                            Modifica
+                          </Link>
+
+                          {!isCancelled && (
+                            <a
+                              href={waUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`flex min-h-11 items-center justify-center rounded-xl border px-3 py-3 text-sm font-bold shadow-sm transition ${
+                                cleanPhone
+                                  ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
+                                  : "border-zinc-200 bg-zinc-50 text-zinc-400 hover:bg-zinc-100"
+                              }`}
+                            >
+                              WhatsApp
+                            </a>
+                          )}
+
+                          {!isCancelled && (
+                            <form action={cancelBooking} className="w-full">
+                              <input type="hidden" name="id" value={booking.id} />
+                              <button
+                                type="submit"
+                                className="flex min-h-11 w-full items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm font-bold text-red-700 shadow-sm hover:bg-red-100"
+                              >
+                                Cancella
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {allBookings.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center text-sm text-zinc-500">
+                  Nessuna prenotazione trovata con i filtri attuali.
+                </div>
+              )}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 text-zinc-500 uppercase text-[10px] font-bold">
+                <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
                   <tr>
-                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      <Link href={buildSortUrl("booking_date")} className="flex items-center">
+                    <th className="cursor-pointer py-3 pr-4 transition hover:text-zinc-900">
+                      <Link
+                        href={buildSortUrl("booking_date")}
+                        className="flex items-center"
+                      >
                         Data / Ora <SortIcon column="booking_date" />
                       </Link>
                     </th>
-                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      <Link href={buildSortUrl("customer_name")} className="flex items-center">
+                    <th className="cursor-pointer py-3 pr-4 transition hover:text-zinc-900">
+                      <Link
+                        href={buildSortUrl("customer_name")}
+                        className="flex items-center"
+                      >
                         Cliente / Rif. <SortIcon column="customer_name" />
                       </Link>
                     </th>
-                    <th className="py-3 pr-4 transition hover:text-zinc-900 cursor-pointer">
-                      <Link href={buildSortUrl("booking_source")} className="flex items-center">
+                    <th className="cursor-pointer py-3 pr-4 transition hover:text-zinc-900">
+                      <Link
+                        href={buildSortUrl("booking_source")}
+                        className="flex items-center"
+                      >
                         Canale / Esperienza <SortIcon column="booking_source" />
                       </Link>
                     </th>
@@ -341,6 +705,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     <th className="py-3 pr-4 text-right">Azioni</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {allBookings.map((booking) => {
                     const isCancelled = booking.is_cancelled === true;
@@ -402,7 +767,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(
                           waText
                         )}`
-                      : `https://api.whatsapp.com/send?text=${encodeURIComponent(waText)}`;
+                      : `https://api.whatsapp.com/send?text=${encodeURIComponent(
+                          waText
+                        )}`;
 
                     let dateColorClass = "text-zinc-900";
                     let isToday = false;
@@ -434,17 +801,17 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             : "hover:bg-zinc-50"
                         }`}
                       >
-                        <td className="py-4 pr-4 whitespace-nowrap">
+                        <td className="whitespace-nowrap py-4 pr-4">
                           <div className="flex items-center gap-2">
                             <div className={`font-bold ${dateColorClass}`}>
                               {formatDate(booking.booking_date)}
                               {isToday && (
-                                <span className="ml-1 text-[9px] uppercase font-black">
+                                <span className="ml-1 text-[9px] font-black uppercase">
                                   Oggi
                                 </span>
                               )}
                               {isTomorrow && (
-                                <span className="ml-1 text-[9px] uppercase font-black">
+                                <span className="ml-1 text-[9px] font-black uppercase">
                                   Dom
                                 </span>
                               )}
@@ -471,7 +838,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             </div>
                           )}
 
-                          <div className="text-[10px] text-zinc-400 font-medium mt-1">
+                          <div className="mt-1 text-[10px] font-medium text-zinc-400">
                             Ins: {formatDate(booking.booking_created_at)}
                           </div>
                         </td>
@@ -486,21 +853,21 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                           >
                             {booking.customer_name}
                           </div>
-                          <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                          <div className="mt-0.5 text-[10px] font-mono text-zinc-500">
                             {booking.booking_reference || "-"}
                           </div>
                         </td>
 
                         <td className="py-4 pr-4">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="inline-block rounded bg-zinc-100 border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600">
+                          <div className="mb-1 flex items-center gap-2">
+                            <span className="inline-block rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600">
                               {bookingChannelName || "-"}
                             </span>
                             <span className="text-[10px] font-medium text-zinc-500">
                               {wPax} Pax
                             </span>
                           </div>
-                          <div className="text-xs font-medium text-zinc-700 truncate max-w-[150px]">
+                          <div className="max-w-[150px] truncate text-xs font-medium text-zinc-700">
                             {booking.experience_name}
                           </div>
                         </td>
@@ -512,7 +879,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                               <button
                                 type="submit"
                                 title="Clicca per confermare la presa visione"
-                                className={`group text-[11px] font-bold leading-tight max-w-[130px] whitespace-normal text-left transition-all cursor-pointer rounded p-1.5 -ml-1.5 hover:bg-zinc-200 ${
+                                className={`group -ml-1.5 max-w-[130px] cursor-pointer rounded p-1.5 text-left text-[11px] font-bold leading-tight transition-all ${
                                   booking.notes.includes("🔴")
                                     ? "text-red-600 hover:bg-red-50"
                                     : booking.notes.includes("🟡")
@@ -521,13 +888,13 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                                 }`}
                               >
                                 {booking.notes}
-                                <span className="block mt-1 text-[9px] font-medium text-zinc-400 group-hover:text-zinc-600 underline">
+                                <span className="mt-1 block text-[9px] font-medium text-zinc-400 underline group-hover:text-zinc-600">
                                   Segna come letto
                                 </span>
                               </button>
                             </form>
                           ) : (
-                            <div className="text-zinc-400 text-[11px] max-w-[130px] whitespace-normal">
+                            <div className="max-w-[130px] whitespace-normal text-[11px] text-zinc-400">
                               {booking.notes || "-"}
                             </div>
                           )}
@@ -565,12 +932,13 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
                         <td className="py-4 pr-4 text-right">
                           {!isCancelled && !cleanPhone && (
-                            <div className="text-[9px] font-bold text-red-500 mb-1.5 pr-1">
+                            <div className="mb-1.5 pr-1 text-[9px] font-bold text-red-500">
                               Manca numero!
                             </div>
                           )}
+
                           {!isCancelled && cleanPhone && (
-                            <div className="text-[9px] font-medium text-zinc-400 mb-1.5 pr-1">
+                            <div className="mb-1.5 pr-1 text-[9px] font-medium text-zinc-400">
                               Tel: +{cleanPhone}
                             </div>
                           )}
@@ -578,7 +946,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                           <div className="flex items-center justify-end gap-2">
                             <Link
                               href={`/prenotazioni/${booking.id}/modifica`}
-                              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 shadow-sm"
+                              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[11px] font-medium text-zinc-700 shadow-sm hover:bg-zinc-100"
                             >
                               Modifica
                             </Link>
@@ -588,7 +956,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                                 href={waUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className={`rounded-lg border px-3 py-2 text-[11px] font-bold transition shadow-sm ${
+                                className={`rounded-lg border px-3 py-2 text-[11px] font-bold shadow-sm transition ${
                                   cleanPhone
                                     ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
                                     : "border-zinc-200 bg-zinc-50 text-zinc-400 hover:bg-zinc-100"
@@ -603,7 +971,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                                 <input type="hidden" name="id" value={booking.id} />
                                 <button
                                   type="submit"
-                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 hover:bg-red-100 shadow-sm"
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 shadow-sm hover:bg-red-100"
                                 >
                                   Cancella
                                 </button>
@@ -614,12 +982,23 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       </tr>
                     );
                   })}
+
+                  {allBookings.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="py-8 text-center text-sm text-zinc-500"
+                      >
+                        Nessuna prenotazione trovata con i filtri attuali.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
-          </SectionCard>
-        </div>
+          </>
+        </SectionCard>
       </div>
-    </main>
+    </AppShell>
   );
 }
