@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
+import ClearSummarySelectionButton from "@/components/ClearSummarySelectionButton";
 import { supabase } from "@/lib/supabase";
 import { cancelBooking, clearAlert } from "./actions";
 
@@ -381,20 +382,24 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   </div>
                 </div>
 
-                <form
-                  id="summaryForm"
-                  action="/prenotazioni/riepilogo"
-                  method="GET"
-                  className="shrink-0"
-                >
-                  <button
-                    type="submit"
-                    formTarget="_blank"
-                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800"
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <ClearSummarySelectionButton formId="summaryForm" />
+
+                  <form
+                    id="summaryForm"
+                    action="/prenotazioni/riepilogo"
+                    method="GET"
+                    className="shrink-0"
                   >
-                    Apri riepilogo
-                  </button>
-                </form>
+                    <button
+                      type="submit"
+                      formTarget="_blank"
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800"
+                    >
+                      Apri riepilogo
+                    </button>
+                  </form>
+                </div>
               </div>
             </div>
 
