@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import PrintPdfButton from "@/components/PrintPdfButton";
+import SendSummaryWhatsAppButton from "@/components/SendSummaryWhatsAppButton";
 
 type PageProps = {
   searchParams: Promise<{
@@ -106,6 +107,11 @@ export default async function PrenotazioniRiepilogoPage({
     )
     .in("id", selectedIds);
 
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("id, name, phone, active")
+    .order("name", { ascending: true });
+
   if (error) {
     return (
       <div className="bg-zinc-100 px-4 py-8 text-zinc-900">
@@ -160,6 +166,35 @@ export default async function PrenotazioniRiepilogoPage({
 
   const totalBookings = rows.length;
   const totalPeople = rows.reduce((sum, booking) => sum + booking.totalPeople, 0);
+
+  const whatsappMessage = [
+    "RIEPILOGO PRENOTAZIONI",
+    `Creato il ${formatDocumentCreatedAt(documentCreatedAt)}`,
+    "",
+    ...rows.map((booking, index) => {
+      const datePart = formatDateOnly(booking.booking_date);
+      const timePart = formatTime(booking.booking_time);
+      const dateTime =
+        timePart !== "-" ? `${datePart} ore ${timePart}` : `${datePart}`;
+
+      return `${index + 1}) ${booking.totalPeople} clienti | ${dateTime} | ${
+        booking.customer_name || "-"
+      } | ${booking.booking_reference || "-"} | ${booking.channelName || "-"} | ${
+        booking.experienceType || "-"
+      }`;
+    }),
+    "",
+    `Totale prenotazioni: ${totalBookings}`,
+    `Totale persone: ${totalPeople}`,
+  ].join("\n");
+
+  const supplierList = (suppliers || [])
+    .filter((supplier) => supplier.active !== false)
+    .map((supplier) => ({
+      id: supplier.id,
+      name: supplier.name,
+      phone: supplier.phone,
+    }));
 
   return (
     <div className="bg-zinc-100 px-4 py-6 text-zinc-900 print:bg-white print:px-0 print:py-0">
@@ -228,6 +263,13 @@ export default async function PrenotazioniRiepilogoPage({
           <div className="mt-2 text-sm text-zinc-500">
             Documento creato il {formatDocumentCreatedAt(documentCreatedAt)}
           </div>
+        </div>
+
+        <div className="no-print mt-5">
+          <SendSummaryWhatsAppButton
+            suppliers={supplierList}
+            message={whatsappMessage}
+          />
         </div>
 
         <div className="print-table-wrap mt-6 overflow-x-auto">
