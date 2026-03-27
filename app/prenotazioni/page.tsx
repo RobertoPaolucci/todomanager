@@ -369,6 +369,35 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
         <SectionCard title={`Elenco Prenotazioni (${allBookings.length})`}>
           <>
+            <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="text-sm font-black text-blue-900">
+                    Riepilogo prenotazioni selezionate
+                  </div>
+                  <div className="mt-1 text-sm text-blue-800">
+                    Metti la spunta a sinistra sulle prenotazioni e apri il riepilogo
+                    stampabile in una nuova scheda.
+                  </div>
+                </div>
+
+                <form
+                  id="summaryForm"
+                  action="/prenotazioni/riepilogo"
+                  method="GET"
+                  className="shrink-0"
+                >
+                  <button
+                    type="submit"
+                    formTarget="_blank"
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800"
+                  >
+                    Apri riepilogo
+                  </button>
+                </form>
+              </div>
+            </div>
+
             <div className="space-y-4 md:hidden">
               {allBookings.map((booking) => {
                 const isCancelled = booking.is_cancelled === true;
@@ -466,39 +495,52 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   >
                     <div className="space-y-4 p-4">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className={`text-sm font-black ${dateColorClass}`}>
-                              {formatDate(booking.booking_date)}
-                            </div>
-
-                            {isToday && (
-                              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-700">
-                                Oggi
-                              </span>
-                            )}
-
-                            {isTomorrow && (
-                              <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">
-                                Domani
-                              </span>
-                            )}
-
-                            {booking.booking_time && (
-                              <span
-                                className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
-                                  isCancelled
-                                    ? "bg-zinc-200 text-zinc-400"
-                                    : "bg-blue-50 text-blue-700"
-                                }`}
-                              >
-                                {booking.booking_time.slice(0, 5)}
-                              </span>
-                            )}
+                        <div className="flex items-start gap-3">
+                          <div className="pt-0.5">
+                            <input
+                              type="checkbox"
+                              name="ids"
+                              value={booking.id}
+                              form="summaryForm"
+                              className="h-5 w-5 rounded border-zinc-300"
+                              aria-label={`Seleziona prenotazione ${booking.id}`}
+                            />
                           </div>
 
-                          <div className="mt-1 text-[11px] text-zinc-400">
-                            Inserita: {formatDate(booking.booking_created_at)}
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className={`text-sm font-black ${dateColorClass}`}>
+                                {formatDate(booking.booking_date)}
+                              </div>
+
+                              {isToday && (
+                                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-700">
+                                  Oggi
+                                </span>
+                              )}
+
+                              {isTomorrow && (
+                                <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">
+                                  Domani
+                                </span>
+                              )}
+
+                              {booking.booking_time && (
+                                <span
+                                  className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
+                                    isCancelled
+                                      ? "bg-zinc-200 text-zinc-400"
+                                      : "bg-blue-50 text-blue-700"
+                                  }`}
+                                >
+                                  {booking.booking_time.slice(0, 5)}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="mt-1 text-[11px] text-zinc-400">
+                              Inserita: {formatDate(booking.booking_created_at)}
+                            </div>
                           </div>
                         </div>
 
@@ -674,6 +716,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               <table className="min-w-full text-left text-sm">
                 <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
                   <tr>
+                    <th className="w-12 py-3 pr-3 text-center">✓</th>
+
                     <th className="cursor-pointer py-3 pr-4 transition hover:text-zinc-900">
                       <Link
                         href={buildSortUrl("booking_date")}
@@ -801,6 +845,17 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             : "hover:bg-zinc-50"
                         }`}
                       >
+                        <td className="py-4 pr-3 text-center align-top">
+                          <input
+                            type="checkbox"
+                            name="ids"
+                            value={booking.id}
+                            form="summaryForm"
+                            className="mt-1 h-4 w-4 rounded border-zinc-300"
+                            aria-label={`Seleziona prenotazione ${booking.id}`}
+                          />
+                        </td>
+
                         <td className="whitespace-nowrap py-4 pr-4">
                           <div className="flex items-center gap-2">
                             <div className={`font-bold ${dateColorClass}`}>
@@ -986,7 +1041,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   {allBookings.length === 0 && (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={9}
                         className="py-8 text-center text-sm text-zinc-500"
                       >
                         Nessuna prenotazione trovata con i filtri attuali.
