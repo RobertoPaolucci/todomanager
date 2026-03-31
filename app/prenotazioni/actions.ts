@@ -16,6 +16,108 @@ function normalizeText(value: FormDataEntryValue | null) {
   return text === "" ? null : text;
 }
 
+function round2(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function getTodayDate() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getEffectiveSupplierPaid(input: {
+  is_cancelled?: boolean | null;
+  supplier_payment_status?: string | null;
+  supplier_amount_paid?: number | string | null;
+  total_supplier_cost?: number | string | null;
+}) {
+  const costo = Number(input.total_supplier_cost || 0);
+  const rawPaid = Number(input.supplier_amount_paid || 0);
+  const status = String(input.supplier_payment_status || "").trim().toLowerCase();
+
+  if (input.is_cancelled) return 0;
+  if (status === "paid") return round2(costo);
+
+  return round2(Math.max(0, Math.min(rawPaid, costo)));
+}
+
+async function insertSupplierPaymentMovement(params: {
+  supplier_id: number;
+  amount: number;
+  payment_date: string;
+  note: string;
+}) {
+  const roundedAmount = round2(params.amount);
+
+  if (!params.supplier_id || Math.abs(roundedAmount) < 0.01) {
+    return;
+  }
+
+  const { error } = await supabase.from("supplier_payments").insert({
+    supplier_id: params.supplier_id,
+    amount: roundedAmount,
+    payment_date: params.payment_date,
+    payment_method: "Altro",
+    notes: params.note,
+  });
+
+  if (error) {
+    console.error("Errore sync supplier_payments:", error.message, params);
+  }
+}
+
+async function syncSupplierPaymentsFromBookingChange(params: {
+  bookingId: number;
+  bookingReference: string | null;
+  customerName: string | null;
+  oldSupplierId: number;
+  newSupplierId: number;
+  oldPaidAmount: number;
+  newPaidAmount: number;
+  paymentDate: string;
+}) {
+  const refPart = params.bookingReference ? ` - ${params.bookingReference}` : "";
+  const namePart = params.customerName ? ` - ${params.customerName}` : "";
+  const label = `prenotazione #${params.bookingId}${refPart}${namePart}`;
+
+  if (params.oldSupplierId === params.newSupplierId) {
+    const delta = round2(params.newPaidAmount - params.oldPaidAmount);
+
+    if (Math.abs(delta) < 0.01) return;
+
+    const note =
+      delta > 0
+        ? `Registrazione pagamento da Modifica Prenotazione - ${label}`
+        : `Storno pagamento da Modifica Prenotazione - ${label}`;
+
+    await insertSupplierPaymentMovement({
+      supplier_id: params.newSupplierId,
+      amount: delta,
+      payment_date: params.paymentDate,
+      note,
+    });
+
+    return;
+  }
+
+  if (params.oldSupplierId && params.oldPaidAmount > 0) {
+    await insertSupplierPaymentMovement({
+      supplier_id: params.oldSupplierId,
+      amount: -round2(params.oldPaidAmount),
+      payment_date: params.paymentDate,
+      note: `Storno per cambio fornitore da Modifica Prenotazione - ${label}`,
+    });
+  }
+
+  if (params.newSupplierId && params.newPaidAmount > 0) {
+    await insertSupplierPaymentMovement({
+      supplier_id: params.newSupplierId,
+      amount: round2(params.newPaidAmount),
+      payment_date: params.paymentDate,
+      note: `Registrazione pagamento per cambio fornitore da Modifica Prenotazione - ${label}`,
+    });
+  }
+}
+
 export async function createBooking(formData: FormData) {
   const returnTo = String(formData.get("returnTo") || "/prenotazioni").trim();
   const intent = String(formData.get("intent") || "save").trim();
@@ -170,9 +272,30 @@ export async function createBooking(formData: FormData) {
     return { error: `Errore durante il salvataggio: ${error.message}` };
   }
 
+  const initialPaidAmount = getEffectiveSupplierPaid({
+    is_cancelled: false,
+    supplier_payment_status,
+    supplier_amount_paid,
+    total_supplier_cost,
+  });
+
+  if (insertedBooking?.id && experience.supplier_id && initialPaidAmount > 0) {
+    await insertSupplierPaymentMovement({
+      supplier_id: Number(experience.supplier_id),
+      amount: initialPaidAmount,
+      payment_date: getTodayDate(),
+      note: `Registrazione pagamento da Nuova Prenotazione - prenotazione #${insertedBooking.id}${
+        booking_reference ? ` - ${booking_reference}` : ""
+      }${customer_name ? ` - ${customer_name}` : ""}`,
+    });
+  }
+
   revalidatePath("/prenotazioni");
   revalidatePath("/prenotazioni/nuova");
   revalidatePath("/pagamenti");
+  if (experience.supplier_id) {
+    revalidatePath(`/pagamenti/${experience.supplier_id}`);
+  }
   revalidatePath("/");
 
   const newBookingId = insertedBooking?.id;
@@ -224,6 +347,18 @@ export async function updateBooking(formData: FormData) {
 
   if (!id) return { error: "ID prenotazione non valido." };
 
+  const { data: currentBooking, error: currentBookingError } = await supabase
+    .from("bookings")
+    .select(
+      "id, supplier_id, booking_reference, customer_name, total_supplier_cost, supplier_payment_status, supplier_amount_paid, is_cancelled"
+    )
+    .eq("id", id)
+    .single();
+
+  if (currentBookingError || !currentBooking) {
+    return { error: "Prenotazione non trovata." };
+  }
+
   const { data: experience } = await supabase
     .from("experiences")
     .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -257,6 +392,23 @@ export async function updateBooking(formData: FormData) {
     ? supplier_unit_cost
     : supplier_unit_cost * pricing_pax;
   const margin_total = total_to_you - total_supplier_cost;
+
+  const oldPaidAmount = getEffectiveSupplierPaid({
+    is_cancelled: currentBooking.is_cancelled,
+    supplier_payment_status: currentBooking.supplier_payment_status,
+    supplier_amount_paid: currentBooking.supplier_amount_paid,
+    total_supplier_cost: currentBooking.total_supplier_cost,
+  });
+
+  const newPaidAmount = getEffectiveSupplierPaid({
+    is_cancelled: currentBooking.is_cancelled,
+    supplier_payment_status,
+    supplier_amount_paid,
+    total_supplier_cost,
+  });
+
+  const oldSupplierId = Number(currentBooking.supplier_id || 0);
+  const newSupplierId = Number(experience?.supplier_id || 0);
 
   const { error } = await supabase
     .from("bookings")
@@ -306,9 +458,29 @@ export async function updateBooking(formData: FormData) {
     return { error: `Errore durante la modifica: ${error.message}` };
   }
 
+  await syncSupplierPaymentsFromBookingChange({
+    bookingId: id,
+    bookingReference: booking_reference || currentBooking.booking_reference || null,
+    customerName: customer_name || currentBooking.customer_name || null,
+    oldSupplierId,
+    newSupplierId,
+    oldPaidAmount,
+    newPaidAmount,
+    paymentDate: getTodayDate(),
+  });
+
   revalidatePath("/prenotazioni");
   revalidatePath(`/prenotazioni/${id}/modifica`);
   revalidatePath("/pagamenti");
+  if (oldSupplierId) {
+    revalidatePath(`/pagamenti/${oldSupplierId}`);
+  }
+  if (newSupplierId && newSupplierId !== oldSupplierId) {
+    revalidatePath(`/pagamenti/${newSupplierId}`);
+  } else if (newSupplierId) {
+    revalidatePath(`/pagamenti/${newSupplierId}`);
+  }
+
   redirect(returnTo);
 }
 

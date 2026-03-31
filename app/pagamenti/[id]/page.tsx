@@ -36,7 +36,7 @@ function getBookingPaidAmount(booking: any, isInternal: boolean) {
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ pay?: string }>;
+  searchParams: Promise<{ pay?: string; q?: string }>;
 };
 
 export default async function DettaglioPagamentiFornitorePage({
@@ -44,10 +44,12 @@ export default async function DettaglioPagamentiFornitorePage({
   searchParams,
 }: PageProps) {
   const { id } = await params;
-  const { pay } = await searchParams;
+  const sp = await searchParams;
 
   const supplierId = Number(id);
-  const showPayModal = pay === "true";
+  const showPayModal = sp.pay === "true";
+  const q = String(sp.q || "").trim();
+  const qLower = q.toLowerCase();
 
   const todayObj = new Date();
   const todayStr = todayObj.toISOString().split("T")[0];
@@ -111,7 +113,24 @@ export default async function DettaglioPagamentiFornitorePage({
     };
   });
 
-  const displayBookings = [...decoratedBookings].sort((a, b) =>
+  const filteredBookings = decoratedBookings.filter((booking) => {
+    if (!qLower) return true;
+
+    const rawDate = booking.booking_date || "";
+    const formattedDate = formatDate(booking.booking_date).toLowerCase();
+
+    return (
+      String(booking.customer_name || "").toLowerCase().includes(qLower) ||
+      String(booking.booking_reference || "").toLowerCase().includes(qLower) ||
+      String(booking.experience_name || "").toLowerCase().includes(qLower) ||
+      String(booking.stato || "").toLowerCase().includes(qLower) ||
+      String(rawDate).toLowerCase().includes(qLower) ||
+      formattedDate.includes(qLower) ||
+      String(booking.id || "").includes(qLower)
+    );
+  });
+
+  const displayBookings = [...filteredBookings].sort((a, b) =>
     (b.booking_date || "").localeCompare(a.booking_date || "")
   );
 
@@ -138,6 +157,13 @@ export default async function DettaglioPagamentiFornitorePage({
         }
         return sum;
       }, 0);
+
+  const querySuffix = q ? `?q=${encodeURIComponent(q)}` : "";
+  const payHref = q
+    ? `/pagamenti/${supplierId}?pay=true&q=${encodeURIComponent(q)}`
+    : `/pagamenti/${supplierId}?pay=true`;
+  const cancelModalHref = q ? `/pagamenti/${supplierId}?q=${encodeURIComponent(q)}` : `/pagamenti/${supplierId}`;
+  const returnToPath = q ? `/pagamenti/${supplierId}?q=${encodeURIComponent(q)}` : `/pagamenti/${supplierId}`;
 
   return (
     <main className="min-h-screen bg-zinc-50 p-6">
@@ -186,7 +212,7 @@ export default async function DettaglioPagamentiFornitorePage({
                 </div>
               ) : (
                 <Link
-                  href={`/pagamenti/${supplierId}?pay=true`}
+                  href={payHref}
                   className="group min-w-[160px] flex-1 cursor-pointer rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm transition hover:border-red-300 hover:bg-red-100"
                 >
                   <span className="block text-sm font-bold text-red-800">
@@ -203,116 +229,171 @@ export default async function DettaglioPagamentiFornitorePage({
             </div>
           </div>
 
-          <SectionCard title="Elenco Movimenti (Allineato a Prenotazioni)">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
-                  <tr>
-                    <th className="py-3 pr-4">Data Exp</th>
-                    <th className="py-3 pr-4">Cliente / Rif.</th>
-                    <th className="py-3 pr-4">Esperienza</th>
-                    <th className="py-3 pr-4">Importo</th>
-                    <th className="py-3 pr-4">Stato Calcolato</th>
-                    <th className="py-3 pr-4 text-right">Azioni</th>
-                  </tr>
-                </thead>
+          <SectionCard
+            title={`Elenco Movimenti (Allineato a Prenotazioni)${q ? ` – ${displayBookings.length} risultati` : ` – ${displayBookings.length}`}`}
+          >
+            <>
+              <div className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <form method="GET" className="space-y-3">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex w-full overflow-hidden rounded-xl border border-zinc-300 bg-white transition focus-within:border-zinc-500 lg:max-w-xl">
+                      <div className="flex items-center pl-3 text-zinc-400">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={2}
+                          stroke="currentColor"
+                          className="h-5 w-5"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                          />
+                        </svg>
+                      </div>
 
-                <tbody>
-                  {displayBookings.map((booking) => {
-                    const badgeClass =
-                      booking.stato === "Annullato"
-                        ? "bg-zinc-200 text-zinc-500"
-                        : booking.stato === "Auto-Saldato"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : booking.stato === "Pagato"
-                        ? "bg-green-100 text-green-700"
-                        : booking.stato === "Parziale"
-                        ? "bg-blue-100 text-blue-700"
-                        : booking.stato === "Futuro"
-                        ? "bg-amber-100 text-amber-700"
-                        : "bg-red-100 text-red-700";
+                      <input
+                        type="text"
+                        name="q"
+                        defaultValue={q}
+                        placeholder="Cerca cliente, riferimento, esperienza, stato, data..."
+                        className="w-full border-none px-3 py-3 text-[16px] outline-none sm:text-sm"
+                      />
 
-                    return (
-                      <tr
-                        key={booking.id}
-                        className={`border-b border-zinc-100 transition hover:bg-zinc-50 ${
-                          booking.isCancelled ? "bg-zinc-50/50 opacity-50" : ""
-                        }`}
+                      <button
+                        type="submit"
+                        className="border-l border-zinc-200 bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-200"
                       >
-                        <td className="whitespace-nowrap py-4 pr-4">
-                          <span
-                            className={`font-medium ${
-                              booking.isFuture &&
-                              booking.stato !== "Pagato" &&
-                              booking.stato !== "Parziale" &&
-                              !booking.isCancelled &&
-                              !isInternal
-                                ? "text-amber-600"
-                                : "text-zinc-900"
-                            }`}
-                          >
-                            {formatDate(booking.booking_date)}
-                          </span>
-                        </td>
+                        Cerca
+                      </button>
+                    </div>
 
-                        <td className="py-4 pr-4">
-                          <div className="font-medium text-zinc-900">{booking.customer_name}</div>
-                          <div className="font-mono text-xs text-zinc-500">
-                            {booking.booking_reference || `#${booking.id}`}
-                          </div>
-                        </td>
+                    <div className="flex items-center gap-2">
+                      {q && (
+                        <Link
+                          href={`/pagamenti/${supplierId}`}
+                          className="inline-flex min-h-11 items-center rounded-xl px-2 text-sm font-medium text-zinc-500 hover:text-zinc-800 hover:underline"
+                        >
+                          Reset ricerca
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </form>
+              </div>
 
-                        <td className="py-4 pr-4 text-zinc-700">
-                          {booking.experience_name}
-                          {booking.isCancelled && (
-                            <span className="ml-2 inline-block text-[10px] font-bold uppercase text-red-600">
-                              Cancellata
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
+                    <tr>
+                      <th className="py-3 pr-4">Data Exp</th>
+                      <th className="py-3 pr-4">Cliente / Rif.</th>
+                      <th className="py-3 pr-4">Esperienza</th>
+                      <th className="py-3 pr-4">Importo</th>
+                      <th className="py-3 pr-4">Stato Calcolato</th>
+                      <th className="py-3 pr-4 text-right">Azioni</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {displayBookings.map((booking) => {
+                      const badgeClass =
+                        booking.stato === "Annullato"
+                          ? "bg-zinc-200 text-zinc-500"
+                          : booking.stato === "Auto-Saldato"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : booking.stato === "Pagato"
+                          ? "bg-green-100 text-green-700"
+                          : booking.stato === "Parziale"
+                          ? "bg-blue-100 text-blue-700"
+                          : booking.stato === "Futuro"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-red-100 text-red-700";
+
+                      return (
+                        <tr
+                          key={booking.id}
+                          className={`border-b border-zinc-100 transition hover:bg-zinc-50 ${
+                            booking.isCancelled ? "bg-zinc-50/50 opacity-50" : ""
+                          }`}
+                        >
+                          <td className="whitespace-nowrap py-4 pr-4">
+                            <span
+                              className={`font-medium ${
+                                booking.isFuture &&
+                                booking.stato !== "Pagato" &&
+                                booking.stato !== "Parziale" &&
+                                !booking.isCancelled &&
+                                !isInternal
+                                  ? "text-amber-600"
+                                  : "text-zinc-900"
+                              }`}
+                            >
+                              {formatDate(booking.booking_date)}
                             </span>
-                          )}
-                        </td>
+                          </td>
 
-                        <td className="py-4 pr-4">
-                          <div className="font-bold text-zinc-900">
-                            {formatEuro(booking.costo)}
-                          </div>
-
-                          {booking.stato === "Parziale" && !booking.isCancelled && !isInternal && (
-                            <div className="mt-0.5 text-[11px] font-medium text-blue-600">
-                              Coperti: {formatEuro(booking.pagato)}
+                          <td className="py-4 pr-4">
+                            <div className="font-medium text-zinc-900">{booking.customer_name}</div>
+                            <div className="font-mono text-xs text-zinc-500">
+                              {booking.booking_reference || `#${booking.id}`}
                             </div>
-                          )}
-                        </td>
+                          </td>
 
-                        <td className="py-4 pr-4">
-                          <span
-                            className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${badgeClass}`}
-                          >
-                            {booking.stato}
-                          </span>
-                        </td>
+                          <td className="py-4 pr-4 text-zinc-700">
+                            {booking.experience_name}
+                            {booking.isCancelled && (
+                              <span className="ml-2 inline-block text-[10px] font-bold uppercase text-red-600">
+                                Cancellata
+                              </span>
+                            )}
+                          </td>
 
-                        <td className="py-4 pr-4 text-right">
-                          <Link
-                            href={`/prenotazioni/${booking.id}/modifica?viewOnly=true&returnTo=/pagamenti/${supplierId}`}
-                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
-                          >
-                            Apri
-                          </Link>
+                          <td className="py-4 pr-4">
+                            <div className="font-bold text-zinc-900">
+                              {formatEuro(booking.costo)}
+                            </div>
+
+                            {booking.stato === "Parziale" && !booking.isCancelled && !isInternal && (
+                              <div className="mt-0.5 text-[11px] font-medium text-blue-600">
+                                Coperti: {formatEuro(booking.pagato)}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-4 pr-4">
+                            <span
+                              className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${badgeClass}`}
+                            >
+                              {booking.stato}
+                            </span>
+                          </td>
+
+                          <td className="py-4 pr-4 text-right">
+                            <Link
+                              href={`/prenotazioni/${booking.id}/modifica?viewOnly=true&returnTo=${encodeURIComponent(returnToPath)}`}
+                              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
+                            >
+                              Apri
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {displayBookings.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-zinc-500">
+                          Nessuna prenotazione trovata con i filtri attuali.
                         </td>
                       </tr>
-                    );
-                  })}
-
-                  {displayBookings.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-zinc-500">
-                        Nessuna prenotazione trovata per questo fornitore.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           </SectionCard>
 
           {!isInternal && (
@@ -433,7 +514,7 @@ export default async function DettaglioPagamentiFornitorePage({
 
               <div className="mt-2 flex justify-end gap-3 border-t border-zinc-100 pt-4">
                 <Link
-                  href={`/pagamenti/${supplierId}`}
+                  href={cancelModalHref}
                   className="flex items-center rounded-xl border border-zinc-300 px-5 py-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                 >
                   Annulla
