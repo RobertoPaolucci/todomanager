@@ -44,6 +44,7 @@ async function insertSupplierPaymentMovement(params: {
   supplier_id: number;
   amount: number;
   payment_date: string;
+  payment_method: string;
   note: string;
 }) {
   const roundedAmount = round2(params.amount);
@@ -56,7 +57,7 @@ async function insertSupplierPaymentMovement(params: {
     supplier_id: params.supplier_id,
     amount: roundedAmount,
     payment_date: params.payment_date,
-    payment_method: "Altro",
+    payment_method: params.payment_method || "Bonifico Bancario",
     notes: params.note,
   });
 
@@ -74,6 +75,7 @@ async function syncSupplierPaymentsFromBookingChange(params: {
   oldPaidAmount: number;
   newPaidAmount: number;
   paymentDate: string;
+  paymentMethod: string;
 }) {
   const refPart = params.bookingReference ? ` - ${params.bookingReference}` : "";
   const namePart = params.customerName ? ` - ${params.customerName}` : "";
@@ -93,6 +95,7 @@ async function syncSupplierPaymentsFromBookingChange(params: {
       supplier_id: params.newSupplierId,
       amount: delta,
       payment_date: params.paymentDate,
+      payment_method: params.paymentMethod,
       note,
     });
 
@@ -104,6 +107,7 @@ async function syncSupplierPaymentsFromBookingChange(params: {
       supplier_id: params.oldSupplierId,
       amount: -round2(params.oldPaidAmount),
       payment_date: params.paymentDate,
+      payment_method: params.paymentMethod,
       note: `Storno per cambio fornitore da Modifica Prenotazione - ${label}`,
     });
   }
@@ -113,6 +117,7 @@ async function syncSupplierPaymentsFromBookingChange(params: {
       supplier_id: params.newSupplierId,
       amount: round2(params.newPaidAmount),
       payment_date: params.paymentDate,
+      payment_method: params.paymentMethod,
       note: `Registrazione pagamento per cambio fornitore da Modifica Prenotazione - ${label}`,
     });
   }
@@ -149,6 +154,9 @@ export async function createBooking(formData: FormData) {
   const supplier_payment_status = String(
     formData.get("supplier_payment_status") || "pending"
   ).trim();
+  const supplier_payment_method =
+    String(formData.get("supplier_payment_method") || "").trim() ||
+    "Bonifico Bancario";
 
   const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
   const notes = String(formData.get("notes") || "").trim();
@@ -284,6 +292,7 @@ export async function createBooking(formData: FormData) {
       supplier_id: Number(experience.supplier_id),
       amount: initialPaidAmount,
       payment_date: getTodayDate(),
+      payment_method: supplier_payment_method,
       note: `Registrazione pagamento da Nuova Prenotazione - prenotazione #${insertedBooking.id}${
         booking_reference ? ` - ${booking_reference}` : ""
       }${customer_name ? ` - ${customer_name}` : ""}`,
@@ -342,6 +351,9 @@ export async function updateBooking(formData: FormData) {
   const supplier_payment_status = String(
     formData.get("supplier_payment_status") || "pending"
   ).trim();
+  const supplier_payment_method =
+    String(formData.get("supplier_payment_method") || "").trim() ||
+    "Bonifico Bancario";
   const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
   const notes = normalizeText(formData.get("notes"));
 
@@ -467,6 +479,7 @@ export async function updateBooking(formData: FormData) {
     oldPaidAmount,
     newPaidAmount,
     paymentDate: getTodayDate(),
+    paymentMethod: supplier_payment_method,
   });
 
   revalidatePath("/prenotazioni");

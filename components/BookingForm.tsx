@@ -37,6 +37,19 @@ type BookingFormProps = {
   returnTo?: string;
 };
 
+const PAYMENT_METHOD_OPTIONS = [
+  "Bonifico Bancario",
+  "Carta di Credito",
+  "Contanti",
+  "POS",
+  "PayPal",
+  "Stripe",
+  "Satispay",
+  "Assegno",
+  "Compensazione",
+  "Altro",
+];
+
 export default function BookingForm({
   channels,
   experiences,
@@ -58,6 +71,16 @@ export default function BookingForm({
 
   const [manualYourPrice, setManualYourPrice] = useState(0);
   const [manualPublicPrice, setManualPublicPrice] = useState(0);
+
+  const [supplierPaymentStatus, setSupplierPaymentStatus] = useState(
+    initialData?.supplier_payment_status ?? "pending"
+  );
+  const [supplierAmountPaid, setSupplierAmountPaid] = useState(
+    String(initialData?.supplier_amount_paid ?? 0)
+  );
+  const [supplierPaymentMethod, setSupplierPaymentMethod] = useState(
+    initialData?.supplier_payment_method ?? "Bonifico Bancario"
+  );
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -109,6 +132,13 @@ export default function BookingForm({
     : supplierUnitCost * pricingPax;
 
   const marginTotal = totalToYou - totalSupplierCost;
+
+  const supplierAmountPaidNumber = Number(
+    String(supplierAmountPaid || "0").replace(",", ".")
+  );
+
+  const showSupplierPaymentMethod =
+    supplierPaymentStatus !== "pending" || supplierAmountPaidNumber > 0;
 
   async function handleFormAction(formData: FormData) {
     setErrorMessage(null);
@@ -326,7 +356,7 @@ export default function BookingForm({
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
-          <div className="min-w-0 col-span-2">
+          <div className="col-span-2 min-w-0">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
               Esperienza
             </label>
@@ -496,7 +526,8 @@ export default function BookingForm({
               <select
                 name="supplier_payment_status"
                 disabled={viewOnly}
-                defaultValue={initialData?.supplier_payment_status ?? "pending"}
+                value={supplierPaymentStatus}
+                onChange={(e) => setSupplierPaymentStatus(e.target.value)}
                 className={compactInputStyle}
               >
                 <option value="pending">In attesa</option>
@@ -514,12 +545,41 @@ export default function BookingForm({
                 type="number"
                 step="0.01"
                 disabled={viewOnly}
-                defaultValue={initialData?.supplier_amount_paid ?? 0}
+                value={supplierAmountPaid}
+                onChange={(e) => setSupplierAmountPaid(e.target.value)}
                 className={compactInputStyle}
               />
             </div>
           </div>
         </div>
+
+        {showSupplierPaymentMethod && (
+          <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+            <div className="grid gap-3 md:max-w-sm">
+              <div className="min-w-0">
+                <label className="mb-1 block text-sm font-medium text-zinc-700">
+                  Metodo di pagamento fornitore
+                </label>
+                <select
+                  name="supplier_payment_method"
+                  disabled={viewOnly}
+                  value={supplierPaymentMethod}
+                  onChange={(e) => setSupplierPaymentMethod(e.target.value)}
+                  className={compactInputStyle}
+                >
+                  {PAYMENT_METHOD_OPTIONS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Usato per registrare il movimento nello storico pagamenti.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2 sm:p-5">
@@ -623,7 +683,7 @@ export default function BookingForm({
         value={selectedExperience?.name || ""}
       />
 
-      <div className="sticky bottom-0 z-20 -mx-3 border-t border-zinc-200 bg-white/95 px-3 pt-3 pb-[calc(12px+env(safe-area-inset-bottom))] backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:pt-1 md:pb-0 md:backdrop-blur-0">
+      <div className="sticky bottom-0 z-20 -mx-3 border-t border-zinc-200 bg-white/95 px-3 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-1 md:backdrop-blur-0">
         <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row sm:flex-wrap">
           {!viewOnly && (
             <>

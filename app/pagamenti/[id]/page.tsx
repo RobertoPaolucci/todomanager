@@ -34,6 +34,19 @@ function getBookingPaidAmount(booking: any, isInternal: boolean) {
   return Math.max(0, Math.min(rawPaid, costo));
 }
 
+const PAYMENT_METHOD_OPTIONS = [
+  "Bonifico Bancario",
+  "Carta di Credito",
+  "Contanti",
+  "POS",
+  "PayPal",
+  "Stripe",
+  "Satispay",
+  "Assegno",
+  "Compensazione",
+  "Altro",
+];
+
 type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ pay?: string; q?: string }>;
@@ -158,12 +171,17 @@ export default async function DettaglioPagamentiFornitorePage({
         return sum;
       }, 0);
 
-  const querySuffix = q ? `?q=${encodeURIComponent(q)}` : "";
   const payHref = q
     ? `/pagamenti/${supplierId}?pay=true&q=${encodeURIComponent(q)}`
     : `/pagamenti/${supplierId}?pay=true`;
-  const cancelModalHref = q ? `/pagamenti/${supplierId}?q=${encodeURIComponent(q)}` : `/pagamenti/${supplierId}`;
-  const returnToPath = q ? `/pagamenti/${supplierId}?q=${encodeURIComponent(q)}` : `/pagamenti/${supplierId}`;
+
+  const cancelModalHref = q
+    ? `/pagamenti/${supplierId}?q=${encodeURIComponent(q)}`
+    : `/pagamenti/${supplierId}`;
+
+  const returnToPath = q
+    ? `/pagamenti/${supplierId}?q=${encodeURIComponent(q)}`
+    : `/pagamenti/${supplierId}`;
 
   return (
     <main className="min-h-screen bg-zinc-50 p-6">
@@ -230,7 +248,9 @@ export default async function DettaglioPagamentiFornitorePage({
           </div>
 
           <SectionCard
-            title={`Elenco Movimenti (Allineato a Prenotazioni)${q ? ` – ${displayBookings.length} risultati` : ` – ${displayBookings.length}`}`}
+            title={`Elenco Movimenti (Allineato a Prenotazioni)${
+              q ? ` – ${displayBookings.length} risultati` : ` – ${displayBookings.length}`
+            }`}
           >
             <>
               <div className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
@@ -373,7 +393,9 @@ export default async function DettaglioPagamentiFornitorePage({
 
                           <td className="py-4 pr-4 text-right">
                             <Link
-                              href={`/prenotazioni/${booking.id}/modifica?viewOnly=true&returnTo=${encodeURIComponent(returnToPath)}`}
+                              href={`/prenotazioni/${booking.id}/modifica?viewOnly=true&returnTo=${encodeURIComponent(
+                                returnToPath
+                              )}`}
                               className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
                             >
                               Apri
@@ -404,36 +426,45 @@ export default async function DettaglioPagamentiFornitorePage({
                     <tr>
                       <th className="py-3 pr-4">Data Pagamento</th>
                       <th className="py-3 pr-4">Importo</th>
-                      <th className="py-3 pr-4">Metodo</th>
+                      <th className="py-3 pr-4">Metodo di pagamento</th>
                       <th className="py-3 pr-4">Note</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {displayPayments.map((payment) => (
-                      <tr
-                        key={payment.id}
-                        className="border-b border-zinc-100 transition hover:bg-zinc-50"
-                      >
-                        <td className="whitespace-nowrap py-4 pr-4 font-medium text-zinc-900">
-                          {formatDate(payment.payment_date)}
-                        </td>
+                    {displayPayments.map((payment) => {
+                      const amount = Number(payment.amount || 0);
+                      const isNegative = amount < 0;
 
-                        <td className="py-4 pr-4 font-bold text-green-700">
-                          {formatEuro(Number(payment.amount || 0))}
-                        </td>
+                      return (
+                        <tr
+                          key={payment.id}
+                          className="border-b border-zinc-100 transition hover:bg-zinc-50"
+                        >
+                          <td className="whitespace-nowrap py-4 pr-4 font-medium text-zinc-900">
+                            {formatDate(payment.payment_date)}
+                          </td>
 
-                        <td className="py-4 pr-4">
-                          <span className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-bold uppercase text-zinc-700">
-                            {payment.payment_method}
-                          </span>
-                        </td>
+                          <td
+                            className={`py-4 pr-4 font-bold ${
+                              isNegative ? "text-red-700" : "text-green-700"
+                            }`}
+                          >
+                            {formatEuro(amount)}
+                          </td>
 
-                        <td className="py-4 pr-4 text-xs text-zinc-600">
-                          {payment.notes || "-"}
-                        </td>
-                      </tr>
-                    ))}
+                          <td className="py-4 pr-4">
+                            <span className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-bold uppercase text-zinc-700">
+                              {payment.payment_method}
+                            </span>
+                          </td>
+
+                          <td className="py-4 pr-4 text-xs text-zinc-600">
+                            {payment.notes || "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
 
                     {displayPayments.length === 0 && (
                       <tr>
@@ -492,11 +523,13 @@ export default async function DettaglioPagamentiFornitorePage({
                 <select
                   name="payment_method"
                   className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 outline-none focus:border-zinc-500"
+                  defaultValue="Bonifico Bancario"
                 >
-                  <option value="Bonifico">Bonifico Bancario</option>
-                  <option value="Carta di Credito">Carta di Credito</option>
-                  <option value="Contanti">Contanti</option>
-                  <option value="Altro">Altro</option>
+                  {PAYMENT_METHOD_OPTIONS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
                 </select>
               </div>
 
