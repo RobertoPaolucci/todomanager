@@ -51,6 +51,16 @@ export async function createBooking(formData: FormData) {
   const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
   const notes = String(formData.get("notes") || "").trim();
 
+  const recoveryControlsPresent =
+    String(formData.get("recovery_controls_present") || "").trim() === "1";
+  const recoveryChecked = String(formData.get("is_recovery") || "").trim() === "on";
+  const recoveryTagRaw = String(formData.get("recovery_tag") || "").trim();
+
+  const recovery_tag =
+    recoveryControlsPresent && recoveryChecked
+      ? recoveryTagRaw || "COGNANELLO_2025"
+      : null;
+
   if (
     !channel_id ||
     !experience_id ||
@@ -152,6 +162,7 @@ export async function createBooking(formData: FormData) {
       supplier_payment_status,
       supplier_amount_paid,
       notes: notes || null,
+      recovery_tag,
       is_cancelled: false,
     })
     .select("id")
@@ -222,6 +233,11 @@ export async function updateBooking(formData: FormData) {
   const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
   const notes = normalizeText(formData.get("notes"));
 
+  const recoveryControlsPresent =
+    String(formData.get("recovery_controls_present") || "").trim() === "1";
+  const recoveryChecked = String(formData.get("is_recovery") || "").trim() === "on";
+  const recoveryTagRaw = String(formData.get("recovery_tag") || "").trim();
+
   if (!id) return { error: "ID prenotazione non valido." };
 
   const { data: experience } = await supabase
@@ -258,40 +274,45 @@ export async function updateBooking(formData: FormData) {
     : supplier_unit_cost * pricing_pax;
   const margin_total = total_to_you - total_supplier_cost;
 
-  const { error } = await supabase
-    .from("bookings")
-    .update({
-      channel_id,
-      booking_source: channel?.name,
-      experience_id,
-      supplier_id: experience?.supplier_id,
-      booking_reference,
-      booking_created_at,
-      customer_name,
-      customer_phone,
-      customer_email,
-      experience_name: experience?.name,
-      booking_date,
-      booking_time,
-      adults,
-      children,
-      infants,
-      total_people,
-      pax: total_people,
-      total_amount: total_customer,
-      your_unit_price,
-      public_unit_price,
-      supplier_unit_cost,
-      total_to_you,
-      total_customer,
-      total_supplier_cost,
-      margin_total,
-      customer_payment_status,
-      supplier_payment_status,
-      supplier_amount_paid,
-      notes,
-    })
-    .eq("id", id);
+  const updateData: Record<string, unknown> = {
+    channel_id,
+    booking_source: channel?.name,
+    experience_id,
+    supplier_id: experience?.supplier_id,
+    booking_reference,
+    booking_created_at,
+    customer_name,
+    customer_phone,
+    customer_email,
+    experience_name: experience?.name,
+    booking_date,
+    booking_time,
+    adults,
+    children,
+    infants,
+    total_people,
+    pax: total_people,
+    total_amount: total_customer,
+    your_unit_price,
+    public_unit_price,
+    supplier_unit_cost,
+    total_to_you,
+    total_customer,
+    total_supplier_cost,
+    margin_total,
+    customer_payment_status,
+    supplier_payment_status,
+    supplier_amount_paid,
+    notes,
+  };
+
+  if (recoveryControlsPresent) {
+    updateData.recovery_tag = recoveryChecked
+      ? recoveryTagRaw || "COGNANELLO_2025"
+      : null;
+  }
+
+  const { error } = await supabase.from("bookings").update(updateData).eq("id", id);
 
   if (error) {
     if (

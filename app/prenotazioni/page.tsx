@@ -32,6 +32,7 @@ type PageProps = {
     highlight?: string;
     from?: string;
     to?: string;
+    recovery?: string;
   }>;
 };
 
@@ -51,6 +52,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const highlightId = params.highlight || "";
   const fromDate = params.from || "";
   const toDate = params.to || "";
+  const recovery = params.recovery || "";
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -71,9 +73,23 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     .from("bookings")
     .select("*, suppliers(phone), channels(name)");
 
+  const { data: recoveryTagsData } = await supabase
+    .from("bookings")
+    .select("recovery_tag")
+    .not("recovery_tag", "is", null)
+    .order("recovery_tag", { ascending: true });
+
   if (error) {
     console.error("Errore caricamento prenotazioni:", error.message);
   }
+
+  const recoveryTags = Array.from(
+    new Set(
+      (recoveryTagsData || [])
+        .map((row: any) => String(row.recovery_tag || "").trim())
+        .filter(Boolean)
+    )
+  );
 
   let allBookings = bookings || [];
 
@@ -90,13 +106,31 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
     const bookingChannelName = getChannelName(b);
 
+    if (recovery === "tagged" && !b.recovery_tag) {
+      return false;
+    }
+
+    if (recovery === "untagged" && b.recovery_tag) {
+      return false;
+    }
+
+    if (
+      recovery &&
+      recovery !== "tagged" &&
+      recovery !== "untagged" &&
+      b.recovery_tag !== recovery
+    ) {
+      return false;
+    }
+
     if (q) {
       const term = q.toLowerCase();
       const match =
         (b.customer_name || "").toLowerCase().includes(term) ||
         (b.booking_reference || "").toLowerCase().includes(term) ||
         (b.experience_name || "").toLowerCase().includes(term) ||
-        (bookingChannelName || "").toLowerCase().includes(term);
+        (bookingChannelName || "").toLowerCase().includes(term) ||
+        (b.recovery_tag || "").toLowerCase().includes(term);
 
       if (!match) return false;
     }
@@ -149,6 +183,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     if (fromDate) sp.set("from", fromDate);
     if (toDate) sp.set("to", toDate);
     if (highlightId) sp.set("highlight", highlightId);
+    if (recovery) sp.set("recovery", recovery);
 
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === undefined || value === "") {
@@ -214,6 +249,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               {showPast && <input type="hidden" name="past" value="true" />}
               {fromDate && <input type="hidden" name="from" value={fromDate} />}
               {toDate && <input type="hidden" name="to" value={toDate} />}
+              {recovery && <input type="hidden" name="recovery" value={recovery} />}
 
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex w-full overflow-hidden rounded-xl border border-zinc-300 bg-white transition focus-within:border-zinc-500 lg:max-w-xl">
@@ -251,6 +287,28 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    name="recovery"
+                    defaultValue={recovery}
+                    className="min-h-11 rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-700 outline-none transition focus:border-zinc-500"
+                  >
+                    <option value="">Tutti i recuperi</option>
+                    <option value="tagged">Solo con tag</option>
+                    <option value="untagged">Solo senza tag</option>
+                    {recoveryTags.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="submit"
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+                  >
+                    Applica
+                  </button>
+
                   <Link
                     href={buildQuery({
                       past: showPast ? null : "true",
@@ -266,7 +324,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
                   </Link>
 
-                  {(fromDate || toDate || q || showPast) && (
+                  {(fromDate || toDate || q || showPast || recovery) && (
                     <Link
                       href="/prenotazioni"
                       className="inline-flex min-h-11 items-center rounded-xl px-2 text-sm font-medium text-zinc-500 hover:text-zinc-800 hover:underline"
@@ -285,6 +343,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   <input type="hidden" name="sort" value={sort} />
                   <input type="hidden" name="dir" value={dir} />
                   {showPast && <input type="hidden" name="past" value="true" />}
+                  {recovery && <input type="hidden" name="recovery" value={recovery} />}
 
                   <div>
                     <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-400">
@@ -361,6 +420,19 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     className="shrink-0 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-[11px] font-bold text-zinc-800 shadow-sm hover:bg-zinc-200"
                   >
                     Tutto 2026
+                  </Link>
+
+                  <Link
+                    href={buildQuery({
+                      recovery: "COGNANELLO_2025",
+                    })}
+                    className={`shrink-0 rounded-lg border px-3 py-2 text-[11px] font-bold shadow-sm ${
+                      recovery === "COGNANELLO_2025"
+                        ? "border-violet-300 bg-violet-100 text-violet-800"
+                        : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                    }`}
+                  >
+                    Cognanello 2025
                   </Link>
                 </div>
               </div>
@@ -586,6 +658,12 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         <span className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">
                           {wPax} Pax
                         </span>
+
+                        {booking.recovery_tag && (
+                          <span className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-bold text-violet-700">
+                            {booking.recovery_tag}
+                          </span>
+                        )}
                       </div>
 
                       <div className="rounded-xl bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
@@ -927,6 +1005,15 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                               {wPax} Pax
                             </span>
                           </div>
+
+                          {booking.recovery_tag && (
+                            <div className="mb-1">
+                              <span className="inline-block rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+                                {booking.recovery_tag}
+                              </span>
+                            </div>
+                          )}
+
                           <div className="max-w-[150px] truncate text-xs font-medium text-zinc-700">
                             {booking.experience_name}
                           </div>

@@ -61,6 +61,25 @@ export default function BookingForm({
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [isRecovery, setIsRecovery] = useState(() => {
+    const initialTag = String(initialData?.recovery_tag || "").trim();
+    if (initialTag) return true;
+    return !isEditing;
+  });
+
+  const [recoveryTag, setRecoveryTag] = useState(() => {
+    const initialTag = String(initialData?.recovery_tag || "").trim();
+    return initialTag || "COGNANELLO_2025";
+  });
+
+  useEffect(() => {
+    const initialTag = String(initialData?.recovery_tag || "").trim();
+    if (initialTag) {
+      setIsRecovery(true);
+      setRecoveryTag(initialTag);
+    }
+  }, [initialData]);
+
   const selectedExperience = useMemo(
     () =>
       experiences.find((experience) => String(experience.id) === experienceId),
@@ -147,6 +166,7 @@ export default function BookingForm({
     <form action={handleFormAction} className="grid gap-4 md:grid-cols-2">
       {isEditing && <input type="hidden" name="id" value={initialData.id} />}
       <input type="hidden" name="returnTo" value={returnTo} />
+      <input type="hidden" name="recovery_controls_present" value="1" />
 
       {errorMessage && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm md:col-span-2">
@@ -326,7 +346,7 @@ export default function BookingForm({
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
-          <div className="min-w-0 col-span-2">
+          <div className="col-span-2 min-w-0">
             <label className="mb-1 block text-sm font-medium text-zinc-700">
               Esperienza
             </label>
@@ -522,6 +542,92 @@ export default function BookingForm({
         </div>
       </div>
 
+      <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4 shadow-sm md:col-span-2 sm:p-5">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
+              Recupero storico
+            </h3>
+            <p className="mt-1 text-xs text-zinc-600 sm:text-sm">
+              Usa questo tag per collegare la prenotazione al recupero manuale che stai facendo.
+            </p>
+          </div>
+
+          {isRecovery && (
+            <span className="w-fit rounded-lg border border-violet-200 bg-white px-2 py-1 text-[10px] font-black uppercase tracking-wide text-violet-700">
+              Attivo
+            </span>
+          )}
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+          <label className="flex items-center gap-3 rounded-2xl border border-violet-200 bg-white px-4 py-3">
+            <input
+              type="checkbox"
+              name="is_recovery"
+              checked={isRecovery}
+              onChange={(e) => setIsRecovery(e.target.checked)}
+              disabled={viewOnly}
+              className="h-5 w-5 rounded border-zinc-300"
+            />
+            <span className="text-sm font-bold text-zinc-800">
+              Segna come recupero storico
+            </span>
+          </label>
+
+          <div className="min-w-0">
+            <label className="mb-1 block text-sm font-medium text-zinc-700">
+              Tag recupero
+            </label>
+            <input
+              name="recovery_tag"
+              type="text"
+              value={recoveryTag}
+              onChange={(e) => setRecoveryTag(e.target.value)}
+              disabled={viewOnly || !isRecovery}
+              placeholder="Es. COGNANELLO_2025"
+              className={inputBaseStyle}
+            />
+
+            {!viewOnly && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRecovery(true);
+                    setRecoveryTag("COGNANELLO_2025");
+                  }}
+                  className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-[11px] font-bold text-violet-700 transition hover:bg-violet-100"
+                >
+                  Usa COGNANELLO_2025
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRecovery(true);
+                    setRecoveryTag("RECUPERO_STORICO");
+                  }}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-700 transition hover:bg-zinc-100"
+                >
+                  Usa RECUPERO_STORICO
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRecovery(false);
+                  }}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100"
+                >
+                  Rimuovi tag
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -623,7 +729,7 @@ export default function BookingForm({
         value={selectedExperience?.name || ""}
       />
 
-      <div className="sticky bottom-0 z-20 -mx-3 border-t border-zinc-200 bg-white/95 px-3 pt-3 pb-[calc(12px+env(safe-area-inset-bottom))] backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:pt-1 md:pb-0 md:backdrop-blur-0">
+      <div className="sticky bottom-0 z-20 -mx-3 border-t border-zinc-200 bg-white/95 px-3 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-1 md:backdrop-blur-0">
         <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row sm:flex-wrap">
           {!viewOnly && (
             <>

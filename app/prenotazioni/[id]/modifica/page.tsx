@@ -1,8 +1,10 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import BookingForm from "@/components/BookingForm";
-import { supabase } from "@/lib/supabase";
 import { getChannels, getExperiences } from "@/lib/queries";
+import { supabase } from "@/lib/supabase";
 
 type PageProps = {
   params: Promise<{
@@ -10,7 +12,6 @@ type PageProps = {
   }>;
   searchParams: Promise<{
     returnTo?: string;
-    viewOnly?: string;
     justCreated?: string;
   }>;
 };
@@ -24,42 +25,93 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function getChannelName(booking: any) {
+  if (Array.isArray(booking.channels)) {
+    return booking.channels[0]?.name || booking.booking_source || "";
+  }
+  return booking.channels?.name || booking.booking_source || "";
+}
+
 export default async function ModificaPrenotazionePage({
   params,
   searchParams,
 }: PageProps) {
   const { id } = await params;
-  const { returnTo, viewOnly, justCreated } = await searchParams;
-  const bookingId = Number(id);
+  const query = await searchParams;
 
-  const isViewOnly = viewOnly === "true";
-  const isJustCreated = justCreated === "true";
-
-  const [channels, experiences, bookingResult] = await Promise.all([
-    getChannels(),
-    getExperiences(),
-    supabase
-      .from("bookings")
-      .select("*, suppliers(phone), channels(name)")
-      .eq("id", bookingId)
-      .single(),
-  ]);
-
-  if (bookingResult.error || !bookingResult.data) {
-    throw new Error("Prenotazione non trovata");
-  }
-
-  const booking = bookingResult.data;
+  const bookingId = Number(id || 0);
+  const returnTo = String(query.returnTo || "/prenotazioni").trim();
+  const justCreated = query.justCreated === "true";
   const today = new Date().toISOString().split("T")[0];
 
-  const backPath = returnTo || "/prenotazioni";
-  const backText = returnTo?.includes("/pagamenti")
-    ? "← Torna all'estratto conto"
-    : "← Torna alle prenotazioni";
+  const channels = await getChannels();
+  const experiences = await getExperiences();
 
-  const bookingChannelName = Array.isArray(booking.channels)
-    ? booking.channels[0]?.name || booking.booking_source || ""
-    : booking.channels?.name || booking.booking_source || "";
+  if (!bookingId || Number.isNaN(bookingId)) {
+    return (
+      <AppShell
+        title="Modifica Prenotazione"
+        subtitle="Prenotazione non valida"
+      >
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
+            <div className="text-2xl font-black text-red-700">
+              Prenotazione non valida
+            </div>
+            <p className="mt-2 text-sm text-zinc-600">
+              L&apos;ID della prenotazione non è valido.
+            </p>
+
+            <div className="mt-6">
+              <Link
+                href="/prenotazioni"
+                className="inline-flex items-center rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white hover:bg-zinc-700"
+              >
+                Torna a Prenotazioni
+              </Link>
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const { data: booking, error } = await supabase
+    .from("bookings")
+    .select("*, suppliers(phone), channels(name)")
+    .eq("id", bookingId)
+    .single();
+
+  if (error || !booking) {
+    return (
+      <AppShell
+        title="Modifica Prenotazione"
+        subtitle="Prenotazione non trovata"
+      >
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
+            <div className="text-2xl font-black text-red-700">
+              Prenotazione non trovata
+            </div>
+            <p className="mt-2 text-sm text-zinc-600">
+              Non è stato possibile caricare la prenotazione richiesta.
+            </p>
+
+            <div className="mt-6">
+              <Link
+                href="/prenotazioni"
+                className="inline-flex items-center rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white hover:bg-zinc-700"
+              >
+                Torna a Prenotazioni
+              </Link>
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const bookingChannelName = getChannelName(booking);
 
   const wPax = Number(booking.adults || 0) + Number(booking.children || 0);
   const wDate = formatDate(booking.booking_date);
@@ -81,6 +133,7 @@ export default async function ModificaPrenotazionePage({
   }
 
   const cleanPhone = rawPhone.replace(/\D/g, "");
+
   const waUrl = cleanPhone
     ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(
         waText
@@ -89,34 +142,11 @@ export default async function ModificaPrenotazionePage({
 
   return (
     <AppShell
-      title={isViewOnly ? "Dettaglio prenotazione" : "Modifica prenotazione"}
-      subtitle={
-        isViewOnly
-          ? "Visualizzazione in sola lettura"
-          : "Aggiorna i dati della prenotazione"
-      }
+      title="Modifica Prenotazione"
+      subtitle="Controlla, correggi e salva i dati della prenotazione"
     >
       <div lang="it-IT" className="mx-auto w-full max-w-5xl space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Link
-            href={backPath}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-100 sm:w-auto"
-          >
-            {backText}
-          </Link>
-
-          {isViewOnly ? (
-            <div className="inline-flex min-h-11 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">
-              Modalità sola lettura
-            </div>
-          ) : (
-            <div className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700">
-              Modifica in corso
-            </div>
-          )}
-        </div>
-
-        {isJustCreated && (
+        {justCreated ? (
           <div className="rounded-2xl border border-green-200 bg-green-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -125,20 +155,24 @@ export default async function ModificaPrenotazionePage({
                 </div>
 
                 <div className="mt-1 text-sm text-green-900">
-                  <span className="font-semibold">{booking.customer_name || "-"}</span>
+                  <span className="font-semibold">{booking.customer_name}</span>
                   {" · "}
-                  {booking.experience_name || "-"}
+                  {booking.experience_name}
                 </div>
 
                 <div className="mt-1 text-xs text-green-800/90">
                   {formatDate(booking.booking_date)}
                   {booking.booking_time ? ` · ${booking.booking_time.slice(0, 5)}` : ""}
-                  {booking.booking_reference ? ` · Rif. ${booking.booking_reference}` : ""}
+                  {booking.booking_reference
+                    ? ` · Rif. ${booking.booking_reference}`
+                    : ""}
                 </div>
 
-                <div className="mt-1 text-xs text-green-800/90">
-                  Canale: {bookingChannelName || "-"} · Pax paganti: {wPax}
-                </div>
+                {booking.recovery_tag ? (
+                  <div className="mt-2 inline-flex rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-bold text-violet-700">
+                    Recupero: {booking.recovery_tag}
+                  </div>
+                ) : null}
 
                 {cleanPhone ? (
                   <div className="mt-1 text-xs text-green-800/90">
@@ -146,53 +180,81 @@ export default async function ModificaPrenotazionePage({
                   </div>
                 ) : (
                   <div className="mt-1 text-xs font-semibold text-amber-700">
-                    Attenzione: manca il numero del fornitore, ma il messaggio WhatsApp è comunque apribile.
+                    Attenzione: manca il numero del fornitore, ma il messaggio
+                    WhatsApp è comunque apribile.
                   </div>
                 )}
               </div>
 
-              {!booking.is_cancelled && (
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-green-300 bg-white px-5 py-3 text-sm font-bold text-green-700 shadow-sm transition hover:bg-green-100"
+              >
+                WhatsApp fornitore
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-black text-zinc-900">
+                  Modifica prenotazione #{booking.id}
+                </div>
+
+                <div className="mt-1 text-sm text-zinc-700">
+                  <span className="font-semibold">{booking.customer_name || "-"}</span>
+                  {" · "}
+                  {booking.experience_name || "-"}
+                </div>
+
+                <div className="mt-1 text-xs text-zinc-500">
+                  {formatDate(booking.booking_date)}
+                  {booking.booking_time ? ` · ${booking.booking_time.slice(0, 5)}` : ""}
+                  {booking.booking_reference
+                    ? ` · Rif. ${booking.booking_reference}`
+                    : ""}
+                  {bookingChannelName ? ` · ${bookingChannelName}` : ""}
+                </div>
+
+                {booking.recovery_tag ? (
+                  <div className="mt-2 inline-flex rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-bold text-violet-700">
+                    Recupero: {booking.recovery_tag}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={returnTo}
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-100"
+                >
+                  ← Torna indietro
+                </Link>
+
                 <a
                   href={waUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex min-h-12 items-center justify-center rounded-xl border border-green-300 bg-white px-5 py-3 text-sm font-bold text-green-700 shadow-sm transition hover:bg-green-100"
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700 shadow-sm transition hover:bg-green-100"
                 >
                   WhatsApp fornitore
                 </a>
-              )}
-            </div>
-          </div>
-        )}
-
-        {!isJustCreated && (
-          <div
-            className={`rounded-2xl px-4 py-3 text-sm shadow-sm ${
-              isViewOnly
-                ? "border border-blue-100 bg-blue-50 text-blue-900"
-                : "border border-amber-100 bg-amber-50 text-amber-900"
-            }`}
-          >
-            <div className="font-bold">
-              {isViewOnly ? "Controllo dettagli" : "Aggiornamento prenotazione"}
-            </div>
-            <div className="mt-1 opacity-90">
-              {isViewOnly
-                ? "Puoi verificare tutti i dati senza modificare i campi."
-                : "Controlla bene date, pax, pagamenti e riepilogo economico prima di salvare."}
+              </div>
             </div>
           </div>
         )}
 
         <BookingForm
-          channels={channels}
-          experiences={experiences}
-          today={today}
-          initialData={booking}
-          isEditing={!isViewOnly}
-          viewOnly={isViewOnly}
-          returnTo={backPath}
-        />
+  channels={channels}
+  experiences={experiences}
+  today={today}
+  initialData={booking}
+  isEditing={true}
+  returnTo={returnTo}
+/>
       </div>
     </AppShell>
   );
