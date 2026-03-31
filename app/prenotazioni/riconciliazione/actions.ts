@@ -3,41 +3,82 @@
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
 
-export async function reconcilePayments(references: string[]) {
-  if (!references || references.length === 0) {
+type ReconcilePaymentsResult = {
+  parsed: number;
+  foundInDb: number;
+  updated: number;
+  alreadyPaid: number;
+  notFound: number;
+  notFoundReferences: string[];
+};
+
+function normalizeBookingReference(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+
+export async function reconcilePayments(
+  references: string[]
+): Promise<ReconcilePaymentsResult> {
+  const cleanedReferences = Array.from(
+    new Set(
+      (references || [])
+        .map(normalizeBookingReference)
+        .filter((ref) => ref !== "" && ref !== "UNDEFINED" && ref !== "NULL")
+    )
+  );
+
+  if (cleanedReferences.length === 0) {
     throw new Error("Nessun codice di riferimento trovato nel file.");
   }
 
-  // Cerca tutte le prenotazioni che corrispondono a questi codici
   const { data: bookings, error } = await supabase
     .from("bookings")
     .select("id, booking_reference, customer_payment_status")
-    .in("booking_reference", references);
+    .in("booking_reference", cleanedReferences);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
 
-  // Filtra solo quelle che non sono ancora segnate come "paid"
-  const toUpdate = bookings?.filter(b => b.customer_payment_status !== "paid") || [];
-  
+  const foundBookings = bookings || [];
+
+  const foundReferenceSet = new Set(
+    foundBookings.map((b) => normalizeBookingReference(b.booking_reference))
+  );
+
+  const notFoundReferences = cleanedReferences.filter(
+    (ref) => !foundReferenceSet.has(normalizeBookingReference(ref))
+  );
+
+  const toUpdate = foundBookings.filter(
+    (b) => b.customer_payment_status !== "paid"
+  );
+
   let updatedCount = 0;
 
-  // Aggiorna lo stato a "paid" (Incassato) per quelle trovate
-  for (const b of toUpdate) {
+  for (const booking of toUpdate) {
     const { error: updateError } = await supabase
       .from("bookings")
       .update({ customer_payment_status: "paid" })
-      .eq("id", b.id);
-      
-    if (!updateError) updatedCount++;
+      .eq("id", booking.id);
+
+    if (!updateError) {
+      updatedCount++;
+    }
   }
 
   revalidatePath("/prenotazioni");
   revalidatePath("/");
 
   return {
-    parsed: references.length,
-    foundInDb: bookings?.length || 0,
+    parsed: cleanedReferences.length,
+    foundInDb: foundBookings.length,
     updated: updatedCount,
-    alreadyPaid: (bookings?.length || 0) - updatedCount
+    alreadyPaid: foundBookings.length - updatedCount,
+    notFound: notFoundReferences.length,
+    notFoundReferences,
   };
 }
