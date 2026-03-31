@@ -23,6 +23,17 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function getBookingPaidAmount(booking: any, isInternal: boolean) {
+  const costo = Number(booking.total_supplier_cost || 0);
+
+  if (booking.is_cancelled) return 0;
+  if (isInternal) return costo;
+  if (booking.supplier_payment_status === "paid") return costo;
+
+  const rawPaid = Number(booking.supplier_amount_paid || 0);
+  return Math.max(0, Math.min(rawPaid, costo));
+}
+
 type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ pay?: string }>;
@@ -34,6 +45,7 @@ export default async function DettaglioPagamentiFornitorePage({
 }: PageProps) {
   const { id } = await params;
   const { pay } = await searchParams;
+
   const supplierId = Number(id);
   const showPayModal = pay === "true";
 
@@ -64,51 +76,68 @@ export default async function DettaglioPagamentiFornitorePage({
 
   const isInternal = supplier.name.includes("Fattoria Madonna della Querce");
 
-  const totalPagato = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const decoratedBookings = bookings.map((booking) => {
+    const costo = Number(booking.total_supplier_cost || 0);
+    const pagato = getBookingPaidAmount(booking, isInternal);
+    const residuo = Math.max(0, costo - pagato);
+    const isCancelled = booking.is_cancelled === true;
+    const isFuture = !!booking.booking_date && booking.booking_date > todayStr;
 
-  let remainingPayment = totalPagato;
-  let costoTotaleMaturato = 0;
-  let daPagareFuturo = 0;
+    let stato: "Annullato" | "Auto-Saldato" | "Pagato" | "Parziale" | "Futuro" | "Da Saldare" =
+      "Da Saldare";
 
-  const decoratedBookings = bookings.map((b) => {
-    const costo = Number(b.total_supplier_cost || 0);
-    let coperto = 0;
-
-    if (!b.is_cancelled) {
-      if (b.booking_date && b.booking_date <= todayStr) {
-        costoTotaleMaturato += costo;
-      } else {
-        daPagareFuturo += costo;
-      }
-
-      if (isInternal) {
-        coperto = costo;
-      } else {
-        if (remainingPayment >= costo) {
-          coperto = costo;
-          remainingPayment -= costo;
-        } else if (remainingPayment > 0) {
-          coperto = remainingPayment;
-          remainingPayment = 0;
-        }
-      }
+    if (isCancelled) {
+      stato = "Annullato";
+    } else if (isInternal) {
+      stato = "Auto-Saldato";
+    } else if (booking.supplier_payment_status === "paid" || pagato >= costo) {
+      stato = "Pagato";
+    } else if (pagato > 0) {
+      stato = "Parziale";
+    } else if (isFuture) {
+      stato = "Futuro";
+    } else {
+      stato = "Da Saldare";
     }
 
-    return { ...b, costo, coperto };
+    return {
+      ...booking,
+      costo,
+      pagato,
+      residuo,
+      stato,
+      isCancelled,
+      isFuture,
+    };
   });
 
-  const displayBookings = [...decoratedBookings].sort(
-    (a, b) =>
-      new Date(b.booking_date || "").getTime() - new Date(a.booking_date || "").getTime()
+  const displayBookings = [...decoratedBookings].sort((a, b) =>
+    (b.booking_date || "").localeCompare(a.booking_date || "")
   );
 
-  const displayPayments = [...payments].sort(
-    (a, b) =>
-      new Date(b.payment_date || "").getTime() - new Date(a.payment_date || "").getTime()
+  const displayPayments = [...payments].sort((a, b) =>
+    (b.payment_date || "").localeCompare(a.payment_date || "")
   );
 
-  const daPagareOggi = isInternal ? 0 : Math.max(0, costoTotaleMaturato - totalPagato);
-  if (isInternal) daPagareFuturo = 0;
+  const daPagareOggi = isInternal
+    ? 0
+    : decoratedBookings.reduce((sum, booking) => {
+        if (booking.isCancelled) return sum;
+        if (booking.booking_date && booking.booking_date <= todayStr) {
+          return sum + booking.residuo;
+        }
+        return sum;
+      }, 0);
+
+  const daPagareFuturo = isInternal
+    ? 0
+    : decoratedBookings.reduce((sum, booking) => {
+        if (booking.isCancelled) return sum;
+        if (booking.booking_date && booking.booking_date > todayStr) {
+          return sum + booking.residuo;
+        }
+        return sum;
+      }, 0);
 
   return (
     <main className="min-h-screen bg-zinc-50 p-6">
@@ -126,6 +155,7 @@ export default async function DettaglioPagamentiFornitorePage({
                   ← Torna a Pagamenti
                 </Link>
               </div>
+
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold text-zinc-900">{supplier.name}</h1>
                 {isInternal && (
@@ -134,6 +164,7 @@ export default async function DettaglioPagamentiFornitorePage({
                   </span>
                 )}
               </div>
+
               <p className="mt-1 text-zinc-600">Dettaglio prenotazioni e stato pagamenti</p>
             </div>
 
@@ -156,7 +187,7 @@ export default async function DettaglioPagamentiFornitorePage({
               ) : (
                 <Link
                   href={`/pagamenti/${supplierId}?pay=true`}
-                  className="group flex-1 cursor-pointer rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm transition hover:border-red-300 hover:bg-red-100 min-w-[160px]"
+                  className="group min-w-[160px] flex-1 cursor-pointer rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm transition hover:border-red-300 hover:bg-red-100"
                 >
                   <span className="block text-sm font-bold text-red-800">
                     Da Saldare (Scaduti/Oggi)
@@ -172,7 +203,7 @@ export default async function DettaglioPagamentiFornitorePage({
             </div>
           </div>
 
-          <SectionCard title="Elenco Movimenti (Riconciliazione Automatica)">
+          <SectionCard title="Elenco Movimenti (Allineato a Prenotazioni)">
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
@@ -185,25 +216,37 @@ export default async function DettaglioPagamentiFornitorePage({
                     <th className="py-3 pr-4 text-right">Azioni</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {displayBookings.map((booking) => {
-                    const isCancelled = booking.is_cancelled === true;
-                    const isFuture = booking.booking_date && booking.booking_date > todayStr;
-
-                    const isFullyPaid = booking.coperto === booking.costo;
-                    const isPartial = booking.coperto > 0 && booking.coperto < booking.costo;
+                    const badgeClass =
+                      booking.stato === "Annullato"
+                        ? "bg-zinc-200 text-zinc-500"
+                        : booking.stato === "Auto-Saldato"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : booking.stato === "Pagato"
+                        ? "bg-green-100 text-green-700"
+                        : booking.stato === "Parziale"
+                        ? "bg-blue-100 text-blue-700"
+                        : booking.stato === "Futuro"
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-red-100 text-red-700";
 
                     return (
                       <tr
                         key={booking.id}
                         className={`border-b border-zinc-100 transition hover:bg-zinc-50 ${
-                          isCancelled ? "bg-zinc-50/50 opacity-50" : ""
+                          booking.isCancelled ? "bg-zinc-50/50 opacity-50" : ""
                         }`}
                       >
                         <td className="whitespace-nowrap py-4 pr-4">
                           <span
                             className={`font-medium ${
-                              isFuture && !isFullyPaid && !isCancelled && !isInternal
+                              booking.isFuture &&
+                              booking.stato !== "Pagato" &&
+                              booking.stato !== "Parziale" &&
+                              !booking.isCancelled &&
+                              !isInternal
                                 ? "text-amber-600"
                                 : "text-zinc-900"
                             }`}
@@ -211,59 +254,43 @@ export default async function DettaglioPagamentiFornitorePage({
                             {formatDate(booking.booking_date)}
                           </span>
                         </td>
+
                         <td className="py-4 pr-4">
                           <div className="font-medium text-zinc-900">{booking.customer_name}</div>
                           <div className="font-mono text-xs text-zinc-500">
                             {booking.booking_reference || `#${booking.id}`}
                           </div>
                         </td>
+
                         <td className="py-4 pr-4 text-zinc-700">
                           {booking.experience_name}
-                          {isCancelled && (
+                          {booking.isCancelled && (
                             <span className="ml-2 inline-block text-[10px] font-bold uppercase text-red-600">
                               Cancellata
                             </span>
                           )}
                         </td>
+
                         <td className="py-4 pr-4">
                           <div className="font-bold text-zinc-900">
                             {formatEuro(booking.costo)}
                           </div>
-                          {isPartial && !isCancelled && !isInternal && (
+
+                          {booking.stato === "Parziale" && !booking.isCancelled && !isInternal && (
                             <div className="mt-0.5 text-[11px] font-medium text-blue-600">
-                              Coperti: {formatEuro(booking.coperto)}
+                              Coperti: {formatEuro(booking.pagato)}
                             </div>
                           )}
                         </td>
+
                         <td className="py-4 pr-4">
                           <span
-                            className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
-                              isCancelled
-                                ? "bg-zinc-200 text-zinc-500"
-                                : isInternal
-                                ? "bg-emerald-100 text-emerald-700"
-                                : isFullyPaid
-                                ? "bg-green-100 text-green-700"
-                                : isPartial
-                                ? "bg-blue-100 text-blue-700"
-                                : isFuture
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-red-100 text-red-700"
-                            }`}
+                            className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${badgeClass}`}
                           >
-                            {isCancelled
-                              ? "Annullato"
-                              : isInternal
-                              ? "Auto-Saldato"
-                              : isFullyPaid
-                              ? "Pagato"
-                              : isPartial
-                              ? "Parziale"
-                              : isFuture
-                              ? "Futuro"
-                              : "Da Saldare"}
+                            {booking.stato}
                           </span>
                         </td>
+
                         <td className="py-4 pr-4 text-right">
                           <Link
                             href={`/prenotazioni/${booking.id}/modifica?viewOnly=true&returnTo=/pagamenti/${supplierId}`}
@@ -275,6 +302,7 @@ export default async function DettaglioPagamentiFornitorePage({
                       </tr>
                     );
                   })}
+
                   {displayBookings.length === 0 && (
                     <tr>
                       <td colSpan={6} className="py-8 text-center text-zinc-500">
@@ -299,6 +327,7 @@ export default async function DettaglioPagamentiFornitorePage({
                       <th className="py-3 pr-4">Note</th>
                     </tr>
                   </thead>
+
                   <tbody>
                     {displayPayments.map((payment) => (
                       <tr
@@ -308,19 +337,23 @@ export default async function DettaglioPagamentiFornitorePage({
                         <td className="whitespace-nowrap py-4 pr-4 font-medium text-zinc-900">
                           {formatDate(payment.payment_date)}
                         </td>
+
                         <td className="py-4 pr-4 font-bold text-green-700">
-                          {formatEuro(Number(payment.amount))}
+                          {formatEuro(Number(payment.amount || 0))}
                         </td>
+
                         <td className="py-4 pr-4">
                           <span className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-bold uppercase text-zinc-700">
                             {payment.payment_method}
                           </span>
                         </td>
+
                         <td className="py-4 pr-4 text-xs text-zinc-600">
                           {payment.notes || "-"}
                         </td>
                       </tr>
                     ))}
+
                     {displayPayments.length === 0 && (
                       <tr>
                         <td colSpan={4} className="py-8 text-center text-zinc-500">
@@ -340,6 +373,7 @@ export default async function DettaglioPagamentiFornitorePage({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
             <h2 className="mb-4 text-xl font-bold text-zinc-900">Registra Pagamento</h2>
+
             <form action={addSupplierPayment} className="space-y-4">
               <input type="hidden" name="supplier_id" value={supplierId} />
 
@@ -404,6 +438,7 @@ export default async function DettaglioPagamentiFornitorePage({
                 >
                   Annulla
                 </Link>
+
                 <button
                   type="submit"
                   className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-zinc-700"
