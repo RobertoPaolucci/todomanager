@@ -9,6 +9,13 @@ function normalizeText(value: FormDataEntryValue | null) {
   return text === "" ? null : text;
 }
 
+function revalidateSupplierPages() {
+  revalidatePath("/fornitori");
+  revalidatePath("/fornitori/nuovo");
+  revalidatePath("/esperienze");
+  revalidatePath("/esperienze/nuova");
+}
+
 export async function createSupplier(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const contact_person = normalizeText(formData.get("contact_person"));
@@ -36,7 +43,7 @@ export async function createSupplier(formData: FormData) {
     throw new Error(`Errore creazione fornitore: ${error.message}`);
   }
 
-  revalidatePath("/fornitori");
+  revalidateSupplierPages();
   redirect("/fornitori");
 }
 
@@ -76,7 +83,7 @@ export async function updateSupplier(formData: FormData) {
     throw new Error(`Errore aggiornamento fornitore: ${error.message}`);
   }
 
-  revalidatePath("/fornitori");
+  revalidateSupplierPages();
   revalidatePath(`/fornitori/${id}/modifica`);
   redirect("/fornitori");
 }
@@ -88,14 +95,11 @@ export async function deleteSupplier(formData: FormData) {
     throw new Error("ID fornitore non valido");
   }
 
-  const { error } = await supabase
-    .from("suppliers")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("suppliers").delete().eq("id", id);
 
   if (error) {
     throw new Error(`Errore eliminazione fornitore: ${error.message}`);
   }
 
-  revalidatePath("/fornitori");
+  revalidateSupplierPages();
 }

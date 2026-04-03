@@ -4,6 +4,8 @@ import SectionCard from "@/components/SectionCard";
 import { createExperience } from "../actions";
 import { getSuppliers } from "@/lib/queries";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuovaEsperienzaPage() {
   const suppliers = await getSuppliers();
 
@@ -41,14 +43,15 @@ export default async function NuovaEsperienzaPage() {
               />
             </div>
 
-            {/* NUOVO CAMPO: BOKUN ID */}
             <div>
               <label
                 htmlFor="bokun_id"
                 className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-700"
               >
                 Bokun ID
-                <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">Opzionale</span>
+                <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-orange-700">
+                  Opzionale
+                </span>
               </label>
               <input
                 id="bokun_id"
@@ -69,7 +72,7 @@ export default async function NuovaEsperienzaPage() {
               <select
                 id="supplier_id"
                 name="supplier_id"
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
                 defaultValue=""
               >
                 <option value="">Seleziona fornitore</option>
@@ -79,6 +82,9 @@ export default async function NuovaEsperienzaPage() {
                   </option>
                 ))}
               </select>
+              <p className="mt-2 text-xs text-zinc-500">
+                In elenco compaiono solo i fornitori attivi.
+              </p>
             </div>
 
             <div>
@@ -99,9 +105,9 @@ export default async function NuovaEsperienzaPage() {
                 placeholder="0.00"
               />
             </div>
-            
+
             <div className="flex items-center pt-8">
-              <div className="flex items-center gap-3 bg-zinc-50 px-4 py-3 rounded-xl border border-zinc-200 w-full">
+              <div className="flex w-full items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                 <input
                   id="is_group_pricing"
                   name="is_group_pricing"
@@ -109,8 +115,14 @@ export default async function NuovaEsperienzaPage() {
                   defaultChecked={false}
                   className="h-5 w-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
                 />
-                <label htmlFor="is_group_pricing" className="text-sm font-medium text-zinc-800">
-                  Costo a gruppo <span className="text-zinc-500 font-normal">(non moltiplicare per pax)</span>
+                <label
+                  htmlFor="is_group_pricing"
+                  className="text-sm font-medium text-zinc-800"
+                >
+                  Costo a gruppo{" "}
+                  <span className="font-normal text-zinc-500">
+                    (non moltiplicare per pax)
+                  </span>
                 </label>
               </div>
             </div>
@@ -148,7 +160,7 @@ export default async function NuovaEsperienzaPage() {
           <div className="flex justify-end border-t border-zinc-100 pt-6">
             <button
               type="submit"
-              className="rounded-xl bg-zinc-900 px-8 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 shadow-sm"
+              className="rounded-xl bg-zinc-900 px-8 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-700"
             >
               Salva esperienza
             </button>
