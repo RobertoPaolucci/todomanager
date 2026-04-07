@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
-import ClearSummarySelectionButton from "@/components/ClearSummarySelectionButton";
+import MobileBookingCard from "@/components/MobileBookingCard";
 import { supabase } from "@/lib/supabase";
 import { cancelBooking, clearAlert } from "./actions";
 
@@ -96,7 +96,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
         (b.customer_name || "").toLowerCase().includes(term) ||
         (b.booking_reference || "").toLowerCase().includes(term) ||
         (b.experience_name || "").toLowerCase().includes(term) ||
-        (bookingChannelName || "").toLowerCase().includes(term);
+        (bookingChannelName || "").toLowerCase().includes(term) ||
+        (b.customer_phone || "").toLowerCase().includes(term);
 
       if (!match) return false;
     }
@@ -183,7 +184,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
       <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm lg:hidden">
-            <p className="text-sm text-zinc-500">
+            <p className="text-base text-zinc-500">
               Totale visibile:{" "}
               <span className="font-bold text-zinc-900">{allBookings.length}</span>
             </p>
@@ -192,14 +193,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex lg:gap-3">
             <Link
               href="/prenotazioni/import"
-              className="flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 border-zinc-200 bg-white px-4 py-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-zinc-200 bg-white px-4 py-2.5 text-base font-bold text-zinc-700 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 sm:text-sm"
             >
               ⚙️ Strumenti Dati
             </Link>
 
             <Link
               href="/prenotazioni/nuova"
-              className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-zinc-700"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-2.5 text-base font-bold text-white shadow-sm transition hover:bg-zinc-700 sm:text-sm"
             >
               + Nuova Prenotazione
             </Link>
@@ -238,13 +239,13 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     type="text"
                     name="q"
                     defaultValue={q}
-                    placeholder="Cerca cliente, riferimento, esperienza, canale..."
-                    className="w-full border-none px-3 py-3 text-[16px] outline-none sm:text-sm"
+                    placeholder="Cerca cliente, riferimento, esperienza, telefono..."
+                    className="w-full border-none px-3 py-3 text-[17px] outline-none sm:text-sm"
                   />
 
                   <button
                     type="submit"
-                    className="border-l border-zinc-200 bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-200"
+                    className="border-l border-zinc-200 bg-zinc-100 px-4 py-3 text-base font-medium text-zinc-700 hover:bg-zinc-200 sm:text-sm"
                   >
                     Cerca
                   </button>
@@ -257,7 +258,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       from: null,
                       to: null,
                     })}
-                    className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                    className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-base font-medium transition sm:text-sm ${
                       showPast
                         ? "border-blue-200 bg-blue-50 text-blue-700"
                         : "border-zinc-300 bg-white text-zinc-700"
@@ -269,7 +270,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   {(fromDate || toDate || q || showPast) && (
                     <Link
                       href="/prenotazioni"
-                      className="inline-flex min-h-11 items-center rounded-xl px-2 text-sm font-medium text-zinc-500 hover:text-zinc-800 hover:underline"
+                      className="inline-flex min-h-11 items-center rounded-xl px-2 text-base font-medium text-zinc-500 hover:text-zinc-800 hover:underline sm:text-sm"
                     >
                       Reset filtri
                     </Link>
@@ -287,7 +288,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   {showPast && <input type="hidden" name="past" value="true" />}
 
                   <div>
-                    <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-400">
+                    <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
                       Dal
                     </label>
                     <input
@@ -299,7 +300,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[10px] font-bold uppercase text-zinc-400">
+                    <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
                       Al
                     </label>
                     <input
@@ -312,7 +313,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
                   <button
                     type="submit"
-                    className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-700"
+                    className="rounded-lg bg-zinc-900 px-4 py-2.5 text-base font-bold text-white transition hover:bg-zinc-700 sm:text-sm"
                   >
                     Applica Date
                   </button>
@@ -325,7 +326,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       to: todayStr,
                       past: null,
                     })}
-                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
+                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[12px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
                     Oggi
                   </Link>
@@ -336,7 +337,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       to: tomorrowStr,
                       past: null,
                     })}
-                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
+                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[12px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
                     Domani
                   </Link>
@@ -347,7 +348,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       to: lastDayMonth,
                       past: null,
                     })}
-                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[11px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
+                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[12px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
                     Questo Mese
                   </Link>
@@ -358,7 +359,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       to: "2026-12-31",
                       past: null,
                     })}
-                    className="shrink-0 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-[11px] font-bold text-zinc-800 shadow-sm hover:bg-zinc-200"
+                    className="shrink-0 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-[12px] font-bold text-zinc-800 shadow-sm hover:bg-zinc-200"
                   >
                     Tutto 2026
                   </Link>
@@ -370,348 +371,19 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
         <SectionCard title={`Elenco Prenotazioni (${allBookings.length})`}>
           <>
-            <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="text-sm font-black text-blue-900">
-                    Riepilogo prenotazioni selezionate
-                  </div>
-                  <div className="mt-1 text-sm text-blue-800">
-                    Metti la spunta a sinistra sulle prenotazioni e apri il riepilogo
-                    stampabile in una nuova scheda.
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <ClearSummarySelectionButton formId="summaryForm" />
-
-                  <form
-                    id="summaryForm"
-                    action="/prenotazioni/riepilogo"
-                    method="GET"
-                    className="shrink-0"
-                  >
-                    <button
-                      type="submit"
-                      formTarget="_blank"
-                      className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800"
-                    >
-                      Apri riepilogo
-                    </button>
-                  </form>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4 md:hidden">
-              {allBookings.map((booking) => {
-                const isCancelled = booking.is_cancelled === true;
-                const isHighlighted = String(booking.id) === highlightId;
-                const isModifiedPermanent = booking.was_modified === true;
-                const bookingChannelName = getChannelName(booking);
-
-                const customerStatus = booking.customer_payment_status;
-                let customerBadgeClass = "bg-red-100 text-red-700";
-                let customerBadgeText = "Da Incassare";
-                if (customerStatus === "paid") {
-                  customerBadgeClass = "bg-green-100 text-green-700";
-                  customerBadgeText = "Incassato";
-                } else if (customerStatus === "partial") {
-                  customerBadgeClass = "bg-blue-100 text-blue-700";
-                  customerBadgeText = "Acconto";
-                }
-
-                const costoFornitore = Number(booking.total_supplier_cost || 0);
-                const pagatoFornitore = Number(booking.supplier_amount_paid || 0);
-                const isSupplierPaid =
-                  booking.supplier_payment_status === "paid" ||
-                  (pagatoFornitore > 0 && pagatoFornitore >= costoFornitore);
-                const isSupplierPartial =
-                  pagatoFornitore > 0 &&
-                  pagatoFornitore < costoFornitore &&
-                  booking.supplier_payment_status !== "paid";
-
-                let supplierBadgeClass = "bg-red-100 text-red-700";
-                let supplierBadgeText = "Da Saldare";
-                if (isSupplierPaid) {
-                  supplierBadgeClass = "bg-green-100 text-green-700";
-                  supplierBadgeText = "Pagato";
-                } else if (isSupplierPartial) {
-                  supplierBadgeClass = "bg-blue-100 text-blue-700";
-                  supplierBadgeText = "Parziale";
-                }
-
-                const wPax =
-                  Number(booking.adults || 0) + Number(booking.children || 0);
-                const wDate = formatDate(booking.booking_date);
-                const wTime = booking.booking_time
-                  ? booking.booking_time.slice(0, 5)
-                  : "Orario da def.";
-                const wChannel = bookingChannelName || "N/A";
-                const wRef = booking.booking_reference || "N/A";
-                const wName = booking.customer_name || "N/A";
-                const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
-
-                const rawSupplier = booking.suppliers;
-                let rawPhone = "";
-                if (Array.isArray(rawSupplier)) {
-                  rawPhone = rawSupplier[0]?.phone || "";
-                } else if (rawSupplier) {
-                  rawPhone = rawSupplier.phone || "";
-                }
-                const cleanPhone = rawPhone.replace(/\D/g, "");
-                const waUrl = cleanPhone
-                  ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(
-                      waText
-                    )}`
-                  : `https://api.whatsapp.com/send?text=${encodeURIComponent(
-                      waText
-                    )}`;
-
-                let dateColorClass = "text-zinc-900";
-                let isToday = false;
-                let isTomorrow = false;
-                if (isCancelled) {
-                  dateColorClass = "text-zinc-500 line-through";
-                } else if (booking.booking_date === todayStr) {
-                  dateColorClass = "text-green-600";
-                  isToday = true;
-                } else if (booking.booking_date === tomorrowStr) {
-                  dateColorClass = "text-orange-500";
-                  isTomorrow = true;
-                }
-
-                const hasAlert =
-                  booking.notes &&
-                  (booking.notes.includes("🔴") ||
-                    booking.notes.includes("🟡") ||
-                    booking.notes.includes("🟢"));
-
-                return (
-                  <div
-                    key={booking.id}
-                    className={`overflow-hidden rounded-2xl border shadow-sm transition ${
-                      isHighlighted
-                        ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
-                        : isCancelled
-                        ? "border-zinc-200 bg-zinc-50/70"
-                        : "border-zinc-200 bg-white"
-                    }`}
-                  >
-                    <div className="space-y-4 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <div className="pt-0.5">
-                            <input
-                              type="checkbox"
-                              name="ids"
-                              value={booking.id}
-                              form="summaryForm"
-                              className="h-5 w-5 rounded border-zinc-300"
-                              aria-label={`Seleziona prenotazione ${booking.id}`}
-                            />
-                          </div>
-
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className={`text-sm font-black ${dateColorClass}`}>
-                                {formatDate(booking.booking_date)}
-                              </div>
-
-                              {isToday && (
-                                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-700">
-                                  Oggi
-                                </span>
-                              )}
-
-                              {isTomorrow && (
-                                <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">
-                                  Domani
-                                </span>
-                              )}
-
-                              {booking.booking_time && (
-                                <span
-                                  className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
-                                    isCancelled
-                                      ? "bg-zinc-200 text-zinc-400"
-                                      : "bg-blue-50 text-blue-700"
-                                  }`}
-                                >
-                                  {booking.booking_time.slice(0, 5)}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="mt-1 text-[11px] text-zinc-400">
-                              Inserita: {formatDate(booking.booking_created_at)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="text-right text-base font-black text-zinc-900">
-                            {formatEuro(Number(booking.total_customer || 0))}
-                          </div>
-
-                          {isModifiedPermanent && !isCancelled && (
-                            <span className="inline-flex rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
-                              Modificata
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div
-                          className={`text-base font-bold ${
-                            isCancelled
-                              ? "text-zinc-500 line-through"
-                              : "text-zinc-900"
-                          }`}
-                        >
-                          {booking.customer_name || "-"}
-                        </div>
-
-                        <div className="text-xs font-mono text-zinc-500">
-                          {booking.booking_reference || "-"}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-lg border border-zinc-200 bg-zinc-100 px-2 py-1 text-[11px] font-bold text-zinc-700">
-                          {bookingChannelName || "-"}
-                        </span>
-
-                        <span className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">
-                          {wPax} Pax
-                        </span>
-                      </div>
-
-                      <div className="rounded-xl bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-                        {booking.experience_name || "-"}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3">
-                          <div className="text-[10px] font-bold uppercase text-zinc-400">
-                            Pag. Agenzia
-                          </div>
-                          <div
-                            className={`mt-2 inline-flex rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
-                              isCancelled
-                                ? "bg-zinc-200 text-zinc-400"
-                                : customerBadgeClass
-                            }`}
-                          >
-                            {isCancelled ? "-" : customerBadgeText}
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3">
-                          <div className="text-[10px] font-bold uppercase text-zinc-400">
-                            Pag. Fornitore
-                          </div>
-                          <div
-                            className={`mt-2 inline-flex rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
-                              isCancelled
-                                ? "bg-zinc-200 text-zinc-400"
-                                : supplierBadgeClass
-                            }`}
-                          >
-                            {isCancelled ? "-" : supplierBadgeText}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="mb-2 text-[10px] font-bold uppercase text-zinc-400">
-                          Note / Alert
-                        </div>
-
-                        {hasAlert ? (
-                          <form action={clearAlert}>
-                            <input type="hidden" name="id" value={booking.id} />
-                            <button
-                              type="submit"
-                              title="Clicca per confermare la presa visione"
-                              className={`w-full rounded-xl p-3 text-left text-[12px] font-bold leading-tight transition ${
-                                booking.notes.includes("🔴")
-                                  ? "bg-red-50 text-red-700 hover:bg-red-100"
-                                  : booking.notes.includes("🟡")
-                                  ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
-                                  : "bg-green-50 text-green-700 hover:bg-green-100"
-                              }`}
-                            >
-                              <div>{booking.notes}</div>
-                              <div className="mt-2 text-[10px] font-medium underline opacity-80">
-                                Segna come letto
-                              </div>
-                            </button>
-                          </form>
-                        ) : (
-                          <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3 text-sm text-zinc-500">
-                            {booking.notes || "-"}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="border-t border-zinc-100 pt-3">
-                        {!isCancelled && !cleanPhone && (
-                          <div className="mb-3 text-[11px] font-bold text-red-500">
-                            Manca numero fornitore
-                          </div>
-                        )}
-
-                        {!isCancelled && cleanPhone && (
-                          <div className="mb-3 text-[11px] text-zinc-500">
-                            Tel fornitore: <span className="font-semibold">+{cleanPhone}</span>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <Link
-                            href={`/prenotazioni/${booking.id}/modifica`}
-                            className="flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-3 text-sm font-bold text-zinc-700 shadow-sm hover:bg-zinc-100"
-                          >
-                            Modifica
-                          </Link>
-
-                          {!isCancelled && (
-                            <a
-                              href={waUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`flex min-h-11 items-center justify-center rounded-xl border px-3 py-3 text-sm font-bold shadow-sm transition ${
-                                cleanPhone
-                                  ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
-                                  : "border-zinc-200 bg-zinc-50 text-zinc-400 hover:bg-zinc-100"
-                              }`}
-                            >
-                              WhatsApp
-                            </a>
-                          )}
-
-                          {!isCancelled && (
-                            <form action={cancelBooking} className="w-full">
-                              <input type="hidden" name="id" value={booking.id} />
-                              <button
-                                type="submit"
-                                className="flex min-h-11 w-full items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm font-bold text-red-700 shadow-sm hover:bg-red-100"
-                              >
-                                Cancella
-                              </button>
-                            </form>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="space-y-3 md:hidden">
+              {allBookings.map((booking) => (
+                <MobileBookingCard
+                  key={booking.id}
+                  booking={booking}
+                  highlightId={highlightId}
+                  todayStr={todayStr}
+                  tomorrowStr={tomorrowStr}
+                />
+              ))}
 
               {allBookings.length === 0 && (
-                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center text-sm text-zinc-500">
+                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center text-base text-zinc-500 sm:text-sm">
                   Nessuna prenotazione trovata con i filtri attuali.
                 </div>
               )}
@@ -721,8 +393,6 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               <table className="min-w-full text-left text-sm">
                 <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
                   <tr>
-                    <th className="w-12 py-3 pr-3 text-center">✓</th>
-
                     <th className="cursor-pointer py-3 pr-4 transition hover:text-zinc-900">
                       <Link
                         href={buildSortUrl("booking_date")}
@@ -850,17 +520,6 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             : "hover:bg-zinc-50"
                         }`}
                       >
-                        <td className="py-4 pr-3 text-center align-top">
-                          <input
-                            type="checkbox"
-                            name="ids"
-                            value={booking.id}
-                            form="summaryForm"
-                            className="mt-1 h-4 w-4 rounded border-zinc-300"
-                            aria-label={`Seleziona prenotazione ${booking.id}`}
-                          />
-                        </td>
-
                         <td className="whitespace-nowrap py-4 pr-4">
                           <div className="flex items-center gap-2">
                             <div className={`font-bold ${dateColorClass}`}>
@@ -991,21 +650,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         </td>
 
                         <td className="py-4 pr-4 text-right">
-                          {!isCancelled && !cleanPhone && (
-                            <div className="mb-1.5 pr-1 text-[9px] font-bold text-red-500">
-                              Manca numero!
-                            </div>
-                          )}
-
-                          {!isCancelled && cleanPhone && (
-                            <div className="mb-1.5 pr-1 text-[9px] font-medium text-zinc-400">
-                              Tel: +{cleanPhone}
-                            </div>
-                          )}
-
                           <div className="flex items-center justify-end gap-2">
                             <Link
-                              href={`/prenotazioni/${booking.id}/modifica`}
+                              href={`/prenotazioni/${booking.id}/modifica?returnTo=/prenotazioni`}
                               className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[11px] font-medium text-zinc-700 shadow-sm hover:bg-zinc-100"
                             >
                               Modifica
@@ -1046,7 +693,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   {allBookings.length === 0 && (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={8}
                         className="py-8 text-center text-sm text-zinc-500"
                       >
                         Nessuna prenotazione trovata con i filtri attuali.

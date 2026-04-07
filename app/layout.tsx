@@ -24,9 +24,11 @@ export const metadata: Metadata = {
     icon: "/icon.png",
     apple: "/apple-touch-icon.png",
   },
+  other: {
+    "format-detection": "telephone=no, date=no, email=no, address=no",
+  },
 };
 
-// Viewport pulito: niente blocchi, massima libertà di scorrimento
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -39,6 +41,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="it">
+      <head>
+        <meta
+          name="format-detection"
+          content="telephone=no, date=no, email=no, address=no"
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
