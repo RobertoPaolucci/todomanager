@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import PrintPdfButton from "@/components/PrintPdfButton";
 import SendSummaryWhatsAppButton from "@/components/SendSummaryWhatsAppButton";
 
@@ -100,14 +100,14 @@ export default async function PrenotazioniRiepilogoPage({
     );
   }
 
-  const { data: bookings, error } = await supabase
+  const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select(
       "id, booking_date, booking_time, booking_created_at, customer_name, booking_reference, booking_source, experience_name, total_people, adults, children, infants, channels(name)"
     )
     .in("id", selectedIds);
 
-  const { data: suppliers } = await supabase
+  const { data: suppliers } = await supabaseServer
     .from("suppliers")
     .select("id, name, phone, active")
     .order("name", { ascending: true });

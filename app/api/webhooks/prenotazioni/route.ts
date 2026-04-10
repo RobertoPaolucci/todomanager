@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function stripSystemAlert(notes: string) {
   return notes
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const bookingReference = String(body.booking_reference || "").trim();
     const channelId = Number(body.channel_id || 1);
 
-    const { data: experience, error: experienceError } = await supabase
+    const { data: experience, error: experienceError } = await supabaseServer
       .from("experiences")
       .select("id, name, supplier_id, is_group_pricing, supplier_unit_cost")
       .eq("bokun_id", rawBokunId)
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
       booking_source: bookingSource,
     };
 
-    const { data: existing, error: existingError } = await supabase
+    const { data: existing, error: existingError } = await supabaseServer
       .from("bookings")
       .select("id, notes, was_modified")
       .eq("booking_reference", bookingReference)
@@ -116,7 +116,7 @@ export async function POST(req: Request) {
         ? Boolean(existing.was_modified)
         : true;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabaseServer
         .from("bookings")
         .update({
           ...bookingData,
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
         throw new Error(updateError.message);
       }
     } else {
-      const { error: insertError } = await supabase
+      const { error: insertError } = await supabaseServer
         .from("bookings")
         .insert({
           ...bookingData,

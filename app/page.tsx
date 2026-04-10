@@ -5,7 +5,7 @@ import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import NotificationCenter from "@/components/NotificationCenter";
 import { getDashboardStats } from "@/lib/dashboard";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -62,7 +62,7 @@ export default async function Home({ searchParams }: PageProps) {
   const { bookingsByChannel } = await getDashboardStats();
   const maxChannelCount = Math.max(...bookingsByChannel.map((c) => c.count), 1);
 
-  const { data: bookings, error } = await supabase
+  const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select("*")
     .order("booking_date", { ascending: true });

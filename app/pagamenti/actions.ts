@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function getCurrentPaidAmount(booking: any) {
   const costo = Number(booking.total_supplier_cost || 0);
@@ -29,19 +29,21 @@ export async function addSupplierPayment(formData: FormData) {
     throw new Error("L'importo del pagamento deve essere maggiore di zero");
   }
 
-  const { error: insertPaymentError } = await supabase.from("supplier_payments").insert({
-    supplier_id,
-    amount,
-    payment_date,
-    payment_method,
-    notes: notes || null,
-  });
+  const { error: insertPaymentError } = await supabaseServer
+    .from("supplier_payments")
+    .insert({
+      supplier_id,
+      amount,
+      payment_date,
+      payment_method,
+      notes: notes || null,
+    });
 
   if (insertPaymentError) {
     throw new Error(`Errore registrazione pagamento: ${insertPaymentError.message}`);
   }
 
-  const { data: bookings, error: bookingsError } = await supabase
+  const { data: bookings, error: bookingsError } = await supabaseServer
     .from("bookings")
     .select(
       "id, booking_date, total_supplier_cost, supplier_amount_paid, supplier_payment_status, is_cancelled"
@@ -76,7 +78,7 @@ export async function addSupplierPayment(formData: FormData) {
       newStatus = "partial";
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseServer
       .from("bookings")
       .update({
         supplier_amount_paid: newPaidAmount,

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function parseMoney(value: FormDataEntryValue | null) {
   if (typeof value !== "string") return 0;
@@ -18,7 +18,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
     throw new Error("ID esperienza non valido");
   }
 
-  const { data: channels, error: channelsError } = await supabase
+  const { data: channels, error: channelsError } = await supabaseServer
     .from("channels")
     .select("id")
     .order("id", { ascending: true });
@@ -28,10 +28,10 @@ export async function saveExperienceChannelPrices(formData: FormData) {
   }
 
   const rows = (channels ?? []).map((channel) => {
-    // your_unit_price riceve i dati dall'input "Prezzo agenzia" del form
     const your_unit_price = parseMoney(formData.get(`your_unit_price_${channel.id}`));
     const public_unit_price = parseMoney(formData.get(`public_unit_price_${channel.id}`));
-    const currency = String(formData.get(`currency_${channel.id}`) || "EUR").trim() || "EUR";
+    const currency =
+      String(formData.get(`currency_${channel.id}`) || "EUR").trim() || "EUR";
     const notes = String(formData.get(`notes_${channel.id}`) || "").trim();
 
     return {
@@ -44,8 +44,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
     };
   });
 
-  // Pulizia vecchi prezzi e inserimento nuovi (Upsert logico)
-  const { error: deleteError } = await supabase
+  const { error: deleteError } = await supabaseServer
     .from("experience_channel_prices")
     .delete()
     .eq("experience_id", experienceId);
@@ -54,7 +53,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
     throw new Error(`Errore pulizia prezzi canale: ${deleteError.message}`);
   }
 
-  const { error: insertError } = await supabase
+  const { error: insertError } = await supabaseServer
     .from("experience_channel_prices")
     .insert(rows);
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import BookingForm from "@/components/BookingForm";
 import { getChannels, getExperiences } from "@/lib/queries";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 type PageProps = {
   params: Promise<{
@@ -76,7 +76,7 @@ export default async function ModificaPrenotazionePage({
     );
   }
 
-  const { data: booking, error } = await supabase
+  const { data: booking, error } = await supabaseServer
     .from("bookings")
     .select("*, suppliers(phone), channels(name)")
     .eq("id", bookingId)
@@ -248,13 +248,13 @@ export default async function ModificaPrenotazionePage({
         )}
 
         <BookingForm
-  channels={channels}
-  experiences={experiences}
-  today={today}
-  initialData={booking}
-  isEditing={true}
-  returnTo={returnTo}
-/>
+          channels={channels}
+          experiences={experiences}
+          today={today}
+          initialData={booking}
+          isEditing={true}
+          returnTo={returnTo}
+        />
       </div>
     </AppShell>
   );

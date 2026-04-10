@@ -4,7 +4,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import MobileBookingCard from "@/components/MobileBookingCard";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import { cancelBooking, clearAlert } from "./actions";
 
 function formatEuro(value: number) {
@@ -67,7 +67,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     .toISOString()
     .split("T")[0];
 
-  const { data: bookings, error } = await supabase
+  const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select("*, suppliers(phone), channels(name)");
 

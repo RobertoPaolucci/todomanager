@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function normalizeText(value: FormDataEntryValue | null) {
   const text = String(value || "").trim();
@@ -29,7 +29,7 @@ export async function createSupplier(formData: FormData) {
     throw new Error("Il nome fornitore è obbligatorio");
   }
 
-  const { error } = await supabase.from("suppliers").insert({
+  const { error } = await supabaseServer.from("suppliers").insert({
     name,
     contact_person,
     email,
@@ -65,7 +65,7 @@ export async function updateSupplier(formData: FormData) {
     throw new Error("Il nome fornitore è obbligatorio");
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("suppliers")
     .update({
       name,
@@ -95,7 +95,10 @@ export async function deleteSupplier(formData: FormData) {
     throw new Error("ID fornitore non valido");
   }
 
-  const { error } = await supabase.from("suppliers").delete().eq("id", id);
+  const { error } = await supabaseServer
+    .from("suppliers")
+    .delete()
+    .eq("id", id);
 
   if (error) {
     throw new Error(`Errore eliminazione fornitore: ${error.message}`);

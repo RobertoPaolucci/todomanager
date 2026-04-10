@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 export async function createChannel(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
@@ -11,7 +11,7 @@ export async function createChannel(formData: FormData) {
 
   if (!name) throw new Error("Il nome del canale è obbligatorio");
 
-  const { error } = await supabase.from("channels").insert({
+  const { error } = await supabaseServer.from("channels").insert({
     name,
     type,
     notes,
@@ -31,7 +31,7 @@ export async function updateChannel(formData: FormData) {
 
   if (!id || !name) throw new Error("Dati mancanti");
 
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("channels")
     .update({ name, type, notes })
     .eq("id", id);
@@ -45,7 +45,10 @@ export async function updateChannel(formData: FormData) {
 export async function deleteChannel(formData: FormData) {
   const id = Number(formData.get("id"));
 
-  const { error } = await supabase.from("channels").delete().eq("id", id);
+  const { error } = await supabaseServer
+    .from("channels")
+    .delete()
+    .eq("id", id);
 
   if (error) throw new Error(`Errore eliminazione: ${error.message}`);
 

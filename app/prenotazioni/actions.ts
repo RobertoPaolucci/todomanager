@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function parseNumber(value: FormDataEntryValue | null, fallback = 0) {
   const raw = String(value ?? "").replace(",", ".").trim();
@@ -53,7 +53,7 @@ async function insertSupplierPaymentMovement(params: {
     return;
   }
 
-  const { error } = await supabase.from("supplier_payments").insert({
+  const { error } = await supabaseServer.from("supplier_payments").insert({
     supplier_id: params.supplier_id,
     amount: roundedAmount,
     payment_date: params.payment_date,
@@ -172,7 +172,7 @@ export async function createBooking(formData: FormData) {
     return { error: "Compila tutti i campi obbligatori." };
   }
 
-  const { data: experience, error: experienceError } = await supabase
+  const { data: experience, error: experienceError } = await supabaseServer
     .from("experiences")
     .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
     .eq("id", experience_id)
@@ -184,13 +184,13 @@ export async function createBooking(formData: FormData) {
 
   const isGroupPricing = experience.is_group_pricing === true;
 
-  const { data: channel } = await supabase
+  const { data: channel } = await supabaseServer
     .from("channels")
     .select("id, name")
     .eq("id", channel_id)
     .single();
 
-  const { data: priceRowData } = await supabase
+  const { data: priceRowData } = await supabaseServer
     .from("experience_channel_prices")
     .select("your_unit_price, public_unit_price")
     .eq("experience_id", experience_id)
@@ -208,7 +208,7 @@ export async function createBooking(formData: FormData) {
     public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
 
     if (your_unit_price > 0) {
-      await supabase.from("experience_channel_prices").insert({
+      await supabaseServer.from("experience_channel_prices").insert({
         experience_id,
         channel_id,
         your_unit_price,
@@ -230,7 +230,7 @@ export async function createBooking(formData: FormData) {
     : supplier_unit_cost * pricing_pax;
   const margin_total = total_to_you - total_supplier_cost;
 
-  const { data: insertedBooking, error } = await supabase
+  const { data: insertedBooking, error } = await supabaseServer
     .from("bookings")
     .insert({
       channel_id,
@@ -359,7 +359,7 @@ export async function updateBooking(formData: FormData) {
 
   if (!id) return { error: "ID prenotazione non valido." };
 
-  const { data: currentBooking, error: currentBookingError } = await supabase
+  const { data: currentBooking, error: currentBookingError } = await supabaseServer
     .from("bookings")
     .select(
       "id, supplier_id, booking_reference, customer_name, total_supplier_cost, supplier_payment_status, supplier_amount_paid, is_cancelled"
@@ -371,7 +371,7 @@ export async function updateBooking(formData: FormData) {
     return { error: "Prenotazione non trovata." };
   }
 
-  const { data: experience } = await supabase
+  const { data: experience } = await supabaseServer
     .from("experiences")
     .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
     .eq("id", experience_id)
@@ -379,13 +379,13 @@ export async function updateBooking(formData: FormData) {
 
   const isGroupPricing = experience?.is_group_pricing === true;
 
-  const { data: channel } = await supabase
+  const { data: channel } = await supabaseServer
     .from("channels")
     .select("id, name")
     .eq("id", channel_id)
     .single();
 
-  const { data: priceRow } = await supabase
+  const { data: priceRow } = await supabaseServer
     .from("experience_channel_prices")
     .select("your_unit_price, public_unit_price")
     .eq("experience_id", experience_id)
@@ -422,7 +422,7 @@ export async function updateBooking(formData: FormData) {
   const oldSupplierId = Number(currentBooking.supplier_id || 0);
   const newSupplierId = Number(experience?.supplier_id || 0);
 
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("bookings")
     .update({
       channel_id,
@@ -499,7 +499,8 @@ export async function updateBooking(formData: FormData) {
 
 export async function cancelBooking(formData: FormData) {
   const id = Number(formData.get("id") || 0);
-  const { error } = await supabase
+
+  const { error } = await supabaseServer
     .from("bookings")
     .update({
       is_cancelled: true,
@@ -515,7 +516,7 @@ export async function clearAlert(formData: FormData) {
   const id = Number(formData.get("id") || 0);
   if (!id) return;
 
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("bookings")
     .update({ notes: null })
     .eq("id", id);

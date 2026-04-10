@@ -1,7 +1,7 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 export async function getChannels() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("channels")
     .select("id, name, type")
     .order("name", { ascending: true });
@@ -14,7 +14,7 @@ export async function getChannels() {
 }
 
 export async function getExperiences() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("experiences")
     .select(`
       id,
@@ -47,7 +47,7 @@ export async function getExperiences() {
 }
 
 export async function getSuppliers() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("suppliers")
     .select("id, name, active")
     .eq("active", true)
@@ -61,7 +61,7 @@ export async function getSuppliers() {
 }
 
 export async function getAllSuppliers() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("suppliers")
     .select(`
       id,
@@ -83,7 +83,7 @@ export async function getAllSuppliers() {
 }
 
 export async function getSupplierById(id: number) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("suppliers")
     .select(`
       id,
@@ -106,7 +106,7 @@ export async function getSupplierById(id: number) {
 }
 
 export async function getExperienceById(id: number) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseServer
     .from("experiences")
     .select(`
       id,

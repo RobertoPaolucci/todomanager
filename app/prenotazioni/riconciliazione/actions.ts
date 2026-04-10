@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 type ReconcilePaymentsResult = {
   parsed: number;
@@ -34,7 +34,7 @@ export async function reconcilePayments(
     throw new Error("Nessun codice di riferimento trovato nel file.");
   }
 
-  const { data: bookings, error } = await supabase
+  const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select("id, booking_reference, customer_payment_status")
     .in("booking_reference", cleanedReferences);
@@ -60,7 +60,7 @@ export async function reconcilePayments(
   let updatedCount = 0;
 
   for (const booking of toUpdate) {
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseServer
       .from("bookings")
       .update({ customer_payment_status: "paid" })
       .eq("id", booking.id);

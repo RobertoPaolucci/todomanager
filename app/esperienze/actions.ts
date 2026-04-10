@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 function parseNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string" || value.trim() === "") return 0;
@@ -18,8 +18,7 @@ function parseNullableNumber(value: FormDataEntryValue | null) {
 
 export async function createExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
-  // Aggiunto recupero bokun_id
-  const bokun_id = String(formData.get("bokun_id") || "").trim() || null; 
+  const bokun_id = String(formData.get("bokun_id") || "").trim() || null;
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
   const notes = String(formData.get("notes") || "").trim();
@@ -30,9 +29,9 @@ export async function createExperience(formData: FormData) {
     throw new Error("Il nome esperienza è obbligatorio");
   }
 
-  const { error } = await supabase.from("experiences").insert({
+  const { error } = await supabaseServer.from("experiences").insert({
     name,
-    bokun_id, // Salviamo il dato nel database
+    bokun_id,
     supplier_id,
     supplier_unit_cost,
     notes: notes || null,
@@ -51,7 +50,6 @@ export async function createExperience(formData: FormData) {
 export async function updateExperience(formData: FormData) {
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") || "").trim();
-  // Aggiunto recupero bokun_id
   const bokun_id = String(formData.get("bokun_id") || "").trim() || null;
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
@@ -67,11 +65,11 @@ export async function updateExperience(formData: FormData) {
     throw new Error("Il nome esperienza è obbligatorio");
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("experiences")
     .update({
       name,
-      bokun_id, // Aggiorniamo il dato nel database
+      bokun_id,
       supplier_id,
       supplier_unit_cost,
       notes: notes || null,
@@ -96,7 +94,7 @@ export async function deleteExperience(formData: FormData) {
     throw new Error("ID esperienza non valido");
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseServer
     .from("experiences")
     .delete()
     .eq("id", id);

@@ -1,7 +1,7 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 export async function getDashboardStats() {
-  const { data: bookings, error } = await supabase
+  const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select(`
       id,
@@ -16,7 +16,9 @@ export async function getDashboardStats() {
     throw new Error(`Errore caricamento dashboard: ${error.message}`);
   }
 
-  const totals = bookings.reduce(
+  const safeBookings = bookings || [];
+
+  const totals = safeBookings.reduce(
     (acc, booking) => {
       acc.totalCustomer += Number(booking.total_customer || 0);
       acc.totalToYou += Number(booking.total_to_you || 0);
@@ -32,7 +34,7 @@ export async function getDashboardStats() {
     }
   );
 
-  const bookingsByChannelMap = bookings.reduce<Record<string, number>>(
+  const bookingsByChannelMap = safeBookings.reduce<Record<string, number>>(
     (acc, booking) => {
       const channel = booking.booking_source || "Unknown";
       acc[channel] = (acc[channel] || 0) + 1;

@@ -1,7 +1,7 @@
 import AppShell from "@/components/AppShell";
 import BookingForm from "@/components/BookingForm";
 import { getChannels, getExperiences } from "@/lib/queries";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 
 type PageProps = {
   searchParams: Promise<{
@@ -41,7 +41,7 @@ export default async function NuovaPrenotazionePage({ searchParams }: PageProps)
   let cleanPhone = "";
 
   if (saved && bookingId) {
-    const { data } = await supabase
+    const { data } = await supabaseServer
       .from("bookings")
       .select("*, suppliers(phone), channels(name)")
       .eq("id", bookingId)

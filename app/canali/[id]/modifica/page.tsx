@@ -1,7 +1,7 @@
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import { updateChannel } from "../../actions";
 
 type PageProps = {
@@ -10,12 +10,16 @@ type PageProps = {
 
 export default async function ModificaCanalePage({ params }: PageProps) {
   const { id } = await params;
-  
-  const { data: channel } = await supabase
+
+  const { data: channel, error } = await supabaseServer
     .from("channels")
     .select("*")
     .eq("id", id)
     .single();
+
+  if (error || !channel) {
+    throw new Error(`Errore caricamento canale: ${error?.message || "Canale non trovato"}`);
+  }
 
   return (
     <AppShell
@@ -25,7 +29,7 @@ export default async function ModificaCanalePage({ params }: PageProps) {
       <div className="mb-4 flex items-center justify-end">
         <Link
           href="/canali"
-          className="rounded-xl border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 bg-white shadow-sm"
+          className="rounded-xl border border-zinc-300 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50"
         >
           ← Torna ai canali
         </Link>
@@ -34,7 +38,7 @@ export default async function ModificaCanalePage({ params }: PageProps) {
       <SectionCard title="Dati canale">
         <form action={updateChannel} className="space-y-6">
           <input type="hidden" name="id" value={channel.id} />
-          
+
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label htmlFor="name" className="mb-2 block text-sm font-medium text-zinc-700">
@@ -46,7 +50,7 @@ export default async function ModificaCanalePage({ params }: PageProps) {
                 type="text"
                 required
                 defaultValue={channel.name}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
               />
             </div>
 
@@ -58,7 +62,7 @@ export default async function ModificaCanalePage({ params }: PageProps) {
                 id="type"
                 name="type"
                 defaultValue={channel.type}
-                className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
               >
                 <option value="ota">OTA (Online Travel Agency)</option>
                 <option value="direct">Diretto</option>
@@ -76,14 +80,14 @@ export default async function ModificaCanalePage({ params }: PageProps) {
               name="notes"
               type="text"
               defaultValue={channel.notes || ""}
-              className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 bg-white"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
             />
           </div>
 
-          <div className="pt-4 border-t border-zinc-100 flex justify-end">
+          <div className="flex justify-end border-t border-zinc-100 pt-4">
             <button
               type="submit"
-              className="rounded-xl bg-zinc-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 shadow-sm"
+              className="rounded-xl bg-zinc-900 px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-700"
             >
               Aggiorna canale
             </button>

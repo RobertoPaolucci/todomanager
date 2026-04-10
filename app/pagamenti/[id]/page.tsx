@@ -4,7 +4,7 @@ export const revalidate = 0;
 import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
-import { supabase } from "@/lib/supabase";
+import { supabaseServer } from "@/lib/supabase-server";
 import { addSupplierPayment } from "../actions";
 
 function formatEuro(value: number) {
@@ -68,13 +68,13 @@ export default async function DettaglioPagamentiFornitorePage({
   const todayStr = todayObj.toISOString().split("T")[0];
 
   const [supplierRes, bookingsRes, paymentsRes] = await Promise.all([
-    supabase.from("suppliers").select("*").eq("id", supplierId).single(),
-    supabase
+    supabaseServer.from("suppliers").select("*").eq("id", supplierId).single(),
+    supabaseServer
       .from("bookings")
       .select("*")
       .eq("supplier_id", supplierId)
       .order("booking_date", { ascending: true }),
-    supabase
+    supabaseServer
       .from("supplier_payments")
       .select("*")
       .eq("supplier_id", supplierId)
