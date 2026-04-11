@@ -69,13 +69,19 @@ export async function POST(req: Request) {
 
     const bookingData = {
       channel_id: channelId,
+      booking_source: bookingSource,
+
       experience_id: experience.id,
       experience_name: experience.name,
+      supplier_id: experience.supplier_id, // FIX PRINCIPALE
+
       customer_name: String(body.customer_name || "").trim(),
-      customer_email: String(body.customer_email || "").trim(),
-      customer_phone: String(body.customer_phone || "").trim(),
+      customer_email: String(body.customer_email || "").trim() || null,
+      customer_phone: String(body.customer_phone || "").trim() || null,
+
       booking_date: String(body.booking_date || ""),
-      booking_time: String(body.booking_time || ""),
+      booking_time: String(body.booking_time || "") || null,
+
       adults: Number(body.adults || 0),
       children: Number(body.children || 0),
       infants: Number(body.infants || 0),
@@ -83,8 +89,8 @@ export async function POST(req: Request) {
         Number(body.adults || 0) +
         Number(body.children || 0) +
         Number(body.infants || 0),
+
       is_cancelled: isCancelled,
-      booking_source: bookingSource,
     };
 
     const { data: existing, error: existingError } = await supabaseServer
