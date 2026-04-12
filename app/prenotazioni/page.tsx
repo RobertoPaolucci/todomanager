@@ -4,6 +4,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import MobileBookingCard from "@/components/MobileBookingCard";
+import SummarySelectionToolbar from "@/components/SummarySelectionToolbar";
 import { supabaseServer } from "@/lib/supabase-server";
 import { cancelBooking, clearAlert } from "./actions";
 
@@ -371,16 +372,57 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
         <SectionCard title={`Elenco Prenotazioni (${allBookings.length})`}>
           <>
+            <form
+              id="summaryForm"
+              action="/prenotazioni/riepilogo"
+              method="GET"
+              className="hidden"
+            />
+
+            <SummarySelectionToolbar formId="summaryForm" />
+
+            <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
+              Seleziona le prenotazioni con la spunta e poi apri il riepilogo per
+              stampare il PDF o inviarlo via WhatsApp.
+            </div>
+
             <div className="space-y-3 md:hidden">
-              {allBookings.map((booking) => (
-                <MobileBookingCard
-                  key={booking.id}
-                  booking={booking}
-                  highlightId={highlightId}
-                  todayStr={todayStr}
-                  tomorrowStr={tomorrowStr}
-                />
-              ))}
+              {allBookings.map((booking) => {
+                const isCancelled = booking.is_cancelled === true;
+
+                return (
+                  <div key={booking.id} className="space-y-2">
+                    <label
+                      className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
+                        isCancelled
+                          ? "border-zinc-200 bg-zinc-100 text-zinc-400"
+                          : "border-zinc-200 bg-white text-zinc-700"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        name="ids"
+                        value={booking.id}
+                        form="summaryForm"
+                        disabled={isCancelled}
+                        className="h-5 w-5 rounded border-zinc-300"
+                      />
+                      <span className="text-sm font-medium">
+                        {isCancelled
+                          ? "Prenotazione annullata"
+                          : "Seleziona per riepilogo"}
+                      </span>
+                    </label>
+
+                    <MobileBookingCard
+                      booking={booking}
+                      highlightId={highlightId}
+                      todayStr={todayStr}
+                      tomorrowStr={tomorrowStr}
+                    />
+                  </div>
+                );
+              })}
 
               {allBookings.length === 0 && (
                 <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center text-base text-zinc-500 sm:text-sm">
@@ -393,6 +435,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               <table className="min-w-full text-left text-sm">
                 <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
                   <tr>
+                    <th className="py-3 pr-4">Sel.</th>
                     <th className="cursor-pointer py-3 pr-4 transition hover:text-zinc-900">
                       <Link
                         href={buildSortUrl("booking_date")}
@@ -520,6 +563,22 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             : "hover:bg-zinc-50"
                         }`}
                       >
+                        <td className="py-4 pr-4 align-top">
+                          <input
+                            type="checkbox"
+                            name="ids"
+                            value={booking.id}
+                            form="summaryForm"
+                            disabled={isCancelled}
+                            title={
+                              isCancelled
+                                ? "Prenotazione annullata"
+                                : "Seleziona per riepilogo"
+                            }
+                            className="mt-1 h-4 w-4 rounded border-zinc-300"
+                          />
+                        </td>
+
                         <td className="whitespace-nowrap py-4 pr-4">
                           <div className="flex items-center gap-2">
                             <div className={`font-bold ${dateColorClass}`}>
@@ -693,7 +752,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   {allBookings.length === 0 && (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={9}
                         className="py-8 text-center text-sm text-zinc-500"
                       >
                         Nessuna prenotazione trovata con i filtri attuali.
@@ -702,6 +761,10 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="mt-4">
+              <SummarySelectionToolbar formId="summaryForm" />
             </div>
           </>
         </SectionCard>
