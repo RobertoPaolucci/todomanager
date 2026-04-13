@@ -2,6 +2,53 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
 
+type ExistingBooking = {
+  id: number;
+  notes: string | null;
+  was_modified: boolean | null;
+  booking_reference: string | null;
+  customer_name: string | null;
+  customer_email: string | null;
+  customer_phone: string | null;
+  booking_date: string | null;
+  booking_time: string | null;
+  adults: number | null;
+  children: number | null;
+  infants: number | null;
+  total_people: number | null;
+  channel_id: number | null;
+};
+
+function cleanString(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function hasValue(value: unknown) {
+  return cleanString(value) !== "";
+}
+
+function toOptionalNumber(value: unknown) {
+  if (!hasValue(value)) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeText(value: unknown) {
+  return cleanString(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizePhone(value: unknown) {
+  return cleanString(value).replace(/\D/g, "");
+}
+
+function firstNonEmpty(...values: unknown[]) {
+  for (const value of values) {
+    const s = cleanString(value);
+    if (s) return s;
+  }
+  return "";
+}
+
 function stripSystemAlert(notes: string) {
   return notes
     .split("\n")
@@ -118,9 +165,166 @@ function resolveChannel(body: any, bookingReference: string) {
   return null;
 }
 
+function scoreCandidate(params: {
+  candidate: ExistingBooking;
+  channelId: number;
+  bookingTime: string;
+  totalPeople: number | null;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+}) {
+  const { candidate, channelId, bookingTime, totalPeople, customerName, customerEmail, customerPhone } = params;
+
+  let score = 0;
+
+  const incomingEmail = normalizeText(customerEmail);
+  const incomingName = normalizeText(customerName);
+  const incomingPhone = normalizePhone(customerPhone);
+
+  const candidateEmail = normalizeText(candidate.customer_email);
+  const candidateName = normalizeText(candidate.customer_name);
+  const candidatePhone = normalizePhone(candidate.customer_phone);
+
+  if (incomingEmail && candidateEmail && incomingEmail === candidateEmail) {
+    score += 100;
+  }
+
+  if (incomingPhone && candidatePhone && incomingPhone === candidatePhone) {
+    score += 90;
+  }
+
+  if (incomingName && candidateName && incomingName === candidateName) {
+    score += 80;
+  }
+
+  if (
+    incomingName &&
+    candidateName &&
+    incomingName !== candidateName &&
+    (incomingName.includes(candidateName) || candidateName.includes(incomingName))
+  ) {
+    score += 40;
+  }
+
+  if (bookingTime && cleanString(candidate.booking_time) === bookingTime) {
+    score += 25;
+  }
+
+  if (Number(candidate.channel_id) === channelId) {
+    score += 15;
+  }
+
+  if (
+    totalPeople !== null &&
+    Number(candidate.total_people || 0) === totalPeople
+  ) {
+    score += 15;
+  }
+
+  return score;
+}
+
+async function findExistingBooking(params: {
+  bookingReference: string;
+  isCancelled: boolean;
+  experienceId: number;
+  bookingDate: string;
+  bookingTime: string;
+  channelId: number;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  totalPeople: number | null;
+}) {
+  const {
+    bookingReference,
+    isCancelled,
+    experienceId,
+    bookingDate,
+    bookingTime,
+    channelId,
+    customerName,
+    customerEmail,
+    customerPhone,
+    totalPeople,
+  } = params;
+
+  if (bookingReference) {
+    const { data, error } = await supabaseServer
+      .from("bookings")
+      .select(
+        "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id"
+      )
+      .eq("booking_reference", bookingReference)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (data) return data as ExistingBooking;
+  }
+
+  if (!isCancelled) return null;
+  if (!bookingDate) return null;
+
+  const { data: candidates, error: candidatesError } = await supabaseServer
+    .from("bookings")
+    .select(
+      "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id"
+    )
+    .eq("experience_id", experienceId)
+    .eq("booking_date", bookingDate)
+    .limit(50);
+
+  if (candidatesError) {
+    throw new Error(candidatesError.message);
+  }
+
+  if (!candidates || candidates.length === 0) {
+    return null;
+  }
+
+  const ranked = (candidates as ExistingBooking[])
+    .map((candidate) => ({
+      candidate,
+      score: scoreCandidate({
+        candidate,
+        channelId,
+        bookingTime,
+        totalPeople,
+        customerName,
+        customerEmail,
+        customerPhone,
+      }),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+  const second = ranked[1];
+
+  if (!best) return null;
+
+  if (best.score >= 100) {
+    return best.candidate;
+  }
+
+  if (best.score >= 60 && (!second || best.score >= second.score + 20)) {
+    return best.candidate;
+  }
+
+  if (
+    ranked.length === 1 &&
+    best.score >= 40
+  ) {
+    return best.candidate;
+  }
+
+  return null;
+}
+
 export async function POST(req: Request) {
   try {
     const authHeader = req.headers.get("authorization");
+
     if (authHeader !== "Bearer TuscanyTours-Webhook-Secret-2026") {
       return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
     }
@@ -129,27 +333,30 @@ export async function POST(req: Request) {
 
     console.log("WEBHOOK PRENOTAZIONE BODY:", JSON.stringify(body, null, 2));
 
-    const rawBokunId = String(body.bokun_id || "").trim();
-    const bookingReference = String(body.booking_reference || "").trim();
+    const rawBokunId = cleanString(body.bokun_id);
+    const incomingBookingReference = cleanString(body.booking_reference);
+    const status = cleanString(body.status).toUpperCase();
+    const isCancelled = status === "CANCELLED";
 
     if (!rawBokunId) {
       return NextResponse.json({ error: "bokun_id mancante" }, { status: 400 });
     }
 
-    if (!bookingReference) {
+    if (!incomingBookingReference && !isCancelled) {
       return NextResponse.json(
         { error: "booking_reference mancante" },
         { status: 400 }
       );
     }
 
-    const resolvedChannel = resolveChannel(body, bookingReference);
+    const resolvedChannel = resolveChannel(body, incomingBookingReference);
 
     if (!resolvedChannel) {
       console.error(
         "Canale non riconosciuto. Payload:",
         JSON.stringify(body, null, 2)
       );
+
       return NextResponse.json(
         { error: "Canale non riconosciuto: prenotazione non salvata" },
         { status: 400 }
@@ -168,7 +375,10 @@ export async function POST(req: Request) {
       .single();
 
     if (experienceError || !experience) {
-      return NextResponse.json({ error: "Esperienza non trovata" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Esperienza non trovata" },
+        { status: 404 }
+      );
     }
 
     if (!experience.business_unit_id) {
@@ -178,11 +388,76 @@ export async function POST(req: Request) {
       );
     }
 
-    const isCancelled = String(body.status || "").toUpperCase() === "CANCELLED";
+    const incomingCustomerName = cleanString(body.customer_name);
+    const incomingCustomerEmail = cleanString(body.customer_email);
+    const incomingCustomerPhone = cleanString(body.customer_phone);
+    const incomingBookingDate = cleanString(body.booking_date);
+    const incomingBookingTime = cleanString(body.booking_time);
 
-    const adults = Number(body.adults || 0);
-    const children = Number(body.children || 0);
-    const infants = Number(body.infants || 0);
+    const adultsFromBody = toOptionalNumber(body.adults);
+    const childrenFromBody = toOptionalNumber(body.children);
+    const infantsFromBody = toOptionalNumber(body.infants);
+
+    const incomingTotalPeople =
+      (adultsFromBody ?? 0) + (childrenFromBody ?? 0) + (infantsFromBody ?? 0);
+
+    const existing = await findExistingBooking({
+      bookingReference: incomingBookingReference,
+      isCancelled,
+      experienceId: experience.id,
+      bookingDate: incomingBookingDate,
+      bookingTime: incomingBookingTime,
+      channelId,
+      customerName: incomingCustomerName,
+      customerEmail: incomingCustomerEmail,
+      customerPhone: incomingCustomerPhone,
+      totalPeople:
+        incomingTotalPeople > 0 ? incomingTotalPeople : null,
+    });
+
+    if (isCancelled && !existing) {
+      return NextResponse.json(
+        {
+          error:
+            "Cancellazione ricevuta ma prenotazione esistente non trovata. Nessun dato aggiornato per evitare abbinamenti sbagliati.",
+        },
+        { status: 404 }
+      );
+    }
+
+    const finalCustomerName = firstNonEmpty(
+      incomingCustomerName,
+      existing?.customer_name
+    );
+
+    const finalCustomerEmail =
+      firstNonEmpty(incomingCustomerEmail, existing?.customer_email) || null;
+
+    const finalCustomerPhone =
+      firstNonEmpty(incomingCustomerPhone, existing?.customer_phone) || null;
+
+    const finalBookingDate = firstNonEmpty(
+      incomingBookingDate,
+      existing?.booking_date
+    );
+
+    const finalBookingTime =
+      firstNonEmpty(incomingBookingTime, existing?.booking_time) || null;
+
+    const finalAdults =
+      adultsFromBody !== null
+        ? adultsFromBody
+        : Number(existing?.adults || 0);
+
+    const finalChildren =
+      childrenFromBody !== null
+        ? childrenFromBody
+        : Number(existing?.children || 0);
+
+    const finalInfants =
+      infantsFromBody !== null
+        ? infantsFromBody
+        : Number(existing?.infants || 0);
 
     const bookingData = {
       channel_id: channelId,
@@ -193,32 +468,22 @@ export async function POST(req: Request) {
       supplier_id: experience.supplier_id,
       business_unit_id: Number(experience.business_unit_id),
 
-      customer_name: String(body.customer_name || "").trim(),
-      customer_email: String(body.customer_email || "").trim() || null,
-      customer_phone: String(body.customer_phone || "").trim() || null,
+      customer_name: finalCustomerName,
+      customer_email: finalCustomerEmail,
+      customer_phone: finalCustomerPhone,
 
-      booking_date: String(body.booking_date || "").trim(),
-      booking_time: String(body.booking_time || "").trim() || null,
+      booking_date: finalBookingDate,
+      booking_time: finalBookingTime,
 
-      adults,
-      children,
-      infants,
-      total_people: adults + children + infants,
+      adults: finalAdults,
+      children: finalChildren,
+      infants: finalInfants,
+      total_people: finalAdults + finalChildren + finalInfants,
 
       is_cancelled: isCancelled,
     };
 
-    const { data: existing, error: existingError } = await supabaseServer
-      .from("bookings")
-      .select("id, notes, was_modified")
-      .eq("booking_reference", bookingReference)
-      .maybeSingle();
-
-    if (existingError) {
-      throw new Error(existingError.message);
-    }
-
-    const previousNotes = String(existing?.notes || body.notes || "").trim();
+    const previousNotes = cleanString(existing?.notes || body.notes);
     const cleanNotes = stripSystemAlert(previousNotes);
 
     let alertType: "new" | "modified" | "cancelled" = "new";
@@ -252,7 +517,7 @@ export async function POST(req: Request) {
         .from("bookings")
         .insert({
           ...bookingData,
-          booking_reference: bookingReference,
+          booking_reference: incomingBookingReference,
           booking_created_at: new Date().toISOString().split("T")[0],
           notes: finalNotes,
           was_modified: false,
@@ -271,6 +536,8 @@ export async function POST(req: Request) {
       channel_id: channelId,
       booking_source: bookingSource,
       business_unit_id: bookingData.business_unit_id,
+      matched_existing_booking: Boolean(existing),
+      preserved_existing_reference: Boolean(existing?.booking_reference),
     });
   } catch (error: any) {
     console.error("Errore webhook prenotazioni:", error.message);
