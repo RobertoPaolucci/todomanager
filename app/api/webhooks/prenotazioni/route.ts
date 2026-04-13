@@ -174,7 +174,15 @@ function scoreCandidate(params: {
   customerEmail: string;
   customerPhone: string;
 }) {
-  const { candidate, channelId, bookingTime, totalPeople, customerName, customerEmail, customerPhone } = params;
+  const {
+    candidate,
+    channelId,
+    bookingTime,
+    totalPeople,
+    customerName,
+    customerEmail,
+    customerPhone,
+  } = params;
 
   let score = 0;
 
@@ -273,6 +281,7 @@ async function findExistingBooking(params: {
     )
     .eq("experience_id", experienceId)
     .eq("booking_date", bookingDate)
+    .eq("is_cancelled", false)
     .limit(50);
 
   if (candidatesError) {
@@ -283,7 +292,72 @@ async function findExistingBooking(params: {
     return null;
   }
 
-  const ranked = (candidates as ExistingBooking[])
+  const list = candidates as ExistingBooking[];
+
+  const exactTimeChannelPeople = list.filter((c) => {
+    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
+    const sameChannel = Number(c.channel_id) === channelId;
+    const samePeople =
+      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
+    return sameTime && sameChannel && samePeople;
+  });
+
+  if (exactTimeChannelPeople.length === 1) {
+    return exactTimeChannelPeople[0];
+  }
+
+  const exactTimePeople = list.filter((c) => {
+    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
+    const samePeople =
+      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
+    return sameTime && samePeople;
+  });
+
+  if (exactTimePeople.length === 1) {
+    return exactTimePeople[0];
+  }
+
+  const exactTimeChannel = list.filter((c) => {
+    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
+    const sameChannel = Number(c.channel_id) === channelId;
+    return sameTime && sameChannel;
+  });
+
+  if (exactTimeChannel.length === 1) {
+    return exactTimeChannel[0];
+  }
+
+  const incomingEmail = normalizeText(customerEmail);
+  if (incomingEmail) {
+    const byEmail = list.filter(
+      (c) => normalizeText(c.customer_email) === incomingEmail
+    );
+    if (byEmail.length === 1) {
+      return byEmail[0];
+    }
+  }
+
+  const incomingPhone = normalizePhone(customerPhone);
+  if (incomingPhone) {
+    const byPhone = list.filter(
+      (c) => normalizePhone(c.customer_phone) === incomingPhone
+    );
+    if (byPhone.length === 1) {
+      return byPhone[0];
+    }
+  }
+
+  const incomingName = normalizeText(customerName);
+  if (incomingName) {
+    const byName = list.filter(
+      (c) => normalizeText(c.customer_name) === incomingName
+    );
+    if (byName.length === 1) {
+      return byName[0];
+    }
+  }
+
+  const ranked = list
     .map((candidate) => ({
       candidate,
       score: scoreCandidate({
@@ -298,23 +372,50 @@ async function findExistingBooking(params: {
     }))
     .sort((a, b) => b.score - a.score);
 
+  console.log(
+    "CANCEL MATCH DEBUG",
+    JSON.stringify(
+      {
+        incoming: {
+          bookingReference,
+          experienceId,
+          bookingDate,
+          bookingTime,
+          channelId,
+          totalPeople,
+          customerName,
+          customerEmail,
+          customerPhone,
+        },
+        ranked: ranked.map((r) => ({
+          id: r.candidate.id,
+          booking_reference: r.candidate.booking_reference,
+          customer_name: r.candidate.customer_name,
+          booking_time: r.candidate.booking_time,
+          total_people: r.candidate.total_people,
+          channel_id: r.candidate.channel_id,
+          score: r.score,
+        })),
+      },
+      null,
+      2
+    )
+  );
+
   const best = ranked[0];
   const second = ranked[1];
 
   if (!best) return null;
 
-  if (best.score >= 100) {
+  if (best.score >= 80) {
     return best.candidate;
   }
 
-  if (best.score >= 60 && (!second || best.score >= second.score + 20)) {
+  if (best.score >= 45 && (!second || best.score >= second.score + 15)) {
     return best.candidate;
   }
 
-  if (
-    ranked.length === 1 &&
-    best.score >= 40
-  ) {
+  if (ranked.length === 1 && best.score >= 25) {
     return best.candidate;
   }
 
@@ -411,8 +512,7 @@ export async function POST(req: Request) {
       customerName: incomingCustomerName,
       customerEmail: incomingCustomerEmail,
       customerPhone: incomingCustomerPhone,
-      totalPeople:
-        incomingTotalPeople > 0 ? incomingTotalPeople : null,
+      totalPeople: incomingTotalPeople > 0 ? incomingTotalPeople : null,
     });
 
     if (isCancelled && !existing) {
@@ -445,9 +545,7 @@ export async function POST(req: Request) {
       firstNonEmpty(incomingBookingTime, existing?.booking_time) || null;
 
     const finalAdults =
-      adultsFromBody !== null
-        ? adultsFromBody
-        : Number(existing?.adults || 0);
+      adultsFromBody !== null ? adultsFromBody : Number(existing?.adults || 0);
 
     const finalChildren =
       childrenFromBody !== null
