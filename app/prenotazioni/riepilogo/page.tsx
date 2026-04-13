@@ -49,15 +49,48 @@ function getSupplierData(booking: any) {
   return booking.suppliers || null;
 }
 
-function getPeopleCount(booking: any) {
+function getPayingPeopleCount(booking: any) {
+  return Number(booking.adults || 0) + Number(booking.children || 0);
+}
+
+function getNonPayingAdultsCount(booking: any) {
+  return Number(booking.non_paying_adults || 0);
+}
+
+function getInfantsCount(booking: any) {
+  return Number(booking.infants || 0);
+}
+
+function getTotalSeatsCount(booking: any) {
   const totalPeople = Number(booking.total_people || 0);
   if (totalPeople > 0) return totalPeople;
 
   return (
-    Number(booking.adults || 0) +
-    Number(booking.children || 0) +
-    Number(booking.infants || 0)
+    getPayingPeopleCount(booking) +
+    getInfantsCount(booking) +
+    getNonPayingAdultsCount(booking)
   );
+}
+
+function getPeopleSummaryForWhatsapp(booking: any) {
+  const paying = getPayingPeopleCount(booking);
+  const nonPaying = getNonPayingAdultsCount(booking);
+  const infants = getInfantsCount(booking);
+  const totalSeats = getTotalSeatsCount(booking);
+
+  const parts = [`${totalSeats} posti`];
+
+  if (nonPaying > 0) {
+    parts.push(`guide ${nonPaying}`);
+  }
+
+  if (infants > 0) {
+    parts.push(`infanti ${infants}`);
+  }
+
+  parts.push(`paganti ${paying}`);
+
+  return parts.join(" | ");
 }
 
 function parseIds(raw: string | string[] | undefined) {
@@ -121,8 +154,8 @@ export default async function RiepilogoPrenotazioniPage({
   const createdAt = new Date();
 
   const totalBookings = bookings.length;
-  const totalPeople = bookings.reduce(
-    (sum, booking) => sum + getPeopleCount(booking),
+  const totalSeats = bookings.reduce(
+    (sum, booking) => sum + getTotalSeatsCount(booking),
     0
   );
 
@@ -145,28 +178,26 @@ export default async function RiepilogoPrenotazioniPage({
 
   const suppliers = Array.from(supplierMap.values());
 
-  const whatsappMessage =
-    [
-      "RIEPILOGO PRENOTAZIONI",
-      `Documento creato il ${formatDateTime(createdAt)}`,
-      "",
-      ...bookings.map((booking) => {
-        const people = getPeopleCount(booking);
-        const date = formatDate(booking.booking_date);
-        const time = formatTime(booking.booking_time);
-        const customer = booking.customer_name || "-";
-        const reference = booking.booking_reference || "-";
-        const channel = getChannelName(booking) || "-";
-        const experience = booking.experience_name || "-";
-        const bookingCreated = formatDate(booking.booking_created_at);
+  const whatsappMessage = [
+    "RIEPILOGO PRENOTAZIONI",
+    `Documento creato il ${formatDateTime(createdAt)}`,
+    "",
+    ...bookings.map((booking) => {
+      const date = formatDate(booking.booking_date);
+      const time = formatTime(booking.booking_time);
+      const customer = booking.customer_name || "-";
+      const reference = booking.booking_reference || "-";
+      const channel = getChannelName(booking) || "-";
+      const experience = booking.experience_name || "-";
+      const bookingCreated = formatDate(booking.booking_created_at);
+      const peopleSummary = getPeopleSummaryForWhatsapp(booking);
 
-        return `${people} pax | ${date} ore ${time} | ${customer} | ${reference} | ${channel} | ${experience} | prenotata il ${bookingCreated}`;
-      }),
-      "",
-      `Numero di prenotazioni: ${totalBookings}`,
-      `Persone totali: ${totalPeople}`,
-      `Data creazione documento: ${formatDateTime(createdAt)}`,
-    ].join("\n");
+      return `${peopleSummary} | ${date} ore ${time} | ${customer} | ${reference} | ${channel} | ${experience} | prenotata il ${bookingCreated}`;
+    }),
+    "",
+    `Numero di prenotazioni: ${totalBookings}`,
+    `Posti totali: ${totalSeats}`,
+  ].join("\n");
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 print:max-w-none print:px-0 print:py-0">
@@ -207,7 +238,7 @@ export default async function RiepilogoPrenotazioniPage({
             <table className="min-w-full text-left text-sm print:text-[11px]">
               <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500">
                 <tr>
-                  <th className="py-3 pr-4">Num Clienti</th>
+                  <th className="py-3 pr-4">Posti</th>
                   <th className="py-3 pr-4">Data e Ora</th>
                   <th className="py-3 pr-4">Nome Cliente</th>
                   <th className="py-3 pr-4">Rif Prenotazione</th>
@@ -218,52 +249,65 @@ export default async function RiepilogoPrenotazioniPage({
               </thead>
 
               <tbody>
-                {bookings.map((booking) => (
-                  <tr key={booking.id} className="border-b border-zinc-100 align-top">
-                    <td className="py-4 pr-4 font-bold text-zinc-900">
-                      {getPeopleCount(booking)}
-                    </td>
+                {bookings.map((booking) => {
+                  const nonPaying = getNonPayingAdultsCount(booking);
+                  const total = getTotalSeatsCount(booking);
 
-                    <td className="py-4 pr-4 whitespace-nowrap">
-                      <div className="font-medium text-zinc-900">
-                        {formatDate(booking.booking_date)}
-                      </div>
-                      <div className="text-xs text-zinc-500">
-                        ore {formatTime(booking.booking_time)}
-                      </div>
-                    </td>
+                  return (
+                    <tr key={booking.id} className="border-b border-zinc-100 align-top">
+                      <td className="py-4 pr-4">
+                        <div className="text-xl font-black leading-none text-zinc-900 print:text-[18px]">
+                          {total}
+                        </div>
 
-                    <td className="py-4 pr-4">
-                      <div className="font-medium text-zinc-900">
-                        {booking.customer_name || "-"}
-                      </div>
-                    </td>
+                        {nonPaying > 0 && (
+                          <div className="mt-1 text-[11px] font-bold text-amber-700 print:text-[10px]">
+                            (guide {nonPaying})
+                          </div>
+                        )}
+                      </td>
 
-                    <td className="py-4 pr-4">
-                      <div className="font-mono text-zinc-700">
-                        {booking.booking_reference || "-"}
-                      </div>
-                    </td>
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <div className="font-medium text-zinc-900">
+                          {formatDate(booking.booking_date)}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          ore {formatTime(booking.booking_time)}
+                        </div>
+                      </td>
 
-                    <td className="py-4 pr-4">
-                      <div className="text-zinc-900">
-                        {getChannelName(booking) || "-"}
-                      </div>
-                    </td>
+                      <td className="py-4 pr-4">
+                        <div className="font-medium text-zinc-900">
+                          {booking.customer_name || "-"}
+                        </div>
+                      </td>
 
-                    <td className="py-4 pr-4">
-                      <div className="text-zinc-900">
-                        {booking.experience_name || "-"}
-                      </div>
-                    </td>
+                      <td className="py-4 pr-4">
+                        <div className="font-mono text-zinc-700">
+                          {booking.booking_reference || "-"}
+                        </div>
+                      </td>
 
-                    <td className="py-4 pr-0 whitespace-nowrap">
-                      <div className="text-zinc-900">
-                        {formatDate(booking.booking_created_at)}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      <td className="py-4 pr-4">
+                        <div className="text-zinc-900">
+                          {getChannelName(booking) || "-"}
+                        </div>
+                      </td>
+
+                      <td className="py-4 pr-4">
+                        <div className="text-zinc-900">
+                          {booking.experience_name || "-"}
+                        </div>
+                      </td>
+
+                      <td className="py-4 pr-0 whitespace-nowrap">
+                        <div className="text-zinc-900">
+                          {formatDate(booking.booking_created_at)}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
 
                 {bookings.length === 0 && (
                   <tr>
@@ -276,7 +320,7 @@ export default async function RiepilogoPrenotazioniPage({
             </table>
           </div>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-3 print:mt-6">
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 print:mt-6">
             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="text-[11px] font-bold uppercase text-zinc-500">
                 Numero di prenotazioni
@@ -288,19 +332,10 @@ export default async function RiepilogoPrenotazioniPage({
 
             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="text-[11px] font-bold uppercase text-zinc-500">
-                Persone totali
+                Posti totali
               </div>
               <div className="mt-2 text-2xl font-black text-zinc-900">
-                {totalPeople}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="text-[11px] font-bold uppercase text-zinc-500">
-                Data creazione documento
-              </div>
-              <div className="mt-2 text-sm font-bold text-zinc-900">
-                {formatDateTime(createdAt)}
+                {totalSeats}
               </div>
             </div>
           </div>

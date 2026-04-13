@@ -49,6 +49,8 @@ type PageProps = {
     highlight?: string;
     from?: string;
     to?: string;
+    bu?: string;
+    venue?: string;
   }>;
 };
 
@@ -57,6 +59,26 @@ function getChannelName(booking: any) {
     return booking.channels[0]?.name || booking.booking_source || "";
   }
   return booking.channels?.name || booking.booking_source || "";
+}
+
+function getSupplierData(booking: any) {
+  if (Array.isArray(booking.suppliers)) {
+    return booking.suppliers[0] || null;
+  }
+  return booking.suppliers || null;
+}
+
+function isFmdqVenueBooking(booking: any) {
+  const supplier = getSupplierData(booking);
+  const supplierId = Number(booking.supplier_id || supplier?.id || 0);
+  const supplierName = String(supplier?.name || "").trim().toLowerCase();
+
+  if (supplierId === 0) return true;
+  if (supplierName === "fmdq") return true;
+  if (supplierName === "fattoria madonna della querce") return true;
+  if (supplierName.includes("madonna della querce")) return true;
+
+  return false;
 }
 
 export default async function PrenotazioniPage({ searchParams }: PageProps) {
@@ -68,6 +90,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const highlightId = params.highlight || "";
   const fromDate = params.from || "";
   const toDate = params.to || "";
+  const businessUnitFilter = String(params.bu || "").trim().toLowerCase();
+  const venueFilter = String(params.venue || "").trim().toLowerCase();
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -87,7 +111,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const [bookingsRes, internalRulesRes, businessUnitsRes] = await Promise.all([
     supabaseServer
       .from("bookings")
-      .select("*, suppliers(phone), channels(name)"),
+      .select("*, suppliers(id, name, phone), channels(name)"),
     supabaseServer
       .from("business_unit_internal_suppliers")
       .select("business_unit_id, supplier_id"),
@@ -150,6 +174,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
       if (!fromDate && !toDate && !showPast && b.booking_date < todayStr) {
         return false;
       }
+    }
+
+    if (businessUnitFilter && b._business_unit_code !== businessUnitFilter) {
+      return false;
+    }
+
+    if (venueFilter === "fmdq" && !isFmdqVenueBooking(b)) {
+      return false;
     }
 
     const bookingChannelName = getChannelName(b);
@@ -218,6 +250,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     if (fromDate) sp.set("from", fromDate);
     if (toDate) sp.set("to", toDate);
     if (highlightId) sp.set("highlight", highlightId);
+    if (businessUnitFilter) sp.set("bu", businessUnitFilter);
+    if (venueFilter) sp.set("venue", venueFilter);
 
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === undefined || value === "") {
@@ -243,6 +277,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     if (sort !== column) return null;
     return <span className="ml-1 text-zinc-900">{dir === "asc" ? "↑" : "↓"}</span>;
   };
+
+  const isFmdqFilterActive = businessUnitFilter === "fmdq";
+  const isFmdqVenueFilterActive = venueFilter === "fmdq";
 
   return (
     <AppShell
@@ -283,6 +320,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               {showPast && <input type="hidden" name="past" value="true" />}
               {fromDate && <input type="hidden" name="from" value={fromDate} />}
               {toDate && <input type="hidden" name="to" value={toDate} />}
+              {businessUnitFilter && <input type="hidden" name="bu" value={businessUnitFilter} />}
+              {venueFilter && <input type="hidden" name="venue" value={venueFilter} />}
 
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex w-full overflow-hidden rounded-xl border border-zinc-300 bg-white transition focus-within:border-zinc-500 lg:max-w-xl">
@@ -322,6 +361,32 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 <div className="flex flex-wrap items-center gap-2">
                   <Link
                     href={buildQuery({
+                      bu: isFmdqFilterActive ? null : "fmdq",
+                    })}
+                    className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-base font-medium transition sm:text-sm ${
+                      isFmdqFilterActive
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-zinc-300 bg-white text-zinc-700"
+                    }`}
+                  >
+                    {isFmdqFilterActive ? "Canale FMDQ ✓" : "Canale FMDQ"}
+                  </Link>
+
+                  <Link
+                    href={buildQuery({
+                      venue: isFmdqVenueFilterActive ? null : "fmdq",
+                    })}
+                    className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-base font-medium transition sm:text-sm ${
+                      isFmdqVenueFilterActive
+                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                        : "border-zinc-300 bg-white text-zinc-700"
+                    }`}
+                  >
+                    {isFmdqVenueFilterActive ? "In Fattoria ✓" : "In Fattoria"}
+                  </Link>
+
+                  <Link
+                    href={buildQuery({
                       past: showPast ? null : "true",
                       from: null,
                       to: null,
@@ -335,7 +400,12 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
                   </Link>
 
-                  {(fromDate || toDate || q || showPast) && (
+                  {(fromDate ||
+                    toDate ||
+                    q ||
+                    showPast ||
+                    businessUnitFilter ||
+                    venueFilter) && (
                     <Link
                       href="/prenotazioni"
                       className="inline-flex min-h-11 items-center rounded-xl px-2 text-base font-medium text-zinc-500 hover:text-zinc-800 hover:underline sm:text-sm"
@@ -354,6 +424,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   <input type="hidden" name="sort" value={sort} />
                   <input type="hidden" name="dir" value={dir} />
                   {showPast && <input type="hidden" name="past" value="true" />}
+                  {businessUnitFilter && <input type="hidden" name="bu" value={businessUnitFilter} />}
+                  {venueFilter && <input type="hidden" name="venue" value={venueFilter} />}
 
                   <div>
                     <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
@@ -584,8 +656,16 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       supplierBadgeText = "Parziale";
                     }
 
-                    const wPax =
+                    const payingPax =
                       Number(booking.adults || 0) + Number(booking.children || 0);
+                    const nonPayingAdults = Number(
+                      booking.non_paying_adults || 0
+                    );
+                    const totalSeats = Number(
+                      booking.total_people ||
+                        payingPax + Number(booking.infants || 0) + nonPayingAdults
+                    );
+
                     const wDate = formatDate(booking.booking_date);
                     const wTime = booking.booking_time
                       ? booking.booking_time.slice(0, 5)
@@ -593,7 +673,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const wChannel = bookingChannelName || "N/A";
                     const wRef = booking.booking_reference || "N/A";
                     const wName = booking.customer_name || "N/A";
-                    const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+                    const waText = `${payingPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
 
                     const rawSupplier = booking.suppliers;
                     let rawPhone = "";
@@ -727,14 +807,17 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             >
                               {getBusinessUnitLabel(businessUnitCode)}
                             </span>
-
-                            <span className="text-[10px] font-medium text-zinc-500">
-                              {wPax} Pax
-                            </span>
                           </div>
 
                           <div className="max-w-[150px] truncate text-xs font-medium text-zinc-700">
                             {booking.experience_name}
+                          </div>
+
+                          <div className="mt-1 text-[10px] font-medium text-zinc-500">
+                            {payingPax} paganti
+                            {nonPayingAdults > 0 ? ` + ${nonPayingAdults} guide` : ""}
+                            {" = "}
+                            {totalSeats} posti
                           </div>
                         </td>
 

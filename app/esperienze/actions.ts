@@ -16,8 +16,64 @@ function parseNullableNumber(value: FormDataEntryValue | null) {
   return Number.isNaN(normalized) ? null : normalized;
 }
 
+function parseRequiredInt(value: FormDataEntryValue | null) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+async function ensureBusinessUnitExists(businessUnitId: number) {
+  const { data, error } = await supabaseServer
+    .from("business_units")
+    .select("id, name, is_active")
+    .eq("id", businessUnitId)
+    .single();
+
+  if (error || !data) {
+    throw new Error("Business unit non trovata");
+  }
+
+  if (!data.is_active) {
+    throw new Error("La business unit selezionata non è attiva");
+  }
+
+  return data;
+}
+
+async function ensureSupplierAllowedForBusinessUnit(params: {
+  businessUnitId: number;
+  supplierId: number | null;
+}) {
+  if (!params.supplierId) return;
+
+  const { data, error } = await supabaseServer
+    .from("business_unit_internal_suppliers")
+    .select("business_unit_id")
+    .eq("supplier_id", params.supplierId);
+
+  if (error) {
+    throw new Error(
+      `Errore controllo fornitore/business unit: ${error.message}`
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return;
+  }
+
+  const allowed = data.some(
+    (row) => Number(row.business_unit_id) === params.businessUnitId
+  );
+
+  if (!allowed) {
+    throw new Error(
+      "Questo fornitore interno è collegato a un'altra business unit. Seleziona la business unit corretta oppure usa un fornitore condiviso."
+    );
+  }
+}
+
 export async function createExperience(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
+  const business_unit_id = parseRequiredInt(formData.get("business_unit_id"));
   const bokun_id = String(formData.get("bokun_id") || "").trim() || null;
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
@@ -29,8 +85,19 @@ export async function createExperience(formData: FormData) {
     throw new Error("Il nome esperienza è obbligatorio");
   }
 
+  if (!business_unit_id) {
+    throw new Error("La business unit è obbligatoria");
+  }
+
+  await ensureBusinessUnitExists(business_unit_id);
+  await ensureSupplierAllowedForBusinessUnit({
+    businessUnitId: business_unit_id,
+    supplierId: supplier_id,
+  });
+
   const { error } = await supabaseServer.from("experiences").insert({
     name,
+    business_unit_id,
     bokun_id,
     supplier_id,
     supplier_unit_cost,
@@ -44,12 +111,14 @@ export async function createExperience(formData: FormData) {
   }
 
   revalidatePath("/esperienze");
+  revalidatePath("/esperienze/nuova");
   redirect("/esperienze");
 }
 
 export async function updateExperience(formData: FormData) {
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") || "").trim();
+  const business_unit_id = parseRequiredInt(formData.get("business_unit_id"));
   const bokun_id = String(formData.get("bokun_id") || "").trim() || null;
   const supplier_id = parseNullableNumber(formData.get("supplier_id"));
   const supplier_unit_cost = parseNumber(formData.get("supplier_unit_cost"));
@@ -65,10 +134,21 @@ export async function updateExperience(formData: FormData) {
     throw new Error("Il nome esperienza è obbligatorio");
   }
 
+  if (!business_unit_id) {
+    throw new Error("La business unit è obbligatoria");
+  }
+
+  await ensureBusinessUnitExists(business_unit_id);
+  await ensureSupplierAllowedForBusinessUnit({
+    businessUnitId: business_unit_id,
+    supplierId: supplier_id,
+  });
+
   const { error } = await supabaseServer
     .from("experiences")
     .update({
       name,
+      business_unit_id,
       bokun_id,
       supplier_id,
       supplier_unit_cost,

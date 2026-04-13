@@ -99,7 +99,12 @@ export default function MobileBookingCard({
     supplierBadgeText = "Parziale";
   }
 
-  const wPax = Number(booking.adults || 0) + Number(booking.children || 0);
+  const payingPax = Number(booking.adults || 0) + Number(booking.children || 0);
+  const nonPayingAdults = Number(booking.non_paying_adults || 0);
+  const totalSeats = Number(
+    booking.total_people || payingPax + Number(booking.infants || 0) + nonPayingAdults
+  );
+
   const wDate = formatDate(booking.booking_date);
   const wTime = booking.booking_time
     ? booking.booking_time.slice(0, 5)
@@ -107,7 +112,7 @@ export default function MobileBookingCard({
   const wChannel = bookingChannelName || "N/A";
   const wRef = booking.booking_reference || "-";
   const wName = booking.customer_name || "N/A";
-  const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+  const waText = `${payingPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
 
   const rawSupplier = booking.suppliers;
   let rawPhone = "";
@@ -206,7 +211,17 @@ export default function MobileBookingCard({
               </span>
 
               <span className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[15px] font-bold text-zinc-700">
-                {wPax} Pax
+                {payingPax} paganti
+              </span>
+
+              {nonPayingAdults > 0 && (
+                <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[15px] font-bold text-amber-700">
+                  + {nonPayingAdults} guide
+                </span>
+              )}
+
+              <span className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[15px] font-bold text-zinc-700">
+                {totalSeats} posti
               </span>
 
               {isModifiedPermanent && !isCancelled && (
@@ -265,6 +280,18 @@ export default function MobileBookingCard({
 
         <div className="rounded-xl bg-zinc-50 px-3 py-3 text-[18px] text-zinc-800">
           {booking.experience_name || "-"}
+        </div>
+
+        <div className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+          <div className="text-[12px] font-bold uppercase text-zinc-400">
+            Posti e conteggio
+          </div>
+          <div className="mt-2 text-[15px] font-medium text-zinc-700">
+            {payingPax} paganti
+            {nonPayingAdults > 0 ? ` + ${nonPayingAdults} guide/autisti` : ""}
+            {" = "}
+            {totalSeats} posti totali
+          </div>
         </div>
 
         {showPayments && (

@@ -3,16 +3,40 @@ import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { createExperience } from "../actions";
 import { getSuppliers } from "@/lib/queries";
+import { supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 
+type BusinessUnit = {
+  id: number;
+  code: string;
+  name: string;
+  is_accounting_autonomous: boolean;
+  is_active: boolean;
+};
+
 export default async function NuovaEsperienzaPage() {
-  const suppliers = await getSuppliers();
+  const [suppliers, businessUnitsResult] = await Promise.all([
+    getSuppliers(),
+    supabaseServer
+      .from("business_units")
+      .select("id, code, name, is_accounting_autonomous, is_active")
+      .eq("is_active", true)
+      .order("id", { ascending: true }),
+  ]);
+
+  if (businessUnitsResult.error) {
+    throw new Error(
+      `Errore caricamento business unit: ${businessUnitsResult.error.message}`
+    );
+  }
+
+  const businessUnits = (businessUnitsResult.data ?? []) as BusinessUnit[];
 
   return (
     <AppShell
       title="Nuova esperienza"
-      subtitle="Crea una nuova esperienza e imposta il costo"
+      subtitle="Crea una nuova esperienza e assegnala alla business unit corretta"
     >
       <div className="mb-4 flex items-center justify-end">
         <Link
@@ -41,6 +65,36 @@ export default async function NuovaEsperienzaPage() {
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
                 placeholder="Es. Wine Tasting Montepulciano"
               />
+            </div>
+
+            <div>
+              <label
+                htmlFor="business_unit_id"
+                className="mb-2 block text-sm font-medium text-zinc-700"
+              >
+                Business unit
+              </label>
+              <select
+                id="business_unit_id"
+                name="business_unit_id"
+                required
+                defaultValue=""
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+              >
+                <option value="">Seleziona business unit</option>
+                {businessUnits.map((unit) => (
+                  <option key={unit.id} value={unit.id}>
+                    {unit.name}
+                    {unit.is_accounting_autonomous
+                      ? " • contabilità autonoma"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-zinc-500">
+                Obbligatoria. Serve per separare correttamente FMDQ da
+                Todointheworld.
+              </p>
             </div>
 
             <div>

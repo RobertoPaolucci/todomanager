@@ -11,6 +11,10 @@ function parseNumber(value: FormDataEntryValue | null, fallback = 0) {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function parseCount(value: FormDataEntryValue | null) {
+  return Math.max(0, Math.floor(parseNumber(value, 0)));
+}
+
 function normalizeText(value: FormDataEntryValue | null) {
   const text = String(value || "").trim();
   return text === "" ? null : text;
@@ -241,11 +245,12 @@ export async function createBooking(formData: FormData) {
   const booking_date = String(formData.get("booking_date") || "").trim();
   const booking_time = String(formData.get("booking_time") || "").trim();
 
-  const adults = Number(formData.get("adults") || 0);
-  const children = Number(formData.get("children") || 0);
-  const infants = Number(formData.get("infants") || 0);
+  const adults = parseCount(formData.get("adults"));
+  const children = parseCount(formData.get("children"));
+  const infants = parseCount(formData.get("infants"));
+  const non_paying_adults = parseCount(formData.get("non_paying_adults"));
 
-  const total_people = adults + children + infants;
+  const total_people = adults + children + infants + non_paying_adults;
   const pricing_pax = adults + children;
 
   const customer_payment_status = String(
@@ -267,12 +272,21 @@ export async function createBooking(formData: FormData) {
 
   const { data: experience, error: experienceError } = await supabaseServer
     .from("experiences")
-    .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
+    .select(
+      "id, name, supplier_id, supplier_unit_cost, is_group_pricing, business_unit_id"
+    )
     .eq("id", experience_id)
     .single();
 
   if (experienceError || !experience) {
     return { error: "Esperienza non trovata." };
+  }
+
+  if (!experience.business_unit_id) {
+    return {
+      error:
+        "Questa esperienza non ha una business unit assegnata. Apri l’esperienza e collega la business unit corretta prima di salvare la prenotazione.",
+    };
   }
 
   const { data: channel, error: channelError } = await supabaseServer
@@ -292,6 +306,7 @@ export async function createBooking(formData: FormData) {
   const customer_name = raw_customer_name || channel.name;
   const experience_name = String(experience.name || "").trim();
   const isGroupPricing = experience.is_group_pricing === true;
+  const business_unit_id = Number(experience.business_unit_id);
 
   const { data: priceRowData } = await supabaseServer
     .from("experience_channel_prices")
@@ -352,6 +367,7 @@ export async function createBooking(formData: FormData) {
     const { data, error } = await supabaseServer
       .from("bookings")
       .insert({
+        business_unit_id,
         channel_id,
         booking_source: channel.name,
         experience_id,
@@ -367,6 +383,7 @@ export async function createBooking(formData: FormData) {
         adults,
         children,
         infants,
+        non_paying_adults,
         total_people,
         pax: total_people,
         total_amount: total_customer,
@@ -479,11 +496,12 @@ export async function updateBooking(formData: FormData) {
   const booking_date = String(formData.get("booking_date") || "").trim();
   const booking_time = normalizeText(formData.get("booking_time"));
 
-  const adults = parseNumber(formData.get("adults"), 0);
-  const children = parseNumber(formData.get("children"), 0);
-  const infants = parseNumber(formData.get("infants"), 0);
+  const adults = parseCount(formData.get("adults"));
+  const children = parseCount(formData.get("children"));
+  const infants = parseCount(formData.get("infants"));
+  const non_paying_adults = parseCount(formData.get("non_paying_adults"));
 
-  const total_people = adults + children + infants;
+  const total_people = adults + children + infants + non_paying_adults;
   const pricing_pax = adults + children;
 
   const customer_payment_status = String(
@@ -514,12 +532,21 @@ export async function updateBooking(formData: FormData) {
 
   const { data: experience, error: experienceError } = await supabaseServer
     .from("experiences")
-    .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
+    .select(
+      "id, name, supplier_id, supplier_unit_cost, is_group_pricing, business_unit_id"
+    )
     .eq("id", experience_id)
     .single();
 
   if (experienceError || !experience) {
     return { error: "Esperienza non trovata." };
+  }
+
+  if (!experience.business_unit_id) {
+    return {
+      error:
+        "Questa esperienza non ha una business unit assegnata. Apri l’esperienza e collega la business unit corretta prima di salvare la prenotazione.",
+    };
   }
 
   const { data: channel, error: channelError } = await supabaseServer
@@ -538,6 +565,7 @@ export async function updateBooking(formData: FormData) {
 
   const customer_name = raw_customer_name || channel.name;
   const isGroupPricing = experience.is_group_pricing === true;
+  const business_unit_id = Number(experience.business_unit_id);
 
   const { data: priceRow } = await supabaseServer
     .from("experience_channel_prices")
@@ -612,6 +640,7 @@ export async function updateBooking(formData: FormData) {
     const { error } = await supabaseServer
       .from("bookings")
       .update({
+        business_unit_id,
         channel_id,
         booking_source: channel.name,
         experience_id,
@@ -627,6 +656,7 @@ export async function updateBooking(formData: FormData) {
         adults,
         children,
         infants,
+        non_paying_adults,
         total_people,
         pax: total_people,
         total_amount: total_customer,

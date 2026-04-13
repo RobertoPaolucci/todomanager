@@ -2,7 +2,8 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { updateExperience } from "../../actions";
-import { getExperienceById, getSuppliers } from "@/lib/queries";
+import { getSuppliers } from "@/lib/queries";
+import { supabaseServer } from "@/lib/supabase-server";
 
 type PageProps = {
   params: Promise<{
@@ -10,19 +11,59 @@ type PageProps = {
   }>;
 };
 
+type BusinessUnit = {
+  id: number;
+  code: string;
+  name: string;
+  is_accounting_autonomous: boolean;
+  is_active: boolean;
+};
+
 export default async function ModificaEsperienzaPage({ params }: PageProps) {
   const { id } = await params;
   const experienceId = Number(id);
 
-  const [experience, suppliers] = await Promise.all([
-    getExperienceById(experienceId),
+  if (!experienceId) {
+    throw new Error("ID esperienza non valido");
+  }
+
+  const [experienceResult, suppliers, businessUnitsResult] = await Promise.all([
+    supabaseServer
+      .from("experiences")
+      .select(
+        "id, name, bokun_id, supplier_id, supplier_unit_cost, notes, active, is_group_pricing, business_unit_id"
+      )
+      .eq("id", experienceId)
+      .single(),
     getSuppliers(),
+    supabaseServer
+      .from("business_units")
+      .select("id, code, name, is_accounting_autonomous, is_active")
+      .eq("is_active", true)
+      .order("id", { ascending: true }),
   ]);
+
+  if (experienceResult.error || !experienceResult.data) {
+    throw new Error(
+      `Errore caricamento esperienza: ${
+        experienceResult.error?.message || "Esperienza non trovata"
+      }`
+    );
+  }
+
+  if (businessUnitsResult.error) {
+    throw new Error(
+      `Errore caricamento business unit: ${businessUnitsResult.error.message}`
+    );
+  }
+
+  const experience = experienceResult.data;
+  const businessUnits = (businessUnitsResult.data ?? []) as BusinessUnit[];
 
   return (
     <AppShell
       title="Modifica esperienza"
-      subtitle="Aggiorna i dettagli e il costo dell'esperienza"
+      subtitle="Aggiorna i dettagli, il costo e la business unit dell'esperienza"
     >
       <div className="mb-4 flex items-center justify-end">
         <Link
@@ -55,20 +96,51 @@ export default async function ModificaEsperienzaPage({ params }: PageProps) {
               />
             </div>
 
-            {/* NUOVO CAMPO: BOKUN ID (Con bypass TypeScript) */}
+            <div>
+              <label
+                htmlFor="business_unit_id"
+                className="mb-2 block text-sm font-medium text-zinc-700"
+              >
+                Business unit
+              </label>
+              <select
+                id="business_unit_id"
+                name="business_unit_id"
+                required
+                defaultValue={experience.business_unit_id ?? ""}
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
+              >
+                <option value="">Seleziona business unit</option>
+                {businessUnits.map((unit) => (
+                  <option key={unit.id} value={unit.id}>
+                    {unit.name}
+                    {unit.is_accounting_autonomous
+                      ? " • contabilità autonoma"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-zinc-500">
+                Obbligatoria. Serve per separare correttamente FMDQ da
+                Todointheworld.
+              </p>
+            </div>
+
             <div>
               <label
                 htmlFor="bokun_id"
                 className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-700"
               >
                 Bokun ID
-                <span className="text-[10px] uppercase font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">Opzionale</span>
+                <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-orange-700">
+                  Opzionale
+                </span>
               </label>
               <input
                 id="bokun_id"
                 name="bokun_id"
                 type="text"
-                defaultValue={(experience as any).bokun_id ?? ""}
+                defaultValue={experience.bokun_id ?? ""}
                 className="w-full rounded-xl border border-zinc-300 bg-orange-50/30 px-4 py-3 text-sm outline-none transition focus:border-zinc-500 focus:bg-white"
                 placeholder="Es. 956472"
               />
@@ -113,7 +185,7 @@ export default async function ModificaEsperienzaPage({ params }: PageProps) {
                 className="w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
               />
             </div>
-            
+
             <div className="flex items-center pt-8">
               <div className="flex items-center gap-3 bg-zinc-50 px-4 py-3 rounded-xl border border-zinc-200 w-full">
                 <input
@@ -123,8 +195,14 @@ export default async function ModificaEsperienzaPage({ params }: PageProps) {
                   defaultChecked={experience.is_group_pricing}
                   className="h-5 w-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500"
                 />
-                <label htmlFor="is_group_pricing" className="text-sm font-medium text-zinc-800">
-                  Costo a gruppo <span className="text-zinc-500 font-normal">(non moltiplicare per pax)</span>
+                <label
+                  htmlFor="is_group_pricing"
+                  className="text-sm font-medium text-zinc-800"
+                >
+                  Costo a gruppo{" "}
+                  <span className="text-zinc-500 font-normal">
+                    (non moltiplicare per pax)
+                  </span>
                 </label>
               </div>
             </div>
