@@ -17,6 +17,8 @@ type ExistingBooking = {
   infants: number | null;
   total_people: number | null;
   channel_id: number | null;
+  experience_id: number | null;
+  is_cancelled: boolean | null;
 };
 
 function cleanString(value: unknown) {
@@ -92,12 +94,14 @@ function detectChannelIdFromText(value: string) {
   if (t.includes("getyourguide") || t.includes("gyg")) return 3;
   if (t.includes("viator") || t.includes("via")) return 2;
   if (t.includes("freedome")) return 5;
+
   if (
     t.includes("fattoria madonna della querce") ||
     t.includes("madonna della querce")
   ) {
     return 6;
   }
+
   if (t.includes("todointheworld") || t.includes("todo in the world")) return 4;
   if (t.includes("direct") || t.includes("website") || t.includes("web")) return 1;
 
@@ -147,7 +151,7 @@ function resolveChannel(body: any, bookingReference: string) {
     return {
       channelId: rawChannelId,
       bookingSource:
-        String(body.booking_source || "").trim() ||
+        cleanString(body.booking_source) ||
         getBookingSourceFromChannelId(rawChannelId),
     };
   }
@@ -167,6 +171,7 @@ function resolveChannel(body: any, bookingReference: string) {
 
 function scoreCandidate(params: {
   candidate: ExistingBooking;
+  expectedExperienceId: number;
   channelId: number;
   bookingTime: string;
   totalPeople: number | null;
@@ -176,6 +181,7 @@ function scoreCandidate(params: {
 }) {
   const {
     candidate,
+    expectedExperienceId,
     channelId,
     bookingTime,
     totalPeople,
@@ -193,6 +199,10 @@ function scoreCandidate(params: {
   const candidateEmail = normalizeText(candidate.customer_email);
   const candidateName = normalizeText(candidate.customer_name);
   const candidatePhone = normalizePhone(candidate.customer_phone);
+
+  if (Number(candidate.experience_id) === expectedExperienceId) {
+    score += 35;
+  }
 
   if (incomingEmail && candidateEmail && incomingEmail === candidateEmail) {
     score += 100;
@@ -233,6 +243,199 @@ function scoreCandidate(params: {
   return score;
 }
 
+function tryFindUniqueCandidate(params: {
+  candidates: ExistingBooking[];
+  expectedExperienceId: number;
+  channelId: number;
+  bookingTime: string;
+  totalPeople: number | null;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  broadSearch: boolean;
+}) {
+  const {
+    candidates,
+    expectedExperienceId,
+    channelId,
+    bookingTime,
+    totalPeople,
+    customerName,
+    customerEmail,
+    customerPhone,
+    broadSearch,
+  } = params;
+
+  if (!candidates.length) {
+    return {
+      match: null as ExistingBooking | null,
+      ranked: [] as Array<{ candidate: ExistingBooking; score: number }>,
+    };
+  }
+
+  const exactTimeChannelPeople = candidates.filter((c) => {
+    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
+    const sameChannel = Number(c.channel_id) === channelId;
+    const samePeople =
+      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
+
+    return sameTime && sameChannel && samePeople;
+  });
+
+  if (exactTimeChannelPeople.length === 1) {
+    return {
+      match: exactTimeChannelPeople[0],
+      ranked: [],
+    };
+  }
+
+  const exactTimePeople = candidates.filter((c) => {
+    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
+    const samePeople =
+      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
+
+    return sameTime && samePeople;
+  });
+
+  if (exactTimePeople.length === 1) {
+    return {
+      match: exactTimePeople[0],
+      ranked: [],
+    };
+  }
+
+  const exactTimeChannel = candidates.filter((c) => {
+    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
+    const sameChannel = Number(c.channel_id) === channelId;
+
+    return sameTime && sameChannel;
+  });
+
+  if (exactTimeChannel.length === 1) {
+    return {
+      match: exactTimeChannel[0],
+      ranked: [],
+    };
+  }
+
+  const sameChannelPeople = candidates.filter((c) => {
+    const sameChannel = Number(c.channel_id) === channelId;
+    const samePeople =
+      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
+
+    return sameChannel && samePeople;
+  });
+
+  if (sameChannelPeople.length === 1) {
+    return {
+      match: sameChannelPeople[0],
+      ranked: [],
+    };
+  }
+
+  const incomingEmail = normalizeText(customerEmail);
+
+  if (incomingEmail) {
+    const byEmail = candidates.filter(
+      (c) => normalizeText(c.customer_email) === incomingEmail
+    );
+
+    if (byEmail.length === 1) {
+      return {
+        match: byEmail[0],
+        ranked: [],
+      };
+    }
+  }
+
+  const incomingPhone = normalizePhone(customerPhone);
+
+  if (incomingPhone) {
+    const byPhone = candidates.filter(
+      (c) => normalizePhone(c.customer_phone) === incomingPhone
+    );
+
+    if (byPhone.length === 1) {
+      return {
+        match: byPhone[0],
+        ranked: [],
+      };
+    }
+  }
+
+  const incomingName = normalizeText(customerName);
+
+  if (incomingName) {
+    const byName = candidates.filter(
+      (c) => normalizeText(c.customer_name) === incomingName
+    );
+
+    if (byName.length === 1) {
+      return {
+        match: byName[0],
+        ranked: [],
+      };
+    }
+  }
+
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      score: scoreCandidate({
+        candidate,
+        expectedExperienceId,
+        channelId,
+        bookingTime,
+        totalPeople,
+        customerName,
+        customerEmail,
+        customerPhone,
+      }),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+  const second = ranked[1];
+
+  if (!best) {
+    return {
+      match: null,
+      ranked,
+    };
+  }
+
+  if (!broadSearch) {
+    if (best.score >= 80) {
+      return { match: best.candidate, ranked };
+    }
+
+    if (best.score >= 45 && (!second || best.score >= second.score + 15)) {
+      return { match: best.candidate, ranked };
+    }
+
+    if (ranked.length === 1 && best.score >= 25) {
+      return { match: best.candidate, ranked };
+    }
+  } else {
+    if (best.score >= 100) {
+      return { match: best.candidate, ranked };
+    }
+
+    if (best.score >= 65 && (!second || best.score >= second.score + 20)) {
+      return { match: best.candidate, ranked };
+    }
+
+    if (ranked.length === 1 && best.score >= 40) {
+      return { match: best.candidate, ranked };
+    }
+  }
+
+  return {
+    match: null,
+    ranked,
+  };
+}
+
 async function findExistingBooking(params: {
   bookingReference: string;
   isCancelled: boolean;
@@ -258,12 +461,13 @@ async function findExistingBooking(params: {
     totalPeople,
   } = params;
 
+  const selectFields =
+    "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id, experience_id, is_cancelled";
+
   if (bookingReference) {
     const { data, error } = await supabaseServer
       .from("bookings")
-      .select(
-        "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id"
-      )
+      .select(selectFields)
       .eq("booking_reference", bookingReference)
       .maybeSingle();
 
@@ -274,103 +478,61 @@ async function findExistingBooking(params: {
   if (!isCancelled) return null;
   if (!bookingDate) return null;
 
-  const { data: candidates, error: candidatesError } = await supabaseServer
+  const { data: sameExperienceCandidates, error: sameExperienceError } =
+    await supabaseServer
+      .from("bookings")
+      .select(selectFields)
+      .eq("booking_date", bookingDate)
+      .eq("experience_id", experienceId)
+      .eq("is_cancelled", false)
+      .limit(50);
+
+  if (sameExperienceError) {
+    throw new Error(sameExperienceError.message);
+  }
+
+  const sameExperienceList = (sameExperienceCandidates || []) as ExistingBooking[];
+
+  const sameExperienceResult = tryFindUniqueCandidate({
+    candidates: sameExperienceList,
+    expectedExperienceId: experienceId,
+    channelId,
+    bookingTime,
+    totalPeople,
+    customerName,
+    customerEmail,
+    customerPhone,
+    broadSearch: false,
+  });
+
+  if (sameExperienceResult.match) {
+    return sameExperienceResult.match;
+  }
+
+  const { data: sameDateCandidates, error: sameDateError } = await supabaseServer
     .from("bookings")
-    .select(
-      "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id"
-    )
-    .eq("experience_id", experienceId)
+    .select(selectFields)
     .eq("booking_date", bookingDate)
     .eq("is_cancelled", false)
-    .limit(50);
+    .limit(100);
 
-  if (candidatesError) {
-    throw new Error(candidatesError.message);
+  if (sameDateError) {
+    throw new Error(sameDateError.message);
   }
 
-  if (!candidates || candidates.length === 0) {
-    return null;
-  }
+  const sameDateList = (sameDateCandidates || []) as ExistingBooking[];
 
-  const list = candidates as ExistingBooking[];
-
-  const exactTimeChannelPeople = list.filter((c) => {
-    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
-    const sameChannel = Number(c.channel_id) === channelId;
-    const samePeople =
-      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
-    return sameTime && sameChannel && samePeople;
+  const sameDateResult = tryFindUniqueCandidate({
+    candidates: sameDateList,
+    expectedExperienceId: experienceId,
+    channelId,
+    bookingTime,
+    totalPeople,
+    customerName,
+    customerEmail,
+    customerPhone,
+    broadSearch: true,
   });
-
-  if (exactTimeChannelPeople.length === 1) {
-    return exactTimeChannelPeople[0];
-  }
-
-  const exactTimePeople = list.filter((c) => {
-    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
-    const samePeople =
-      totalPeople !== null && Number(c.total_people || 0) === totalPeople;
-    return sameTime && samePeople;
-  });
-
-  if (exactTimePeople.length === 1) {
-    return exactTimePeople[0];
-  }
-
-  const exactTimeChannel = list.filter((c) => {
-    const sameTime = bookingTime && cleanString(c.booking_time) === bookingTime;
-    const sameChannel = Number(c.channel_id) === channelId;
-    return sameTime && sameChannel;
-  });
-
-  if (exactTimeChannel.length === 1) {
-    return exactTimeChannel[0];
-  }
-
-  const incomingEmail = normalizeText(customerEmail);
-  if (incomingEmail) {
-    const byEmail = list.filter(
-      (c) => normalizeText(c.customer_email) === incomingEmail
-    );
-    if (byEmail.length === 1) {
-      return byEmail[0];
-    }
-  }
-
-  const incomingPhone = normalizePhone(customerPhone);
-  if (incomingPhone) {
-    const byPhone = list.filter(
-      (c) => normalizePhone(c.customer_phone) === incomingPhone
-    );
-    if (byPhone.length === 1) {
-      return byPhone[0];
-    }
-  }
-
-  const incomingName = normalizeText(customerName);
-  if (incomingName) {
-    const byName = list.filter(
-      (c) => normalizeText(c.customer_name) === incomingName
-    );
-    if (byName.length === 1) {
-      return byName[0];
-    }
-  }
-
-  const ranked = list
-    .map((candidate) => ({
-      candidate,
-      score: scoreCandidate({
-        candidate,
-        channelId,
-        bookingTime,
-        totalPeople,
-        customerName,
-        customerEmail,
-        customerPhone,
-      }),
-    }))
-    .sort((a, b) => b.score - a.score);
 
   console.log(
     "CANCEL MATCH DEBUG",
@@ -387,13 +549,42 @@ async function findExistingBooking(params: {
           customerEmail,
           customerPhone,
         },
-        ranked: ranked.map((r) => ({
+        same_experience_candidates: sameExperienceList.map((c) => ({
+          id: c.id,
+          booking_reference: c.booking_reference,
+          customer_name: c.customer_name,
+          booking_time: c.booking_time,
+          total_people: c.total_people,
+          channel_id: c.channel_id,
+          experience_id: c.experience_id,
+        })),
+        same_experience_ranked: sameExperienceResult.ranked.map((r) => ({
           id: r.candidate.id,
           booking_reference: r.candidate.booking_reference,
           customer_name: r.candidate.customer_name,
           booking_time: r.candidate.booking_time,
           total_people: r.candidate.total_people,
           channel_id: r.candidate.channel_id,
+          experience_id: r.candidate.experience_id,
+          score: r.score,
+        })),
+        same_date_candidates: sameDateList.map((c) => ({
+          id: c.id,
+          booking_reference: c.booking_reference,
+          customer_name: c.customer_name,
+          booking_time: c.booking_time,
+          total_people: c.total_people,
+          channel_id: c.channel_id,
+          experience_id: c.experience_id,
+        })),
+        same_date_ranked: sameDateResult.ranked.map((r) => ({
+          id: r.candidate.id,
+          booking_reference: r.candidate.booking_reference,
+          customer_name: r.candidate.customer_name,
+          booking_time: r.candidate.booking_time,
+          total_people: r.candidate.total_people,
+          channel_id: r.candidate.channel_id,
+          experience_id: r.candidate.experience_id,
           score: r.score,
         })),
       },
@@ -402,21 +593,8 @@ async function findExistingBooking(params: {
     )
   );
 
-  const best = ranked[0];
-  const second = ranked[1];
-
-  if (!best) return null;
-
-  if (best.score >= 80) {
-    return best.candidate;
-  }
-
-  if (best.score >= 45 && (!second || best.score >= second.score + 15)) {
-    return best.candidate;
-  }
-
-  if (ranked.length === 1 && best.score >= 25) {
-    return best.candidate;
+  if (sameDateResult.match) {
+    return sameDateResult.match;
   }
 
   return null;
@@ -516,13 +694,37 @@ export async function POST(req: Request) {
     });
 
     if (isCancelled && !existing) {
-      return NextResponse.json(
-        {
-          error:
-            "Cancellazione ricevuta ma prenotazione esistente non trovata. Nessun dato aggiornato per evitare abbinamenti sbagliati.",
-        },
-        { status: 404 }
+      console.log(
+        "CANCEL NOT FOUND",
+        JSON.stringify(
+          {
+            incoming: {
+              booking_reference: incomingBookingReference,
+              bokun_id: rawBokunId,
+              resolved_experience_id: experience.id,
+              booking_date: incomingBookingDate,
+              booking_time: incomingBookingTime,
+              channel_id: channelId,
+              customer_name: incomingCustomerName,
+              customer_email: incomingCustomerEmail,
+              customer_phone: incomingCustomerPhone,
+              adults: adultsFromBody,
+              children: childrenFromBody,
+              infants: infantsFromBody,
+              total_people: incomingTotalPeople,
+            },
+          },
+          null,
+          2
+        )
       );
+
+      return NextResponse.json({
+        success: false,
+        skipped: true,
+        reason:
+          "Cancellazione ricevuta ma prenotazione esistente non trovata. Nessun dato aggiornato per evitare abbinamenti sbagliati.",
+      });
     }
 
     const finalCustomerName = firstNonEmpty(
