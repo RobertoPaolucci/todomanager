@@ -18,13 +18,15 @@ export default async function ModificaCanalePage({ params }: PageProps) {
     .single();
 
   if (error || !channel) {
-    throw new Error(`Errore caricamento canale: ${error?.message || "Canale non trovato"}`);
+    throw new Error(
+      `Errore caricamento canale: ${error?.message || "Canale non trovato"}`
+    );
   }
 
   return (
     <AppShell
       title="Modifica Canale"
-      subtitle="Aggiorna le impostazioni dell'agenzia"
+      subtitle="Aggiorna le impostazioni del canale"
     >
       <div className="mb-4 flex items-center justify-end">
         <Link
@@ -41,7 +43,10 @@ export default async function ModificaCanalePage({ params }: PageProps) {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label htmlFor="name" className="mb-2 block text-sm font-medium text-zinc-700">
+              <label
+                htmlFor="name"
+                className="mb-2 block text-sm font-medium text-zinc-700"
+              >
                 Nome canale
               </label>
               <input
@@ -55,24 +60,38 @@ export default async function ModificaCanalePage({ params }: PageProps) {
             </div>
 
             <div>
-              <label htmlFor="type" className="mb-2 block text-sm font-medium text-zinc-700">
+              <label
+                htmlFor="type"
+                className="mb-2 block text-sm font-medium text-zinc-700"
+              >
                 Tipo
               </label>
               <select
                 id="type"
                 name="type"
+                required
                 defaultValue={channel.type}
                 className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-zinc-500"
               >
                 <option value="ota">OTA (Online Travel Agency)</option>
                 <option value="direct">Diretto</option>
+                <option value="agency">Agenzia / Hotel / Struttura</option>
                 <option value="internal">Interno / Partner</option>
               </select>
+
+              <p className="mt-2 text-xs text-zinc-500">
+                Usa <strong>agency</strong> per agenzie, hotel, tour operator,
+                concierge, wedding planner e strutture che inviano o gestiscono
+                la prenotazione.
+              </p>
             </div>
           </div>
 
           <div>
-            <label htmlFor="notes" className="mb-2 block text-sm font-medium text-zinc-700">
+            <label
+              htmlFor="notes"
+              className="mb-2 block text-sm font-medium text-zinc-700"
+            >
               Note o Commissioni
             </label>
             <input

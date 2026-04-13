@@ -38,35 +38,66 @@ function isDuplicateBookingReferenceError(error: any) {
   );
 }
 
-function isDirectChannel(channel?: { name?: string | null; type?: string | null } | null) {
+function isDirectChannel(
+  channel?: { name?: string | null; type?: string | null } | null
+) {
   const type = String(channel?.type ?? "").trim().toLowerCase();
   const name = String(channel?.name ?? "").trim().toLowerCase();
 
   return type === "direct" || name === "direct" || name === "diretto";
 }
 
-function extractDirectProgressive(value: string | null | undefined) {
-  const match = String(value ?? "").match(/^DIR-(\d{6})$/i);
+function isAgencyChannel(
+  channel?: { name?: string | null; type?: string | null } | null
+) {
+  const type = String(channel?.type ?? "").trim().toLowerCase();
+  return type === "agency";
+}
+
+function isAutoReferenceChannel(
+  channel?: { name?: string | null; type?: string | null } | null
+) {
+  return isDirectChannel(channel) || isAgencyChannel(channel);
+}
+
+function getBookingReferencePrefix(
+  channel?: { name?: string | null; type?: string | null } | null
+) {
+  if (isDirectChannel(channel)) return "DIR";
+  if (isAgencyChannel(channel)) return "AGY";
+  return null;
+}
+
+function extractProgressiveByPrefix(
+  value: string | null | undefined,
+  prefix: string
+) {
+  const match = String(value ?? "").match(
+    new RegExp(`^${prefix}-(\\d{6})$`, "i")
+  );
   return match ? Number(match[1]) : 0;
 }
 
-async function getNextDirectBookingReference() {
+async function getNextBookingReferenceByPrefix(prefix: string) {
   const { data, error } = await supabaseServer
     .from("bookings")
     .select("booking_reference")
-    .ilike("booking_reference", "DIR-%")
+    .ilike("booking_reference", `${prefix}-%`)
     .order("booking_reference", { ascending: false })
     .limit(200);
 
   if (error) {
-    throw new Error(`Errore generazione riferimento DIR: ${error.message}`);
+    throw new Error(`Errore generazione riferimento ${prefix}: ${error.message}`);
   }
 
   const maxProgressive = (data ?? []).reduce((max, row) => {
-    return Math.max(max, extractDirectProgressive(row.booking_reference));
+    return Math.max(
+      max,
+      extractProgressiveByPrefix(row.booking_reference, prefix)
+    );
   }, 0);
 
-  return `DIR-${String(maxProgressive + 1).padStart(6, "0")}`;
+  return `${prefix}-${String(maxProgressive + 1).padStart(6, "0")}`;
 }
 
 async function resolveBookingReference(params: {
@@ -79,11 +110,13 @@ async function resolveBookingReference(params: {
     return manualReference;
   }
 
-  if (!isDirectChannel(params.channel)) {
+  const prefix = getBookingReferencePrefix(params.channel);
+
+  if (!prefix) {
     return null;
   }
 
-  return await getNextDirectBookingReference();
+  return await getNextBookingReferenceByPrefix(prefix);
 }
 
 function getEffectiveSupplierPaid(input: {
@@ -94,7 +127,9 @@ function getEffectiveSupplierPaid(input: {
 }) {
   const costo = Number(input.total_supplier_cost || 0);
   const rawPaid = Number(input.supplier_amount_paid || 0);
-  const status = String(input.supplier_payment_status || "").trim().toLowerCase();
+  const status = String(input.supplier_payment_status || "")
+    .trim()
+    .toLowerCase();
 
   if (input.is_cancelled) return 0;
   if (status === "paid") return round2(costo);
@@ -195,9 +230,11 @@ export async function createBooking(formData: FormData) {
   const raw_booking_reference = formData.get("booking_reference");
   const manual_booking_reference = normalizeBookingReference(raw_booking_reference);
 
-  const booking_created_at = String(formData.get("booking_created_at") || "").trim();
+  const booking_created_at = String(
+    formData.get("booking_created_at") || ""
+  ).trim();
 
-  const customer_name = String(formData.get("customer_name") || "").trim();
+  const raw_customer_name = String(formData.get("customer_name") || "").trim();
   const customer_phone = String(formData.get("customer_phone") || "").trim();
   const customer_email = String(formData.get("customer_email") || "").trim();
 
@@ -224,7 +261,7 @@ export async function createBooking(formData: FormData) {
   const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
   const notes = String(formData.get("notes") || "").trim();
 
-  if (!channel_id || !experience_id || !booking_date || !customer_name || !booking_created_at) {
+  if (!channel_id || !experience_id || !booking_date || !booking_created_at) {
     return { error: "Compila tutti i campi obbligatori." };
   }
 
@@ -248,6 +285,11 @@ export async function createBooking(formData: FormData) {
     return { error: "Canale non trovato." };
   }
 
+  if (isDirectChannel(channel) && !raw_customer_name) {
+    return { error: "Per il canale Direct il nome cliente è obbligatorio." };
+  }
+
+  const customer_name = raw_customer_name || channel.name;
   const experience_name = String(experience.name || "").trim();
   const isGroupPricing = experience.is_group_pricing === true;
 
@@ -291,14 +333,15 @@ export async function createBooking(formData: FormData) {
     : supplier_unit_cost * pricing_pax;
   const margin_total = total_to_you - total_supplier_cost;
 
-  const shouldAutoGenerateDirectReference =
-    isDirectChannel(channel) && !manual_booking_reference;
+  const shouldAutoGenerateBookingReference =
+    isAutoReferenceChannel(channel) && !manual_booking_reference;
 
-  let insertedBooking: { id: number; booking_reference?: string | null } | null = null;
+  let insertedBooking: { id: number; booking_reference?: string | null } | null =
+    null;
   let insertError: any = null;
   let savedBookingReference: string | null = null;
 
-  const maxAttempts = shouldAutoGenerateDirectReference ? 5 : 1;
+  const maxAttempts = shouldAutoGenerateBookingReference ? 5 : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const booking_reference = await resolveBookingReference({
@@ -350,7 +393,7 @@ export async function createBooking(formData: FormData) {
       break;
     }
 
-    if (shouldAutoGenerateDirectReference && isDuplicateBookingReferenceError(error)) {
+    if (shouldAutoGenerateBookingReference && isDuplicateBookingReferenceError(error)) {
       insertError = error;
       continue;
     }
@@ -362,12 +405,15 @@ export async function createBooking(formData: FormData) {
   if (insertError || !insertedBooking) {
     if (isDuplicateBookingReferenceError(insertError)) {
       return {
-        error: "⚠️ Attenzione: Questo Numero di Riferimento esiste già. Usa un codice diverso.",
+        error:
+          "⚠️ Attenzione: Questo Numero di Riferimento esiste già. Usa un codice diverso.",
       };
     }
 
     return {
-      error: `Errore durante il salvataggio: ${insertError?.message || "errore sconosciuto"}`,
+      error: `Errore durante il salvataggio: ${
+        insertError?.message || "errore sconosciuto"
+      }`,
     };
   }
 
@@ -424,8 +470,10 @@ export async function updateBooking(formData: FormData) {
   const raw_booking_reference = formData.get("booking_reference");
   const manual_booking_reference = normalizeBookingReference(raw_booking_reference);
 
-  const booking_created_at = String(formData.get("booking_created_at") || "").trim();
-  const customer_name = String(formData.get("customer_name") || "").trim();
+  const booking_created_at = String(
+    formData.get("booking_created_at") || ""
+  ).trim();
+  const raw_customer_name = String(formData.get("customer_name") || "").trim();
   const customer_phone = normalizeText(formData.get("customer_phone"));
   const customer_email = normalizeText(formData.get("customer_email"));
   const booking_date = String(formData.get("booking_date") || "").trim();
@@ -484,6 +532,11 @@ export async function updateBooking(formData: FormData) {
     return { error: "Canale non trovato." };
   }
 
+  if (isDirectChannel(channel) && !raw_customer_name) {
+    return { error: "Per il canale Direct il nome cliente è obbligatorio." };
+  }
+
+  const customer_name = raw_customer_name || channel.name;
   const isGroupPricing = experience.is_group_pricing === true;
 
   const { data: priceRow } = await supabaseServer
@@ -543,12 +596,12 @@ export async function updateBooking(formData: FormData) {
   const oldSupplierId = Number(currentBooking.supplier_id || 0);
   const newSupplierId = Number(experience.supplier_id || 0);
 
-  const shouldAutoGenerateDirectReference =
-    isDirectChannel(channel) && !manual_booking_reference;
+  const shouldAutoGenerateBookingReference =
+    isAutoReferenceChannel(channel) && !manual_booking_reference;
 
   let updateError: any = null;
   let finalBookingReference: string | null = null;
-  const maxAttempts = shouldAutoGenerateDirectReference ? 5 : 1;
+  const maxAttempts = shouldAutoGenerateBookingReference ? 5 : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const booking_reference = await resolveBookingReference({
@@ -597,7 +650,7 @@ export async function updateBooking(formData: FormData) {
       break;
     }
 
-    if (shouldAutoGenerateDirectReference && isDuplicateBookingReferenceError(error)) {
+    if (shouldAutoGenerateBookingReference && isDuplicateBookingReferenceError(error)) {
       updateError = error;
       continue;
     }
@@ -609,7 +662,8 @@ export async function updateBooking(formData: FormData) {
   if (updateError) {
     if (isDuplicateBookingReferenceError(updateError)) {
       return {
-        error: "⚠️ Attenzione: Questo Numero di Riferimento è già usato da un'altra prenotazione.",
+        error:
+          "⚠️ Attenzione: Questo Numero di Riferimento è già usato da un'altra prenotazione.",
       };
     }
 
