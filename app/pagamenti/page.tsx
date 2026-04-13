@@ -13,11 +13,11 @@ function formatEuro(value: number) {
   }).format(value);
 }
 
-function getBookingPaidAmount(booking: any, isInternal: boolean) {
+function getBookingPaidAmount(booking: any, isInternalBooking: boolean) {
   const costo = Number(booking.total_supplier_cost || 0);
 
   if (booking.is_cancelled) return 0;
-  if (isInternal) return costo;
+  if (isInternalBooking) return costo;
   if (booking.supplier_payment_status === "paid") return costo;
 
   const rawPaid = Number(booking.supplier_amount_paid || 0);
@@ -28,25 +28,55 @@ export default async function PagamentiPage() {
   const todayObj = new Date();
   const todayStr = todayObj.toISOString().split("T")[0];
 
-  const [suppliersRes, bookingsRes] = await Promise.all([
+  const [suppliersRes, bookingsRes, internalRulesRes] = await Promise.all([
     supabaseServer.from("suppliers").select("id, name").order("name"),
     supabaseServer.from("bookings").select(`
       supplier_id,
+      business_unit_id,
       total_supplier_cost,
       booking_date,
       is_cancelled,
       supplier_payment_status,
       supplier_amount_paid
     `),
+    supabaseServer
+      .from("business_unit_internal_suppliers")
+      .select("business_unit_id, supplier_id"),
   ]);
+
+  if (suppliersRes.error) {
+    console.error("Errore caricamento fornitori:", suppliersRes.error.message);
+  }
+
+  if (bookingsRes.error) {
+    console.error("Errore caricamento bookings:", bookingsRes.error.message);
+  }
+
+  if (internalRulesRes.error) {
+    console.error(
+      "Errore caricamento regole fornitori interni:",
+      internalRulesRes.error.message
+    );
+  }
 
   const suppliers = suppliersRes.data || [];
   const bookings = bookingsRes.data || [];
+  const internalRules = internalRulesRes.data || [];
+
+  const internalRuleSet = new Set(
+    internalRules.map((rule) => `${rule.business_unit_id}:${rule.supplier_id}`)
+  );
 
   const supplierBalances = suppliers.map((supplier) => {
-    const isInternal = supplier.name.includes("Fattoria Madonna della Querce");
+    const supplierBookings = bookings
+      .filter((b) => b.supplier_id === supplier.id)
+      .map((b) => ({
+        ...b,
+        _is_internal_booking: internalRuleSet.has(
+          `${b.business_unit_id}:${b.supplier_id}`
+        ),
+      }));
 
-    const supplierBookings = bookings.filter((b) => b.supplier_id === supplier.id);
     const activeBookings = supplierBookings.filter((b) => !b.is_cancelled);
 
     const totalCosto = activeBookings.reduce(
@@ -55,13 +85,17 @@ export default async function PagamentiPage() {
     );
 
     const totalPagato = activeBookings.reduce((sum, b) => {
-      return sum + getBookingPaidAmount(b, isInternal);
+      return sum + getBookingPaidAmount(b, b._is_internal_booking);
     }, 0);
 
     const daPagareOggi = activeBookings.reduce((sum, b) => {
       const costo = Number(b.total_supplier_cost || 0);
-      const pagato = getBookingPaidAmount(b, isInternal);
+      const pagato = getBookingPaidAmount(b, b._is_internal_booking);
       const residuo = Math.max(0, costo - pagato);
+
+      if (b._is_internal_booking) {
+        return sum;
+      }
 
       if (b.booking_date && b.booking_date <= todayStr) {
         return sum + residuo;
@@ -70,13 +104,28 @@ export default async function PagamentiPage() {
       return sum;
     }, 0);
 
+    const internalBookingsCount = activeBookings.filter(
+      (b) => b._is_internal_booking
+    ).length;
+
+    const externalBookingsCount = activeBookings.filter(
+      (b) => !b._is_internal_booking
+    ).length;
+
+    let supplierMode: "external" | "internal" | "mixed" = "external";
+    if (internalBookingsCount > 0 && externalBookingsCount === 0) {
+      supplierMode = "internal";
+    } else if (internalBookingsCount > 0 && externalBookingsCount > 0) {
+      supplierMode = "mixed";
+    }
+
     return {
       ...supplier,
       totalCosto,
       totalPagato,
-      daPagareOggi: isInternal ? 0 : daPagareOggi,
+      daPagareOggi,
       prenotazioniCount: activeBookings.length,
-      isInternal,
+      supplierMode,
     };
   });
 
@@ -114,38 +163,62 @@ export default async function PagamentiPage() {
                       className="group cursor-pointer border-b border-zinc-100 transition hover:bg-zinc-50"
                     >
                       <td className="py-4 pr-4 font-medium text-zinc-900 group-hover:text-blue-600">
-                        <Link href={`/pagamenti/${supplier.id}`} className="flex w-full items-center gap-2">
+                        <Link
+                          href={`/pagamenti/${supplier.id}`}
+                          className="flex w-full items-center gap-2"
+                        >
                           {supplier.name}
-                          {supplier.isInternal && (
+
+                          {supplier.supplierMode === "internal" && (
                             <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight text-emerald-700">
                               Interno
+                            </span>
+                          )}
+
+                          {supplier.supplierMode === "mixed" && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight text-amber-700">
+                              Misto
                             </span>
                           )}
                         </Link>
                       </td>
 
                       <td className="py-4 pr-4 text-center">
-                        <Link href={`/pagamenti/${supplier.id}`} className="block w-full text-zinc-500">
+                        <Link
+                          href={`/pagamenti/${supplier.id}`}
+                          className="block w-full text-zinc-500"
+                        >
                           {supplier.prenotazioniCount}
                         </Link>
                       </td>
 
                       <td className="py-4 pr-4 text-right text-zinc-500">
-                        <Link href={`/pagamenti/${supplier.id}`} className="block w-full">
+                        <Link
+                          href={`/pagamenti/${supplier.id}`}
+                          className="block w-full"
+                        >
                           {formatEuro(supplier.totalCosto)}
                         </Link>
                       </td>
 
                       <td className="py-4 pr-4 text-right font-medium text-green-700">
-                        <Link href={`/pagamenti/${supplier.id}`} className="block w-full">
+                        <Link
+                          href={`/pagamenti/${supplier.id}`}
+                          className="block w-full"
+                        >
                           {formatEuro(supplier.totalPagato)}
                         </Link>
                       </td>
 
                       <td className="py-4 pr-4 text-right font-bold text-red-600">
-                        <Link href={`/pagamenti/${supplier.id}`} className="block w-full">
-                          {supplier.isInternal ? (
-                            <span className="font-medium text-emerald-600">Auto-saldato</span>
+                        <Link
+                          href={`/pagamenti/${supplier.id}`}
+                          className="block w-full"
+                        >
+                          {supplier.supplierMode === "internal" ? (
+                            <span className="font-medium text-emerald-600">
+                              Auto-saldato
+                            </span>
                           ) : (
                             formatEuro(supplier.daPagareOggi)
                           )}

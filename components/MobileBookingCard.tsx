@@ -20,6 +20,22 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function getBusinessUnitLabel(code: string | null | undefined) {
+  if (code === "fmdq") return "FMDQ";
+  if (code === "todointheworld") return "Todo";
+  return code ? code.toUpperCase() : "-";
+}
+
+function getBusinessUnitBadgeClass(code: string | null | undefined) {
+  if (code === "fmdq") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (code === "todointheworld") {
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+  return "border-zinc-200 bg-zinc-50 text-zinc-600";
+}
+
 type Props = {
   booking: any;
   highlightId?: string;
@@ -38,6 +54,8 @@ export default function MobileBookingCard({
   const isCancelled = booking.is_cancelled === true;
   const isHighlighted = String(booking.id) === highlightId;
   const isModifiedPermanent = booking.was_modified === true;
+  const businessUnitCode = booking._business_unit_code;
+  const isInternalSupplier = booking._is_internal_supplier === true;
 
   const bookingChannelName = Array.isArray(booking.channels)
     ? booking.channels[0]?.name || booking.booking_source || ""
@@ -56,17 +74,24 @@ export default function MobileBookingCard({
 
   const costoFornitore = Number(booking.total_supplier_cost || 0);
   const pagatoFornitore = Number(booking.supplier_amount_paid || 0);
+
   const isSupplierPaid =
+    isInternalSupplier ||
     booking.supplier_payment_status === "paid" ||
     (pagatoFornitore > 0 && pagatoFornitore >= costoFornitore);
+
   const isSupplierPartial =
+    !isInternalSupplier &&
     pagatoFornitore > 0 &&
     pagatoFornitore < costoFornitore &&
     booking.supplier_payment_status !== "paid";
 
   let supplierBadgeClass = "bg-red-100 text-red-700";
   let supplierBadgeText = "Da saldare";
-  if (isSupplierPaid) {
+  if (isInternalSupplier) {
+    supplierBadgeClass = "bg-emerald-100 text-emerald-700";
+    supplierBadgeText = "Auto-saldato";
+  } else if (isSupplierPaid) {
     supplierBadgeClass = "bg-green-100 text-green-700";
     supplierBadgeText = "Pagato";
   } else if (isSupplierPartial) {
@@ -170,6 +195,14 @@ export default function MobileBookingCard({
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-lg border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[15px] font-bold text-zinc-800">
                 {wChannel}
+              </span>
+
+              <span
+                className={`rounded-lg border px-2.5 py-1 text-[15px] font-bold ${getBusinessUnitBadgeClass(
+                  businessUnitCode
+                )}`}
+              >
+                {getBusinessUnitLabel(businessUnitCode)}
               </span>
 
               <span className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[15px] font-bold text-zinc-700">

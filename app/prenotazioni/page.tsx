@@ -24,6 +24,22 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function getBusinessUnitLabel(code: string | null | undefined) {
+  if (code === "fmdq") return "FMDQ";
+  if (code === "todointheworld") return "Todo";
+  return code ? code.toUpperCase() : "-";
+}
+
+function getBusinessUnitBadgeClass(code: string | null | undefined) {
+  if (code === "fmdq") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (code === "todointheworld") {
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+  return "border-zinc-200 bg-zinc-50 text-zinc-600";
+}
+
 type PageProps = {
   searchParams: Promise<{
     q?: string;
@@ -68,15 +84,62 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     .toISOString()
     .split("T")[0];
 
-  const { data: bookings, error } = await supabaseServer
-    .from("bookings")
-    .select("*, suppliers(phone), channels(name)");
+  const [bookingsRes, internalRulesRes, businessUnitsRes] = await Promise.all([
+    supabaseServer
+      .from("bookings")
+      .select("*, suppliers(phone), channels(name)"),
+    supabaseServer
+      .from("business_unit_internal_suppliers")
+      .select("business_unit_id, supplier_id"),
+    supabaseServer.from("business_units").select("id, code, name"),
+  ]);
 
-  if (error) {
-    console.error("Errore caricamento prenotazioni:", error.message);
+  if (bookingsRes.error) {
+    console.error(
+      "Errore caricamento prenotazioni:",
+      bookingsRes.error.message
+    );
   }
 
-  let allBookings = bookings || [];
+  if (internalRulesRes.error) {
+    console.error(
+      "Errore caricamento regole fornitori interni:",
+      internalRulesRes.error.message
+    );
+  }
+
+  if (businessUnitsRes.error) {
+    console.error(
+      "Errore caricamento business units:",
+      businessUnitsRes.error.message
+    );
+  }
+
+  const bookings = bookingsRes.data || [];
+  const internalRules = internalRulesRes.data || [];
+  const businessUnits = businessUnitsRes.data || [];
+
+  const internalRuleSet = new Set(
+    internalRules.map((rule) => `${rule.business_unit_id}:${rule.supplier_id}`)
+  );
+
+  const businessUnitMap = new Map(
+    businessUnits.map((bu) => [String(bu.id), bu])
+  );
+
+  let allBookings = bookings.map((booking) => {
+    const businessUnit = businessUnitMap.get(String(booking.business_unit_id));
+    const isInternalSupplier = internalRuleSet.has(
+      `${booking.business_unit_id}:${booking.supplier_id}`
+    );
+
+    return {
+      ...booking,
+      _is_internal_supplier: isInternalSupplier,
+      _business_unit_code: businessUnit?.code || "",
+      _business_unit_name: businessUnit?.name || "",
+    };
+  });
 
   allBookings = allBookings.filter((b) => {
     if (String(b.id) === highlightId) return true;
@@ -90,6 +153,8 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     }
 
     const bookingChannelName = getChannelName(b);
+    const businessUnitLabel = getBusinessUnitLabel(b._business_unit_code);
+    const businessUnitName = b._business_unit_name || "";
 
     if (q) {
       const term = q.toLowerCase();
@@ -98,7 +163,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
         (b.booking_reference || "").toLowerCase().includes(term) ||
         (b.experience_name || "").toLowerCase().includes(term) ||
         (bookingChannelName || "").toLowerCase().includes(term) ||
-        (b.customer_phone || "").toLowerCase().includes(term);
+        (b.customer_phone || "").toLowerCase().includes(term) ||
+        businessUnitLabel.toLowerCase().includes(term) ||
+        businessUnitName.toLowerCase().includes(term);
 
       if (!match) return false;
     }
@@ -474,6 +541,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const isHighlighted = String(booking.id) === highlightId;
                     const isModifiedPermanent = booking.was_modified === true;
                     const bookingChannelName = getChannelName(booking);
+                    const businessUnitCode = booking._business_unit_code;
+                    const isInternalSupplier =
+                      booking._is_internal_supplier === true;
 
                     const customerStatus = booking.customer_payment_status;
                     let customerBadgeClass = "bg-red-100 text-red-700";
@@ -488,17 +558,25 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
                     const costoFornitore = Number(booking.total_supplier_cost || 0);
                     const pagatoFornitore = Number(booking.supplier_amount_paid || 0);
+
                     const isSupplierPaid =
+                      isInternalSupplier ||
                       booking.supplier_payment_status === "paid" ||
                       (pagatoFornitore > 0 && pagatoFornitore >= costoFornitore);
+
                     const isSupplierPartial =
+                      !isInternalSupplier &&
                       pagatoFornitore > 0 &&
                       pagatoFornitore < costoFornitore &&
                       booking.supplier_payment_status !== "paid";
 
                     let supplierBadgeClass = "bg-red-100 text-red-700";
                     let supplierBadgeText = "Da Saldare";
-                    if (isSupplierPaid) {
+
+                    if (isInternalSupplier) {
+                      supplierBadgeClass = "bg-emerald-100 text-emerald-700";
+                      supplierBadgeText = "Auto-saldato";
+                    } else if (isSupplierPaid) {
                       supplierBadgeClass = "bg-green-100 text-green-700";
                       supplierBadgeText = "Pagato";
                     } else if (isSupplierPartial) {
@@ -637,14 +715,24 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         </td>
 
                         <td className="py-4 pr-4">
-                          <div className="mb-1 flex items-center gap-2">
+                          <div className="mb-1 flex flex-wrap items-center gap-2">
                             <span className="inline-block rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600">
                               {bookingChannelName || "-"}
                             </span>
+
+                            <span
+                              className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-bold ${getBusinessUnitBadgeClass(
+                                businessUnitCode
+                              )}`}
+                            >
+                              {getBusinessUnitLabel(businessUnitCode)}
+                            </span>
+
                             <span className="text-[10px] font-medium text-zinc-500">
                               {wPax} Pax
                             </span>
                           </div>
+
                           <div className="max-w-[150px] truncate text-xs font-medium text-zinc-700">
                             {booking.experience_name}
                           </div>

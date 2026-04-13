@@ -60,7 +60,6 @@ function detectChannelIdFromText(value: string) {
 function resolveChannel(body: any, bookingReference: string) {
   const ref = String(bookingReference || "").trim().toUpperCase();
 
-  // Regole forti sui prefissi riferimento
   if (ref.startsWith("GYG")) {
     return {
       channelId: 3,
@@ -162,12 +161,21 @@ export async function POST(req: Request) {
 
     const { data: experience, error: experienceError } = await supabaseServer
       .from("experiences")
-      .select("id, name, supplier_id, is_group_pricing, supplier_unit_cost")
+      .select(
+        "id, name, supplier_id, is_group_pricing, supplier_unit_cost, business_unit_id"
+      )
       .eq("bokun_id", rawBokunId)
       .single();
 
     if (experienceError || !experience) {
       return NextResponse.json({ error: "Esperienza non trovata" }, { status: 404 });
+    }
+
+    if (!experience.business_unit_id) {
+      return NextResponse.json(
+        { error: "Esperienza senza business_unit_id" },
+        { status: 500 }
+      );
     }
 
     const isCancelled = String(body.status || "").toUpperCase() === "CANCELLED";
@@ -183,6 +191,7 @@ export async function POST(req: Request) {
       experience_id: experience.id,
       experience_name: experience.name,
       supplier_id: experience.supplier_id,
+      business_unit_id: Number(experience.business_unit_id),
 
       customer_name: String(body.customer_name || "").trim(),
       customer_email: String(body.customer_email || "").trim() || null,
@@ -261,6 +270,7 @@ export async function POST(req: Request) {
       success: true,
       channel_id: channelId,
       booking_source: bookingSource,
+      business_unit_id: bookingData.business_unit_id,
     });
   } catch (error: any) {
     console.error("Errore webhook prenotazioni:", error.message);
