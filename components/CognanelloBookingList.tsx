@@ -25,6 +25,7 @@ type Props = {
 
 function formatDateIt(value: string | null) {
   if (!value) return "—";
+
   const [y, m, d] = value.split("-").map(Number);
   const dt = new Date(y, (m || 1) - 1, d || 1);
 
@@ -43,6 +44,7 @@ function formatTime(value: string | null) {
 
 function formatCreatedAt(value: string | null) {
   if (!value) return "—";
+
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "—";
 
@@ -86,7 +88,6 @@ export default function CognanelloBookingList({
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const visibleIds = useMemo(() => bookings.map((b) => b.id), [bookings]);
-
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const toggleOne = (id: number) => {
@@ -107,7 +108,10 @@ export default function CognanelloBookingList({
 
   const openSummary = () => {
     if (selectedIds.length === 0) return;
-    router.push(`/prenotazioni/riepilogo?ids=${selectedIds.join(",")}`);
+
+    router.push(
+      `/prenotazioni/riepilogo?ids=${selectedIds.join(",")}&source=cognanello`
+    );
   };
 
   return (
@@ -161,7 +165,7 @@ export default function CognanelloBookingList({
 
         <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
           Seleziona le prenotazioni con la spunta e poi apri il riepilogo per
-          stampare il PDF o inviarlo via WhatsApp.
+          stampare il PDF.
         </div>
       </div>
 

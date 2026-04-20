@@ -8,8 +8,14 @@ import { supabaseServer } from "@/lib/supabase-server";
 type PageProps = {
   searchParams: Promise<{
     ids?: string | string[];
+    source?: string | string[];
   }>;
 };
+
+function getParam(value?: string | string[]) {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
 
 function formatDate(value: string | null) {
   if (!value) return "-";
@@ -111,6 +117,12 @@ export default async function RiepilogoPrenotazioniPage({
 }: PageProps) {
   const params = await searchParams;
   const ids = parseIds(params.ids);
+  const source = getParam(params.source).trim();
+  const isCognanello = source === "cognanello";
+  const backHref = isCognanello ? "/cognanello" : "/prenotazioni";
+  const backLabel = isCognanello
+    ? "← Torna alle prenotazioni Cognanello"
+    : "← Torna alle prenotazioni";
 
   if (ids.length === 0) {
     return (
@@ -125,10 +137,10 @@ export default async function RiepilogoPrenotazioniPage({
 
           <div className="mt-6">
             <Link
-              href="/prenotazioni"
+              href={backHref}
               className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-100"
             >
-              Torna alle prenotazioni
+              {backLabel}
             </Link>
           </div>
         </div>
@@ -208,16 +220,18 @@ export default async function RiepilogoPrenotazioniPage({
               Riepilogo Prenotazioni
             </h1>
             <p className="mt-1 text-sm text-zinc-600">
-              Selezione pronta per stampa PDF o invio WhatsApp.
+              {isCognanello
+                ? "Selezione pronta per stampa PDF."
+                : "Selezione pronta per stampa PDF o invio WhatsApp."}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/prenotazioni"
+              href={backHref}
               className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-100"
             >
-              ← Torna alle prenotazioni
+              {backLabel}
             </Link>
 
             <PrintPdfButton />
@@ -341,21 +355,25 @@ export default async function RiepilogoPrenotazioniPage({
           </div>
         </div>
 
-        <div className="print:hidden">
-          <SendSummaryWhatsAppButton
-            suppliers={suppliers}
-            message={whatsappMessage}
-          />
-        </div>
+        {!isCognanello && (
+          <>
+            <div className="print:hidden">
+              <SendSummaryWhatsAppButton
+                suppliers={suppliers}
+                message={whatsappMessage}
+              />
+            </div>
 
-        <div className="print:hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <div className="mb-2 text-sm font-black text-zinc-900">
-            Anteprima messaggio WhatsApp
-          </div>
-          <pre className="whitespace-pre-wrap rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
-            {whatsappMessage}
-          </pre>
-        </div>
+            <div className="print:hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div className="mb-2 text-sm font-black text-zinc-900">
+                Anteprima messaggio WhatsApp
+              </div>
+              <pre className="whitespace-pre-wrap rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+                {whatsappMessage}
+              </pre>
+            </div>
+          </>
+        )}
       </div>
     </main>
   );
