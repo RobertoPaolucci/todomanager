@@ -35,12 +35,29 @@ function isValidCognanelloBasicAuth(req: NextRequest) {
   const expectedUser = process.env.COGNANELLO_BASIC_USER ?? "";
   const expectedPassword = process.env.COGNANELLO_BASIC_PASSWORD ?? "";
 
+  const credentials = getBasicAuthCredentials(req);
+
+  console.log("[COGNANELLO AUTH CHECK]", {
+    path: req.nextUrl.pathname,
+    hasExpectedUser: Boolean(expectedUser),
+    hasExpectedPassword: Boolean(expectedPassword),
+    hasAuthorizationHeader: Boolean(req.headers.get("authorization")),
+    providedUsername: credentials?.username ?? null,
+    usernameMatches: credentials
+      ? credentials.username === expectedUser
+      : false,
+    passwordMatches: credentials
+      ? credentials.password === expectedPassword
+      : false,
+  });
+
   if (!expectedUser || !expectedPassword) {
     return false;
   }
 
-  const credentials = getBasicAuthCredentials(req);
-  if (!credentials) return false;
+  if (!credentials) {
+    return false;
+  }
 
   return (
     credentials.username === expectedUser &&
@@ -61,7 +78,6 @@ function buildBasicAuthResponse() {
 export function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
-  // Protezione separata solo per /cognanello
   if (pathname.startsWith(COGNANELLO_PATH)) {
     if (!isValidCognanelloBasicAuth(req)) {
       return buildBasicAuthResponse();
@@ -70,7 +86,6 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Protezione normale del resto di Todo Manager
   const hasAuthCookie = hasSupabaseAuthCookie(req);
   const isLoginPage = pathname.startsWith("/login");
 
