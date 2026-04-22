@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const COGNANELLO_PATH = "/cognanello";
+const COGNANELLO_SUMMARY_PATH = "/prenotazioni/riepilogo";
 
 function hasSupabaseAuthCookie(req: NextRequest) {
   return req.cookies.getAll().some((c) => c.name.includes("-auth-token"));
@@ -35,26 +36,11 @@ function isValidCognanelloBasicAuth(req: NextRequest) {
   const expectedUser = process.env.COGNANELLO_BASIC_USER ?? "";
   const expectedPassword = process.env.COGNANELLO_BASIC_PASSWORD ?? "";
 
-  const credentials = getBasicAuthCredentials(req);
-
-  console.log("[COGNANELLO AUTH CHECK]", {
-    path: req.nextUrl.pathname,
-    hasExpectedUser: Boolean(expectedUser),
-    hasExpectedPassword: Boolean(expectedPassword),
-    hasAuthorizationHeader: Boolean(req.headers.get("authorization")),
-    providedUsername: credentials?.username ?? null,
-    usernameMatches: credentials
-      ? credentials.username === expectedUser
-      : false,
-    passwordMatches: credentials
-      ? credentials.password === expectedPassword
-      : false,
-  });
-
   if (!expectedUser || !expectedPassword) {
     return false;
   }
 
+  const credentials = getBasicAuthCredentials(req);
   if (!credentials) {
     return false;
   }
@@ -75,10 +61,21 @@ function buildBasicAuthResponse() {
   });
 }
 
+function isCognanelloSummaryRequest(req: NextRequest) {
+  return (
+    req.nextUrl.pathname === COGNANELLO_SUMMARY_PATH &&
+    req.nextUrl.searchParams.get("source") === "cognanello"
+  );
+}
+
 export function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
-  if (pathname.startsWith(COGNANELLO_PATH)) {
+  const isCognanelloArea =
+    pathname.startsWith(COGNANELLO_PATH) || isCognanelloSummaryRequest(req);
+
+  // Area Cognanello: usa sempre Basic Auth dedicata
+  if (isCognanelloArea) {
     if (!isValidCognanelloBasicAuth(req)) {
       return buildBasicAuthResponse();
     }
@@ -86,6 +83,7 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Resto di Todo Manager: usa il login normale Supabase
   const hasAuthCookie = hasSupabaseAuthCookie(req);
   const isLoginPage = pathname.startsWith("/login");
 
