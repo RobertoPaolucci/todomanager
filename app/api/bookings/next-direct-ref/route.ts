@@ -1,20 +1,45 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 
-function isDirectChannel(channel?: { name?: string | null; type?: string | null } | null) {
-  const type = String(channel?.type ?? "").trim().toLowerCase();
-  const name = String(channel?.name ?? "").trim().toLowerCase();
-  return type === "direct" || name === "direct" || name === "diretto";
+type ChannelRow = {
+  name?: string | null;
+  type?: string | null;
+};
+
+function normalizeText(value?: string | null) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
-function isAgencyChannel(channel?: { name?: string | null; type?: string | null } | null) {
-  const type = String(channel?.type ?? "").trim().toLowerCase();
+function isFmdqChannel(channel?: ChannelRow | null) {
+  const type = normalizeText(channel?.type);
+  const name = normalizeText(channel?.name);
+
+  return (
+    type === "fmdq" ||
+    name === "fmdq" ||
+    name.includes("fattoria madonna della querce")
+  );
+}
+
+function isDirectChannel(channel?: ChannelRow | null) {
+  const type = normalizeText(channel?.type);
+  const name = normalizeText(channel?.name);
+
+  return (
+    type === "direct" ||
+    name === "direct" ||
+    name === "diretto" ||
+    isFmdqChannel(channel)
+  );
+}
+
+function isAgencyChannel(channel?: ChannelRow | null) {
+  const type = normalizeText(channel?.type);
   return type === "agency";
 }
 
-function getPrefixFromChannel(
-  channel?: { name?: string | null; type?: string | null } | null
-) {
+function getPrefixFromChannel(channel?: ChannelRow | null) {
+  if (isFmdqChannel(channel)) return "FMDQ";
   if (isDirectChannel(channel)) return "DIR";
   if (isAgencyChannel(channel)) return "AGY";
   return null;
@@ -27,6 +52,7 @@ function extractProgressiveByPrefix(
   const match = String(value ?? "").match(
     new RegExp(`^${prefix}-(\\d{6})$`, "i")
   );
+
   return match ? Number(match[1]) : 0;
 }
 
@@ -62,7 +88,7 @@ export async function GET(request: Request) {
     .select("booking_reference")
     .ilike("booking_reference", `${prefix}-%`)
     .order("booking_reference", { ascending: false })
-    .limit(200);
+    .limit(1000);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
