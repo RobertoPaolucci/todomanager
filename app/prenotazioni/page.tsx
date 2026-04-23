@@ -82,9 +82,21 @@ function isFmdqVenueBooking(booking: any) {
   return false;
 }
 
+function getTotalSeatsCount(booking: any) {
+  const totalPeople = Number(booking.total_people || 0);
+  if (totalPeople > 0) return totalPeople;
+
+  return (
+    Number(booking.adults || 0) +
+    Number(booking.children || 0) +
+    Number(booking.infants || 0) +
+    Number(booking.non_paying_adults || 0)
+  );
+}
+
 export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const q = params.q || "";
+  const q = String(params.q || "").trim();
   const sort = params.sort || "booking_date";
   const dir = params.dir || "asc";
   const showPast = params.past === "true";
@@ -191,13 +203,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
       if (fromDate && b.booking_date < fromDate) return false;
       if (toDate && b.booking_date > toDate) return false;
 
-      if (
+      const shouldHidePastByDefault =
         !fromDate &&
         !toDate &&
         exactDateSet.size === 0 &&
         !showPast &&
-        b.booking_date < todayStr
-      ) {
+        !q;
+
+      if (shouldHidePastByDefault && b.booking_date < todayStr) {
         return false;
       }
     } else {
@@ -266,6 +279,11 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     return 0;
   });
 
+  const totalVisiblePeople = allBookings.reduce(
+    (sum, booking) => sum + getTotalSeatsCount(booking),
+    0
+  );
+
   const buildQuery = (
     updates: Record<string, string | null | undefined> = {}
   ) => {
@@ -319,10 +337,20 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
       <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm lg:hidden">
-            <p className="text-base text-zinc-500">
-              Totale visibile:{" "}
-              <span className="font-bold text-zinc-900">{allBookings.length}</span>
-            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-sm text-zinc-500">Prenotazioni visibili</p>
+                <p className="text-xl font-black text-zinc-900">
+                  {allBookings.length}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-zinc-500">Persone totali</p>
+                <p className="text-xl font-black text-zinc-900">
+                  {totalVisiblePeople}
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex lg:gap-3">
@@ -562,7 +590,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
           </div>
         </SectionCard>
 
-        <SectionCard title={`Elenco Prenotazioni (${allBookings.length})`}>
+        <SectionCard
+          title={`Elenco Prenotazioni (${allBookings.length} prenotazioni · ${totalVisiblePeople} persone)`}
+        >
           <>
             <form
               id="summaryForm"
@@ -573,9 +603,31 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
             <SummarySelectionToolbar formId="summaryForm" />
 
-            <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-              Seleziona le prenotazioni con la spunta e poi apri il riepilogo per
-              stampare il PDF o inviarlo via WhatsApp.
+            <div className="mb-3 grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 sm:grid-cols-3">
+              <div>
+                <div className="text-[11px] font-bold uppercase text-zinc-500">
+                  Prenotazioni visibili
+                </div>
+                <div className="mt-1 text-xl font-black text-zinc-900">
+                  {allBookings.length}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-bold uppercase text-zinc-500">
+                  Persone totali
+                </div>
+                <div className="mt-1 text-xl font-black text-zinc-900">
+                  {totalVisiblePeople}
+                </div>
+              </div>
+
+              <div className="sm:flex sm:items-end">
+                <div className="text-sm text-zinc-600">
+                  Seleziona le prenotazioni con la spunta e poi apri il riepilogo
+                  per stampare il PDF o inviarlo via WhatsApp.
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3 md:hidden">
@@ -714,10 +766,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const nonPayingAdults = Number(
                       booking.non_paying_adults || 0
                     );
-                    const totalSeats = Number(
-                      booking.total_people ||
-                        payingPax + Number(booking.infants || 0) + nonPayingAdults
-                    );
+                    const totalSeats = getTotalSeatsCount(booking);
 
                     const wDate = formatDate(booking.booking_date);
                     const wTime = booking.booking_time

@@ -296,8 +296,18 @@ export default function BookingForm({
 
   async function handleFormAction(formData: FormData) {
     setErrorMessage(null);
-    const action = isEditing && !viewOnly ? updateBooking : createBooking;
 
+    const customerName = String(formData.get("customer_name") || "").trim();
+
+    if (!customerName) {
+      setErrorMessage(
+        "Devi inserire il nome cliente prima di salvare la prenotazione."
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    const action = isEditing && !viewOnly ? updateBooking : createBooking;
     const result = await action(formData);
 
     if (result?.error) {
@@ -427,19 +437,20 @@ export default function BookingForm({
             <input
               name="customer_name"
               type="text"
-              required={isDirectChannel(selectedChannel)}
+              required
               disabled={viewOnly}
               defaultValue={initialData?.customer_name ?? ""}
               placeholder={
                 isDirectChannel(selectedChannel)
                   ? "Es. John Smith"
-                  : "Facoltativo - se vuoto userà il nome del canale"
+                  : "Obbligatorio - es. nome referente o nome struttura"
               }
               className={inputBaseStyle}
             />
-            {!viewOnly && !isDirectChannel(selectedChannel) ? (
+            {!viewOnly ? (
               <p className="mt-1 text-xs text-zinc-500">
-                Per agenzie, hotel o strutture questo campo può restare vuoto.
+                Campo obbligatorio. Se non hai il nome del viaggiatore, inserisci
+                almeno il referente o il nome della struttura/agenzia.
               </p>
             ) : null}
           </div>
