@@ -51,6 +51,7 @@ type PageProps = {
     to?: string;
     bu?: string;
     venue?: string;
+    dates?: string;
   }>;
 };
 
@@ -92,6 +93,18 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const toDate = params.to || "";
   const businessUnitFilter = String(params.bu || "").trim().toLowerCase();
   const venueFilter = String(params.venue || "").trim().toLowerCase();
+  const datesParam = String(params.dates || "").trim();
+
+  const exactDateList = Array.from(
+    new Set(
+      datesParam
+        .split(",")
+        .map((v) => v.trim())
+        .filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v))
+    )
+  ).sort();
+
+  const exactDateSet = new Set(exactDateList);
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -168,12 +181,27 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   allBookings = allBookings.filter((b) => {
     if (String(b.id) === highlightId) return true;
 
+    if (exactDateSet.size > 0) {
+      if (!b.booking_date || !exactDateSet.has(b.booking_date)) {
+        return false;
+      }
+    }
+
     if (b.booking_date) {
       if (fromDate && b.booking_date < fromDate) return false;
       if (toDate && b.booking_date > toDate) return false;
-      if (!fromDate && !toDate && !showPast && b.booking_date < todayStr) {
+
+      if (
+        !fromDate &&
+        !toDate &&
+        exactDateSet.size === 0 &&
+        !showPast &&
+        b.booking_date < todayStr
+      ) {
         return false;
       }
+    } else {
+      if (exactDateSet.size > 0) return false;
     }
 
     if (businessUnitFilter && b._business_unit_code !== businessUnitFilter) {
@@ -252,6 +280,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     if (highlightId) sp.set("highlight", highlightId);
     if (businessUnitFilter) sp.set("bu", businessUnitFilter);
     if (venueFilter) sp.set("venue", venueFilter);
+    if (exactDateList.length > 0) sp.set("dates", exactDateList.join(","));
 
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === undefined || value === "") {
@@ -280,6 +309,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
   const isFmdqFilterActive = businessUnitFilter === "fmdq";
   const isFmdqVenueFilterActive = venueFilter === "fmdq";
+  const isSpecificDatesFilterActive = exactDateList.length > 0;
 
   return (
     <AppShell
@@ -322,6 +352,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               {toDate && <input type="hidden" name="to" value={toDate} />}
               {businessUnitFilter && <input type="hidden" name="bu" value={businessUnitFilter} />}
               {venueFilter && <input type="hidden" name="venue" value={venueFilter} />}
+              {isSpecificDatesFilterActive && (
+                <input type="hidden" name="dates" value={exactDateList.join(",")} />
+              )}
 
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex w-full overflow-hidden rounded-xl border border-zinc-300 bg-white transition focus-within:border-zinc-500 lg:max-w-xl">
@@ -390,6 +423,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       past: showPast ? null : "true",
                       from: null,
                       to: null,
+                      dates: null,
                     })}
                     className={`inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-base font-medium transition sm:text-sm ${
                       showPast
@@ -400,12 +434,19 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     {showPast ? "👁 Nascondi Passate" : "🕒 Mostra Passate"}
                   </Link>
 
+                  {isSpecificDatesFilterActive && (
+                    <span className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-base font-medium text-amber-700 sm:text-sm">
+                      Date specifiche: {exactDateList.length}
+                    </span>
+                  )}
+
                   {(fromDate ||
                     toDate ||
                     q ||
                     showPast ||
                     businessUnitFilter ||
-                    venueFilter) && (
+                    venueFilter ||
+                    isSpecificDatesFilterActive) && (
                     <Link
                       href="/prenotazioni"
                       className="inline-flex min-h-11 items-center rounded-xl px-2 text-base font-medium text-zinc-500 hover:text-zinc-800 hover:underline sm:text-sm"
@@ -465,6 +506,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       from: todayStr,
                       to: todayStr,
                       past: null,
+                      dates: null,
                     })}
                     className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[12px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
@@ -476,6 +518,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       from: tomorrowStr,
                       to: tomorrowStr,
                       past: null,
+                      dates: null,
                     })}
                     className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[12px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
@@ -487,6 +530,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       from: firstDayMonth,
                       to: lastDayMonth,
                       past: null,
+                      dates: null,
                     })}
                     className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[12px] font-bold text-zinc-600 shadow-sm hover:bg-zinc-50"
                   >
@@ -498,6 +542,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       from: "2026-01-01",
                       to: "2026-12-31",
                       past: null,
+                      dates: null,
                     })}
                     className="shrink-0 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-[12px] font-bold text-zinc-800 shadow-sm hover:bg-zinc-200"
                   >
@@ -505,6 +550,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   </Link>
                 </div>
               </div>
+
+              {isSpecificDatesFilterActive && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Filtro date specifiche attivo su{" "}
+                  <strong>{exactDateList.length}</strong> date:{" "}
+                  <strong>{exactDateList.map((d) => formatDate(d)).join(", ")}</strong>
+                </div>
+              )}
             </div>
           </div>
         </SectionCard>

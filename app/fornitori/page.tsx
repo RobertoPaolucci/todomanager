@@ -8,10 +8,7 @@ export default async function FornitoriPage() {
   const suppliers = await getAllSuppliers();
 
   return (
-    <AppShell
-      title="Fornitori"
-      subtitle="Anagrafica fornitori e partner"
-    >
+    <AppShell title="Fornitori" subtitle="Anagrafica fornitori e partner">
       <div className="mb-4 flex items-center justify-end">
         <Link
           href="/fornitori/nuovo"
@@ -31,7 +28,7 @@ export default async function FornitoriPage() {
                 key={supplier.id}
                 className="rounded-xl border border-zinc-200 p-4"
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <p className="font-semibold text-zinc-900">{supplier.name}</p>
 
@@ -54,7 +51,9 @@ export default async function FornitoriPage() {
                     )}
 
                     {supplier.notes && (
-                      <p className="mt-2 text-sm text-zinc-700">{supplier.notes}</p>
+                      <p className="mt-2 text-sm text-zinc-700">
+                        {supplier.notes}
+                      </p>
                     )}
 
                     <p className="mt-2 text-sm text-zinc-700">
@@ -62,7 +61,14 @@ export default async function FornitoriPage() {
                     </p>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/fornitori/${supplier.id}/report`}
+                      className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      Report
+                    </Link>
+
                     <Link
                       href={`/fornitori/${supplier.id}/modifica`}
                       className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
