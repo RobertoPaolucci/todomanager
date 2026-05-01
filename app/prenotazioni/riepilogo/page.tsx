@@ -17,6 +17,11 @@ function getParam(value?: string | string[]) {
   return value ?? "";
 }
 
+function toSafeNumber(value: unknown) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
+}
+
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("it-IT", {
@@ -55,43 +60,105 @@ function getSupplierData(booking: any) {
   return booking.suppliers || null;
 }
 
-function getPayingPeopleCount(booking: any) {
-  return Number(booking.adults || 0) + Number(booking.children || 0);
+function getAdultsCount(booking: any) {
+  return toSafeNumber(booking.adults);
 }
 
-function getNonPayingAdultsCount(booking: any) {
-  return Number(booking.non_paying_adults || 0);
+function getChildrenCount(booking: any) {
+  return toSafeNumber(booking.children);
 }
 
 function getInfantsCount(booking: any) {
-  return Number(booking.infants || 0);
+  return toSafeNumber(booking.infants);
+}
+
+/**
+ * Nel Todo Manager i "non_paying_adults" sono usati come guide/accompagnatori.
+ * Ho lasciato anche altri nomi come fallback, così il riepilogo resta robusto
+ * se in futuro aggiungi una colonna più esplicita tipo guides o guide_count.
+ */
+function getGuidesCount(booking: any) {
+  return toSafeNumber(
+    booking.guides ??
+      booking.guide_count ??
+      booking.guides_count ??
+      booking.number_of_guides ??
+      booking.total_guides ??
+      booking.non_paying_adults ??
+      0
+  );
+}
+
+function getPayingPeopleCount(booking: any) {
+  return getAdultsCount(booking) + getChildrenCount(booking);
 }
 
 function getTotalSeatsCount(booking: any) {
-  const totalPeople = Number(booking.total_people || 0);
-  if (totalPeople > 0) return totalPeople;
+  const adults = getAdultsCount(booking);
+  const children = getChildrenCount(booking);
+  const infants = getInfantsCount(booking);
+  const guides = getGuidesCount(booking);
 
+  const totalFromSeparatedFields = adults + children + infants + guides;
+
+  if (totalFromSeparatedFields > 0) {
+    return totalFromSeparatedFields;
+  }
+
+  return toSafeNumber(booking.total_people);
+}
+
+function hasSeparatedSeatsDetails(booking: any) {
   return (
-    getPayingPeopleCount(booking) +
-    getInfantsCount(booking) +
-    getNonPayingAdultsCount(booking)
+    getChildrenCount(booking) > 0 ||
+    getInfantsCount(booking) > 0 ||
+    getGuidesCount(booking) > 0
   );
+}
+
+function formatSeatsBreakdown(booking: any) {
+  const adults = getAdultsCount(booking);
+  const children = getChildrenCount(booking);
+  const infants = getInfantsCount(booking);
+  const guides = getGuidesCount(booking);
+  const total = getTotalSeatsCount(booking);
+
+  const parts: string[] = [];
+
+  if (adults > 0) {
+    parts.push(String(adults));
+  }
+
+  if (children > 0) {
+    parts.push(`${children} ${children === 1 ? "bambino" : "bambini"}`);
+  }
+
+  if (infants > 0) {
+    parts.push(`${infants} ${infants === 1 ? "infante" : "infanti"}`);
+  }
+
+  if (guides > 0) {
+    parts.push(`${guides} ${guides === 1 ? "guida" : "guide"}`);
+  }
+
+  if (parts.length === 0) {
+    return String(total);
+  }
+
+  return parts.join(" + ");
 }
 
 function getPeopleSummaryForWhatsapp(booking: any) {
   const paying = getPayingPeopleCount(booking);
-  const nonPaying = getNonPayingAdultsCount(booking);
-  const infants = getInfantsCount(booking);
   const totalSeats = getTotalSeatsCount(booking);
+  const breakdown = formatSeatsBreakdown(booking);
 
-  const parts = [`${totalSeats} posti`];
+  const parts = [`${breakdown}`];
 
-  if (nonPaying > 0) {
-    parts.push(`guide ${nonPaying}`);
-  }
-
-  if (infants > 0) {
-    parts.push(`infanti ${infants}`);
+  if (hasSeparatedSeatsDetails(booking)) {
+    parts.push(`totale posti ${totalSeats}`);
+  } else {
+    parts.push(`${totalSeats} posti`);
   }
 
   parts.push(`paganti ${paying}`);
@@ -248,9 +315,9 @@ export default async function RiepilogoPrenotazioniPage({
             </p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm print:text-[11px]">
-              <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500">
+          <div className="overflow-x-auto print:overflow-visible">
+            <table className="min-w-full text-left text-sm print:text-[10.5px]">
+              <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500 print:text-[9.5px]">
                 <tr>
                   <th className="py-3 pr-4">Posti</th>
                   <th className="py-3 pr-4">Data e Ora</th>
@@ -264,34 +331,40 @@ export default async function RiepilogoPrenotazioniPage({
 
               <tbody>
                 {bookings.map((booking) => {
-                  const nonPaying = getNonPayingAdultsCount(booking);
                   const total = getTotalSeatsCount(booking);
+                  const breakdown = formatSeatsBreakdown(booking);
+                  const showTotalLine = hasSeparatedSeatsDetails(booking);
 
                   return (
-                    <tr key={booking.id} className="border-b border-zinc-100 align-top">
-                      <td className="py-4 pr-4">
-                        <div className="text-xl font-black leading-none text-zinc-900 print:text-[18px]">
-                          {total}
-                        </div>
-
-                        {nonPaying > 0 && (
-                          <div className="mt-1 text-[11px] font-bold text-amber-700 print:text-[10px]">
-                            (guide {nonPaying})
+                    <tr
+                      key={booking.id}
+                      className="border-b border-zinc-100 align-top"
+                    >
+                      <td className="min-w-[190px] py-4 pr-4 print:min-w-[150px]">
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 print:border-zinc-300 print:bg-white print:px-2 print:py-1">
+                          <div className="text-lg font-black leading-tight text-zinc-900 print:text-[15px]">
+                            {breakdown}
                           </div>
-                        )}
+
+                          {showTotalLine && (
+                            <div className="mt-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 print:text-[9.5px]">
+                              Totale posti: {total}
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       <td className="py-4 pr-4 whitespace-nowrap">
                         <div className="font-medium text-zinc-900">
                           {formatDate(booking.booking_date)}
                         </div>
-                        <div className="text-xs text-zinc-500">
+                        <div className="text-xs text-zinc-500 print:text-[9.5px]">
                           ore {formatTime(booking.booking_time)}
                         </div>
                       </td>
 
                       <td className="py-4 pr-4">
-                        <div className="font-medium text-zinc-900">
+                        <div className="font-black text-zinc-900">
                           {booking.customer_name || "-"}
                         </div>
                       </td>
@@ -303,7 +376,7 @@ export default async function RiepilogoPrenotazioniPage({
                       </td>
 
                       <td className="py-4 pr-4">
-                        <div className="text-zinc-900">
+                        <div className="font-black text-zinc-900">
                           {getChannelName(booking) || "-"}
                         </div>
                       </td>
@@ -325,7 +398,10 @@ export default async function RiepilogoPrenotazioniPage({
 
                 {bookings.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-sm text-zinc-500">
+                    <td
+                      colSpan={7}
+                      className="py-8 text-center text-sm text-zinc-500"
+                    >
                       Nessuna prenotazione trovata.
                     </td>
                   </tr>
@@ -335,20 +411,20 @@ export default async function RiepilogoPrenotazioniPage({
           </div>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-2 print:mt-6">
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="text-[11px] font-bold uppercase text-zinc-500">
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 print:p-3">
+              <div className="text-[11px] font-bold uppercase text-zinc-500 print:text-[9.5px]">
                 Numero di prenotazioni
               </div>
-              <div className="mt-2 text-2xl font-black text-zinc-900">
+              <div className="mt-2 text-2xl font-black text-zinc-900 print:text-[22px]">
                 {totalBookings}
               </div>
             </div>
 
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="text-[11px] font-bold uppercase text-zinc-500">
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 print:p-3">
+              <div className="text-[11px] font-bold uppercase text-zinc-500 print:text-[9.5px]">
                 Posti totali
               </div>
-              <div className="mt-2 text-2xl font-black text-zinc-900">
+              <div className="mt-2 text-2xl font-black text-zinc-900 print:text-[22px]">
                 {totalSeats}
               </div>
             </div>
