@@ -148,6 +148,34 @@ function formatSeatsBreakdown(booking: any) {
   return parts.join(" + ");
 }
 
+function stripSystemAlert(notes: string) {
+  return notes
+    .split("\n")
+    .filter((line) => {
+      const text = line.trim();
+      return (
+        !text.startsWith("🟢") &&
+        !text.startsWith("🟡") &&
+        !text.startsWith("🔴")
+      );
+    })
+    .join("\n")
+    .trim();
+}
+
+function getInternalNotes(booking: any) {
+  const rawNotes = String(
+    booking.internal_notes ??
+      booking.private_notes ??
+      booking.notes ??
+      ""
+  ).trim();
+
+  const cleanedNotes = stripSystemAlert(rawNotes);
+
+  return cleanedNotes || "-";
+}
+
 function getPeopleSummaryForWhatsapp(booking: any) {
   const paying = getPayingPeopleCount(booking);
   const totalSeats = getTotalSeatsCount(booking);
@@ -271,7 +299,7 @@ export default async function RiepilogoPrenotazioniPage({
       const bookingCreated = formatDate(booking.booking_created_at);
       const peopleSummary = getPeopleSummaryForWhatsapp(booking);
 
-      return `${peopleSummary} | ${date} ore ${time} | ${customer} | ${reference} | ${channel} | ${experience} | prenotata il ${bookingCreated}`;
+      return `${peopleSummary} | ${date} ore ${time} | ${customer} | ${channel} | ${reference} | ${experience} | prenotata il ${bookingCreated}`;
     }),
     "",
     `Numero di prenotazioni: ${totalBookings}`,
@@ -316,16 +344,22 @@ export default async function RiepilogoPrenotazioniPage({
           </div>
 
           <div className="overflow-x-auto print:overflow-visible">
-            <table className="min-w-full text-left text-sm print:text-[10.5px]">
-              <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500 print:text-[9.5px]">
+            <table className="min-w-full text-left text-sm print:text-[10px]">
+              <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500 print:text-[9px]">
                 <tr>
-                  <th className="py-3 pr-4">Posti</th>
-                  <th className="py-3 pr-4">Data e Ora</th>
-                  <th className="py-3 pr-4">Nome Cliente</th>
-                  <th className="py-3 pr-4">Rif Prenotazione</th>
-                  <th className="py-3 pr-4">Canale Prenotazione</th>
-                  <th className="py-3 pr-4">Tipo Esperienza</th>
-                  <th className="py-3 pr-0">Data Prenotazione</th>
+                  <th className="py-3 pr-3">Posti</th>
+                  <th className="py-3 pr-3">Data e Ora</th>
+                  <th className="py-3 pr-3">Nome Cliente</th>
+                  <th className="py-3 pr-3">Canale Prenotazione</th>
+                  <th className="py-3 pr-3">
+                    Rif Prenotazione
+                    <br />
+                    <span className="normal-case text-zinc-400">
+                      Data pren.
+                    </span>
+                  </th>
+                  <th className="py-3 pr-3">Tipo Esperienza</th>
+                  <th className="py-3 pr-0">Note interne</th>
                 </tr>
               </thead>
 
@@ -334,62 +368,66 @@ export default async function RiepilogoPrenotazioniPage({
                   const total = getTotalSeatsCount(booking);
                   const breakdown = formatSeatsBreakdown(booking);
                   const showTotalLine = hasSeparatedSeatsDetails(booking);
+                  const internalNotes = getInternalNotes(booking);
 
                   return (
                     <tr
                       key={booking.id}
                       className="border-b border-zinc-100 align-top"
                     >
-                      <td className="min-w-[190px] py-4 pr-4 print:min-w-[150px]">
+                      <td className="min-w-[180px] py-4 pr-3 print:min-w-[135px]">
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 print:border-zinc-300 print:bg-white print:px-2 print:py-1">
-                          <div className="text-lg font-black leading-tight text-zinc-900 print:text-[15px]">
+                          <div className="text-lg font-black leading-tight text-zinc-900 print:text-[14px]">
                             {breakdown}
                           </div>
 
                           {showTotalLine && (
-                            <div className="mt-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 print:text-[9.5px]">
+                            <div className="mt-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 print:text-[9px]">
                               Totale posti: {total}
                             </div>
                           )}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-4 whitespace-nowrap">
+                      <td className="py-4 pr-3 whitespace-nowrap">
                         <div className="font-medium text-zinc-900">
                           {formatDate(booking.booking_date)}
                         </div>
-                        <div className="text-xs text-zinc-500 print:text-[9.5px]">
+                        <div className="text-xs text-zinc-500 print:text-[9px]">
                           ore {formatTime(booking.booking_time)}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-4">
+                      <td className="py-4 pr-3">
                         <div className="font-black text-zinc-900">
                           {booking.customer_name || "-"}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-4">
-                        <div className="font-mono text-zinc-700">
-                          {booking.booking_reference || "-"}
-                        </div>
-                      </td>
-
-                      <td className="py-4 pr-4">
+                      <td className="py-4 pr-3">
                         <div className="font-black text-zinc-900">
                           {getChannelName(booking) || "-"}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-4">
+                      <td className="py-4 pr-3">
+                        <div className="font-mono font-bold text-zinc-800">
+                          {booking.booking_reference || "-"}
+                        </div>
+                        <div className="mt-1 text-[11px] font-semibold text-zinc-500 print:text-[9px]">
+                          Prenotata il {formatDate(booking.booking_created_at)}
+                        </div>
+                      </td>
+
+                      <td className="py-4 pr-3">
                         <div className="text-zinc-900">
                           {booking.experience_name || "-"}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-0 whitespace-nowrap">
-                        <div className="text-zinc-900">
-                          {formatDate(booking.booking_created_at)}
+                      <td className="max-w-[220px] py-4 pr-0 print:max-w-[150px]">
+                        <div className="whitespace-pre-line text-zinc-800">
+                          {internalNotes}
                         </div>
                       </td>
                     </tr>
