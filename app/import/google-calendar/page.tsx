@@ -48,6 +48,7 @@ type BookingRow = {
   experience_name: string;
   booking_source: string;
   notes: string | null;
+  business_unit_id: number | null;
 };
 
 type ExperienceRow = {
@@ -58,6 +59,12 @@ type ExperienceRow = {
 type ChannelRow = {
   id: number;
   name: string;
+};
+
+type ComputedStagingRow = StagingRow & {
+  computedStatus: string;
+  matchedBooking?: BookingRow;
+  matchReason?: string;
 };
 
 function getParam(value?: string | string[]) {
@@ -111,9 +118,8 @@ function peopleLabel(row: {
 function statusLabel(status: string) {
   switch (status) {
     case "pending":
-      return "Da importare";
     case "rolled_back":
-      return "Da importare";
+      return "Nuova";
     case "already_exists":
       return "Già presente";
     case "possible_duplicate":
@@ -148,8 +154,21 @@ function statusClass(status: string) {
   }
 }
 
-function isSelectable(status: string) {
+function isImportable(status: string) {
   return status === "pending" || status === "rolled_back";
+}
+
+function isActionSelectable(status: string) {
+  return status !== "imported" && status !== "already_exists";
+}
+
+function importPageHref(date: string) {
+  return `/import/google-calendar?date=${encodeURIComponent(date)}`;
+}
+
+function bookingEditHref(id: number, selectedDate: string) {
+  const returnTo = importPageHref(selectedDate);
+  return `/prenotazioni/${id}/modifica?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 function buildPossibleDuplicateKey(row: {
@@ -190,10 +209,11 @@ export default async function GoogleCalendarImportPage({
   const { data: bookingsData } = await supabaseServer
     .from("bookings")
     .select(
-      "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes"
+      "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id"
     )
-    .eq("business_unit_id", 1)
-    .eq("booking_date", selectedDate);
+    .eq("booking_date", selectedDate)
+    .order("booking_time", { ascending: true })
+    .order("id", { ascending: true });
 
   const existingBookings = (bookingsData ?? []) as BookingRow[];
 
@@ -233,46 +253,77 @@ export default async function GoogleCalendarImportPage({
       .map((booking) => [booking.booking_reference as string, booking])
   );
 
+  const existingIdMap = new Map(
+    existingBookings.map((booking) => [booking.id, booking])
+  );
+
   const duplicateKeyMap = new Map<string, BookingRow>();
 
   for (const booking of existingBookings) {
     duplicateKeyMap.set(buildPossibleDuplicateKey(booking), booking);
   }
 
-  const rowsWithComputedStatus = stagingRows.map((row) => {
+  const rowsWithComputedStatus: ComputedStagingRow[] = stagingRows.map((row) => {
     const existingByReference = existingReferenceMap.get(row.booking_reference);
+    const existingByImportedId = row.imported_booking_id
+      ? existingIdMap.get(row.imported_booking_id)
+      : undefined;
     const possibleDuplicate = duplicateKeyMap.get(buildPossibleDuplicateKey(row));
 
     let computedStatus = row.import_status;
+    let matchedBooking: BookingRow | undefined;
+    let matchReason = "";
 
-    if (row.import_status === "pending" || row.import_status === "rolled_back") {
-      if (existingByReference) {
-        computedStatus = "already_exists";
-      } else if (possibleDuplicate) {
-        computedStatus = "possible_duplicate";
-      }
+    if (
+      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      existingByReference
+    ) {
+      computedStatus = "already_exists";
+      matchedBooking = existingByReference;
+      matchReason = "stesso riferimento";
+    } else if (
+      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      possibleDuplicate
+    ) {
+      computedStatus = "possible_duplicate";
+      matchedBooking = possibleDuplicate;
+      matchReason = "stessa data, ora, esperienza, canale e persone";
+    } else if (existingByImportedId) {
+      matchedBooking = existingByImportedId;
+      matchReason = "già importata";
     }
 
     return {
       ...row,
       computedStatus,
-      existingByReference,
-      possibleDuplicate,
+      matchedBooking,
+      matchReason,
     };
   });
 
-  const selectableCount = rowsWithComputedStatus.filter((row) =>
-    isSelectable(row.computedStatus)
+  const googleCount = rowsWithComputedStatus.length;
+  const todoCount = existingBookings.length;
+  const importableCount = rowsWithComputedStatus.filter((row) =>
+    isImportable(row.computedStatus)
   ).length;
+
+  const importedBookingIdsFromGoogle = new Set(
+    rowsWithComputedStatus
+      .filter((row) => row.import_status === "imported" && row.imported_booking_id)
+      .map((row) => row.imported_booking_id as number)
+  );
 
   return (
     <AppShell
       title="Import Google Calendar"
-      subtitle="Import manuale storico, un giorno alla volta"
+      subtitle="Controllo storico per giorno: Google Calendar a sinistra, Todo Manager a destra"
     >
       <div className="space-y-6">
         <SectionCard title="Seleziona giorno">
-          <form method="get" className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <form
+            method="get"
+            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          >
             <div>
               <label className="mb-1 block text-sm font-medium text-zinc-700">
                 Giorno da controllare
@@ -289,161 +340,301 @@ export default async function GoogleCalendarImportPage({
               type="submit"
               className="rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white"
             >
-              Mostra eventi
+              Mostra giorno
             </button>
           </form>
         </SectionCard>
 
-        <SectionCard title="Eventi Google Calendar">
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <SectionCard title={`Confronto del giorno - ${formatDateIt(selectedDate)}`}>
+          <div className="mb-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-700 md:grid-cols-3">
             <div>
-              <h2 className="text-lg font-semibold text-zinc-900">
-                {formatDateIt(selectedDate)}
-              </h2>
-              <p className="text-sm text-zinc-500">
-                Eventi trovati: {rowsWithComputedStatus.length} · Importabili:{" "}
-                {selectableCount}
-              </p>
+              <div className="text-xs font-semibold uppercase text-zinc-500">
+                Google Calendar
+              </div>
+              <div className="text-xl font-bold text-zinc-900">
+                {googleCount}
+              </div>
             </div>
 
-            <Link
-              href="/prenotazioni"
-              className="text-sm font-medium text-zinc-700 underline underline-offset-4"
-            >
-              Vai alle prenotazioni
-            </Link>
+            <div>
+              <div className="text-xs font-semibold uppercase text-zinc-500">
+                Todo Manager
+              </div>
+              <div className="text-xl font-bold text-zinc-900">{todoCount}</div>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase text-zinc-500">
+                Importabili
+              </div>
+              <div className="text-xl font-bold text-zinc-900">
+                {importableCount}
+              </div>
+            </div>
           </div>
 
-          {stagingError ? (
-            <div className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
-              Errore lettura staging: {stagingError.message}
-            </div>
-          ) : rowsWithComputedStatus.length === 0 ? (
-            <div className="rounded-xl bg-zinc-50 p-4 text-sm text-zinc-600">
-              Nessun evento Google Calendar trovato per questa data.
-            </div>
-          ) : (
-            <form action={importSelectedGoogleCalendarRows} className="space-y-4">
-              <input type="hidden" name="return_date" value={selectedDate} />
+          <div className="grid gap-6 xl:grid-cols-2">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  Eventi Google Calendar
+                </h2>
+                <p className="text-sm text-zinc-500">
+                  Seleziona solo quelli da importare.
+                </p>
+              </div>
 
-              <div className="overflow-hidden rounded-2xl border border-zinc-200">
-                <div className="hidden grid-cols-[48px_80px_1.5fr_1fr_1fr_120px] gap-3 bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 md:grid">
-                  <div></div>
-                  <div>Ora</div>
-                  <div>Titolo originale</div>
-                  <div>Esperienza</div>
-                  <div>Canale</div>
-                  <div>Stato</div>
+              {stagingError ? (
+                <div className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
+                  Errore lettura staging: {stagingError.message}
+                </div>
+              ) : rowsWithComputedStatus.length === 0 ? (
+                <div className="rounded-xl bg-white p-4 text-sm text-zinc-600">
+                  Nessun evento Google Calendar trovato per questa data.
+                </div>
+              ) : (
+                <form
+                  action={importSelectedGoogleCalendarRows}
+                  className="space-y-4"
+                >
+                  <input type="hidden" name="return_date" value={selectedDate} />
+
+                  <div className="space-y-3">
+                    {rowsWithComputedStatus.map((row) => {
+                      const title = row.notes || row.original_title || "";
+                      const experienceName =
+                        experienceMap.get(row.experience_id) ??
+                        `ID ${row.experience_id}`;
+                      const channelName =
+                        channelMap.get(row.channel_id) ?? `ID ${row.channel_id}`;
+                      const selectable = isActionSelectable(row.computedStatus);
+
+                      return (
+                        <div
+                          key={row.id}
+                          className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="mb-3 flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              name="row_ids"
+                              value={row.id}
+                              disabled={!selectable}
+                              className="mt-1 h-5 w-5 rounded border-zinc-300 disabled:opacity-30"
+                            />
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-semibold text-white">
+                                  {normalizeTime(row.booking_time) || "—"}
+                                </span>
+
+                                <span
+                                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(
+                                    row.computedStatus
+                                  )}`}
+                                >
+                                  {statusLabel(row.computedStatus)}
+                                </span>
+                              </div>
+
+                              <div className="mt-2 text-sm font-bold text-zinc-900">
+                                {title || "Senza titolo"}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2 text-sm text-zinc-700 sm:grid-cols-2">
+                            <div>
+                              <span className="font-semibold">Esperienza:</span>{" "}
+                              {experienceName}
+                            </div>
+
+                            <div>
+                              <span className="font-semibold">Canale:</span>{" "}
+                              {channelName}
+                            </div>
+
+                            <div>
+                              <span className="font-semibold">Persone:</span>{" "}
+                              {peopleLabel(row)}
+                            </div>
+
+                            <div className="break-all">
+                              <span className="font-semibold">Rif:</span>{" "}
+                              {row.booking_reference}
+                            </div>
+                          </div>
+
+                          {row.matchReason && row.matchedBooking ? (
+                            <div className="mt-3 rounded-xl bg-red-50 p-3 text-xs text-red-800">
+                              Collegamento rilevato:{" "}
+                              <span className="font-semibold">
+                                {row.matchReason}
+                              </span>{" "}
+                              con prenotazione Todo Manager #
+                              {row.matchedBooking.id}
+                            </div>
+                          ) : null}
+
+                          {row.matchedBooking ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Link
+                                href={bookingEditHref(
+                                  row.matchedBooking.id,
+                                  selectedDate
+                                )}
+                                className="rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white"
+                              >
+                                Modifica prenotazione
+                              </Link>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="submit"
+                      className="rounded-xl bg-green-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                      disabled={importableCount === 0}
+                    >
+                      Importa selezionate
+                    </button>
+
+                    <button
+                      type="submit"
+                      formAction={ignoreSelectedGoogleCalendarRows}
+                      className="rounded-xl bg-zinc-200 px-4 py-3 text-sm font-semibold text-zinc-900"
+                    >
+                      Ignora selezionate
+                    </button>
+
+                    <button
+                      type="submit"
+                      formAction={resetSelectedGoogleCalendarRows}
+                      className="rounded-xl border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-900"
+                    >
+                      Rimetti da importare
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-green-200 bg-green-50/30 p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-900">
+                    Prenotazioni Todo Manager
+                  </h2>
+                  <p className="text-sm text-zinc-500">
+                    Elenco completo già presente nello stesso giorno.
+                  </p>
                 </div>
 
-                <div className="divide-y divide-zinc-200">
-                  {rowsWithComputedStatus.map((row) => {
-                    const selectable = isSelectable(row.computedStatus);
-                    const title = row.notes || row.original_title || "";
+                <Link
+                  href="/prenotazioni"
+                  className="text-sm font-medium text-zinc-700 underline underline-offset-4"
+                >
+                  Apri
+                </Link>
+              </div>
+
+              {existingBookings.length === 0 ? (
+                <div className="rounded-xl bg-white p-4 text-sm text-zinc-600">
+                  Nessuna prenotazione già presente in Todo Manager per questa
+                  data.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {existingBookings.map((booking) => {
+                    const importedFromGoogleCalendar =
+                      importedBookingIdsFromGoogle.has(booking.id);
 
                     return (
                       <div
-                        key={row.id}
-                        className="grid gap-3 px-4 py-4 md:grid-cols-[48px_80px_1.5fr_1fr_1fr_120px] md:items-start"
+                        key={booking.id}
+                        className={`rounded-2xl border p-4 shadow-sm ${
+                          importedFromGoogleCalendar
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-green-200 bg-white"
+                        }`}
                       >
-                        <div>
-                          <input
-                            type="checkbox"
-                            name="row_ids"
-                            value={row.id}
-                            disabled={!selectable}
-                            className="h-5 w-5 rounded border-zinc-300"
-                          />
-                        </div>
-
-                        <div className="text-sm font-semibold text-zinc-900">
-                          {normalizeTime(row.booking_time) || "—"}
-                        </div>
-
-                        <div>
-                          <div className="text-sm font-medium text-zinc-900">
-                            {title || "Senza titolo"}
-                          </div>
-                          <div className="mt-1 text-xs text-zinc-500">
-                            {peopleLabel(row)} · Rif. {row.booking_reference}
-                          </div>
-
-                          {row.computedStatus === "possible_duplicate" &&
-                            row.possibleDuplicate && (
-                              <div className="mt-2 rounded-xl bg-red-50 p-2 text-xs text-red-800">
-                                Possibile doppione con prenotazione #
-                                {row.possibleDuplicate.id}:{" "}
-                                {row.possibleDuplicate.customer_name} ·{" "}
-                                {row.possibleDuplicate.experience_name}
-                              </div>
-                            )}
-
-                          {row.computedStatus === "already_exists" &&
-                            row.existingByReference && (
-                              <div className="mt-2 rounded-xl bg-zinc-50 p-2 text-xs text-zinc-700">
-                                Già presente in Todo Manager come prenotazione #
-                                {row.existingByReference.id}
-                              </div>
-                            )}
-                        </div>
-
-                        <div className="text-sm text-zinc-700">
-                          <span className="md:hidden font-semibold">
-                            Esperienza:{" "}
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-semibold text-white">
+                            {normalizeTime(booking.booking_time) || "—"}
                           </span>
-                          {experienceMap.get(row.experience_id) ??
-                            `ID ${row.experience_id}`}
-                        </div>
 
-                        <div className="text-sm text-zinc-700">
-                          <span className="md:hidden font-semibold">
-                            Canale:{" "}
+                          <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-900">
+                            #{booking.id}
                           </span>
-                          {channelMap.get(row.channel_id) ?? `ID ${row.channel_id}`}
+
+                          <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-900">
+                            BU {booking.business_unit_id ?? "—"}
+                          </span>
+
+                          {importedFromGoogleCalendar ? (
+                            <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                              Import Google Calendar
+                            </span>
+                          ) : null}
                         </div>
 
-                        <div>
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(
-                              row.computedStatus
-                            )}`}
+                        <div className="text-sm font-bold text-zinc-900">
+                          {booking.customer_name || "Senza nome"}
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-sm text-zinc-700 sm:grid-cols-2">
+                          <div>
+                            <span className="font-semibold">Ora:</span>{" "}
+                            {normalizeTime(booking.booking_time) || "—"}
+                          </div>
+
+                          <div>
+                            <span className="font-semibold">Persone:</span>{" "}
+                            {peopleLabel(booking)}
+                          </div>
+
+                          <div>
+                            <span className="font-semibold">Esperienza:</span>{" "}
+                            {booking.experience_name || "—"}
+                          </div>
+
+                          <div>
+                            <span className="font-semibold">Canale:</span>{" "}
+                            {booking.booking_source || "—"}
+                          </div>
+
+                          <div className="break-all sm:col-span-2">
+                            <span className="font-semibold">Rif:</span>{" "}
+                            {booking.booking_reference || "—"}
+                          </div>
+                        </div>
+
+                        {booking.notes ? (
+                          <div className="mt-3 rounded-xl bg-zinc-50 p-3 text-xs text-zinc-600">
+                            {booking.notes}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Link
+                            href={bookingEditHref(booking.id, selectedDate)}
+                            className="rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white"
                           >
-                            {statusLabel(row.computedStatus)}
-                          </span>
+                            Modifica
+                          </Link>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <button
-                  type="submit"
-                  className="rounded-xl bg-green-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
-                  disabled={selectableCount === 0}
-                >
-                  Importa selezionate
-                </button>
-
-                <button
-                  type="submit"
-                  formAction={ignoreSelectedGoogleCalendarRows}
-                  className="rounded-xl bg-zinc-200 px-4 py-3 text-sm font-semibold text-zinc-900"
-                >
-                  Ignora selezionate
-                </button>
-
-                <button
-                  type="submit"
-                  formAction={resetSelectedGoogleCalendarRows}
-                  className="rounded-xl border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-900"
-                >
-                  Rimetti da importare
-                </button>
-              </div>
-            </form>
-          )}
+              )}
+            </div>
+          </div>
         </SectionCard>
       </div>
     </AppShell>

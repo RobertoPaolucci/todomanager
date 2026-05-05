@@ -32,6 +32,10 @@ function getChannelName(booking: any) {
   return booking.channels?.name || booking.booking_source || "";
 }
 
+function isGoogleCalendarImportReturn(returnTo: string) {
+  return returnTo.startsWith("/import/google-calendar");
+}
+
 export default async function ModificaPrenotazionePage({
   params,
   searchParams,
@@ -43,6 +47,7 @@ export default async function ModificaPrenotazionePage({
   const returnTo = String(query.returnTo || "/prenotazioni").trim();
   const justCreated = query.justCreated === "true";
   const today = new Date().toISOString().split("T")[0];
+  const isReturningToGoogleCalendarImport = isGoogleCalendarImportReturn(returnTo);
 
   const channels = await getChannels();
   const experiences = await getExperiences();
@@ -143,9 +148,37 @@ export default async function ModificaPrenotazionePage({
   return (
     <AppShell
       title="Modifica Prenotazione"
-      subtitle="Controlla, correggi e salva i dati della prenotazione"
+      subtitle={
+        isReturningToGoogleCalendarImport
+          ? "Salva la modifica e tornerai alla pagina Import Google Calendar"
+          : "Controlla, correggi e salva i dati della prenotazione"
+      }
     >
       <div lang="it-IT" className="mx-auto w-full max-w-5xl space-y-4">
+        {isReturningToGoogleCalendarImport ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-black text-amber-900">
+                  Import Google Calendar
+                </div>
+                <p className="mt-1 text-sm text-amber-900">
+                  Sei arrivato dalla pagina importazioni. Quando premi il
+                  pulsante di aggiornamento del modulo, la prenotazione viene
+                  salvata e torni automaticamente al giorno di importazione.
+                </p>
+              </div>
+
+              <Link
+                href={returnTo}
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
+              >
+                ← Torna a Import Google Calendar
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
         {justCreated ? (
           <div className="rounded-2xl border border-green-200 bg-green-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -231,7 +264,9 @@ export default async function ModificaPrenotazionePage({
                   href={returnTo}
                   className="inline-flex min-h-11 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-100"
                 >
-                  ← Torna indietro
+                  {isReturningToGoogleCalendarImport
+                    ? "← Torna a Import Google Calendar"
+                    : "← Torna indietro"}
                 </Link>
 
                 <a
