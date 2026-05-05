@@ -50,12 +50,16 @@ function getSelectedIds(formData: FormData) {
 }
 
 function getReturnDate(formData: FormData) {
-  const value = String(formData.get("return_date") ?? "").trim();
-  return value || "";
+  return String(formData.get("return_date") ?? "").trim();
+}
+
+function shouldForceImport(formData: FormData) {
+  return String(formData.get("force_import") ?? "").trim() === "true";
 }
 
 function redirectBack(date: string) {
   revalidatePath("/import/google-calendar");
+  revalidatePath("/prenotazioni");
   redirect(`/import/google-calendar${date ? `?date=${date}` : ""}`);
 }
 
@@ -105,7 +109,6 @@ async function findPossibleDuplicate(row: StagingRow) {
     .select(
       "id, booking_time, experience_id, channel_id, adults, children, infants"
     )
-    .eq("business_unit_id", FMDQ_BUSINESS_UNIT_ID)
     .eq("booking_date", row.booking_date)
     .eq("experience_id", row.experience_id)
     .eq("channel_id", row.channel_id)
@@ -160,6 +163,7 @@ async function getPrice(experienceId: number, channelId: number) {
 export async function importSelectedGoogleCalendarRows(formData: FormData) {
   const selectedIds = getSelectedIds(formData);
   const returnDate = getReturnDate(formData);
+  const forceImport = shouldForceImport(formData);
 
   if (selectedIds.length === 0) {
     redirectBack(returnDate);
@@ -175,7 +179,13 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
   const rows = (rowsData ?? []) as StagingRow[];
 
   for (const row of rows) {
-    if (row.import_status !== "pending" && row.import_status !== "rolled_back") {
+    const canProcessNormally =
+      row.import_status === "pending" || row.import_status === "rolled_back";
+
+    const canProcessWithForce =
+      canProcessNormally || row.import_status === "possible_duplicate";
+
+    if (forceImport ? !canProcessWithForce : !canProcessNormally) {
       continue;
     }
 
@@ -190,7 +200,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const possibleDuplicate = await findPossibleDuplicate(row);
 
-    if (possibleDuplicate) {
+    if (possibleDuplicate && !forceImport) {
       await markRow(row.id, "possible_duplicate", possibleDuplicate.id);
       continue;
     }

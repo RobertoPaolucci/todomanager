@@ -158,6 +158,10 @@ function isImportable(status: string) {
   return status === "pending" || status === "rolled_back";
 }
 
+function isForceImportable(status: string) {
+  return status === "possible_duplicate";
+}
+
 function isActionSelectable(status: string) {
   return status !== "imported" && status !== "already_exists";
 }
@@ -303,14 +307,27 @@ export default async function GoogleCalendarImportPage({
 
   const googleCount = rowsWithComputedStatus.length;
   const todoCount = existingBookings.length;
+
   const importableCount = rowsWithComputedStatus.filter((row) =>
     isImportable(row.computedStatus)
+  ).length;
+
+  const forceImportableCount = rowsWithComputedStatus.filter((row) =>
+    isForceImportable(row.computedStatus)
   ).length;
 
   const importedBookingIdsFromGoogle = new Set(
     rowsWithComputedStatus
       .filter((row) => row.import_status === "imported" && row.imported_booking_id)
       .map((row) => row.imported_booking_id as number)
+  );
+
+  const alreadyImportedLinkedBookingIds = new Set(
+    rowsWithComputedStatus
+      .filter(
+        (row) => row.matchReason === "già importata" && row.matchedBooking?.id
+      )
+      .map((row) => row.matchedBooking!.id)
   );
 
   return (
@@ -346,7 +363,7 @@ export default async function GoogleCalendarImportPage({
         </SectionCard>
 
         <SectionCard title={`Confronto del giorno - ${formatDateIt(selectedDate)}`}>
-          <div className="mb-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-700 md:grid-cols-3">
+          <div className="mb-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-700 md:grid-cols-4">
             <div>
               <div className="text-xs font-semibold uppercase text-zinc-500">
                 Google Calendar
@@ -371,6 +388,15 @@ export default async function GoogleCalendarImportPage({
                 {importableCount}
               </div>
             </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase text-zinc-500">
+                Possibili doppioni
+              </div>
+              <div className="text-xl font-bold text-red-700">
+                {forceImportableCount}
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">
@@ -380,7 +406,8 @@ export default async function GoogleCalendarImportPage({
                   Eventi Google Calendar
                 </h2>
                 <p className="text-sm text-zinc-500">
-                  Seleziona solo quelli da importare.
+                  Seleziona solo quelli da importare. Se un possibile doppione è
+                  stato verificato e non è un doppione, usa “Importa comunque”.
                 </p>
               </div>
 
@@ -412,7 +439,11 @@ export default async function GoogleCalendarImportPage({
                       return (
                         <div
                           key={row.id}
-                          className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm"
+                          className={`rounded-2xl border bg-white p-4 shadow-sm ${
+                            row.computedStatus === "possible_duplicate"
+                              ? "border-red-300"
+                              : "border-amber-200"
+                          }`}
                         >
                           <div className="mb-3 flex items-start gap-3">
                             <input
@@ -477,6 +508,17 @@ export default async function GoogleCalendarImportPage({
                             </div>
                           ) : null}
 
+                          {row.computedStatus === "possible_duplicate" ? (
+                            <div className="mt-3 rounded-xl border border-red-200 bg-white p-3 text-xs text-red-800">
+                              Se hai verificato che non è un doppione, seleziona
+                              questa riga e premi{" "}
+                              <span className="font-bold">
+                                Importa comunque selezionate
+                              </span>
+                              .
+                            </div>
+                          ) : null}
+
                           {row.matchedBooking ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Link
@@ -495,13 +537,23 @@ export default async function GoogleCalendarImportPage({
                     })}
                   </div>
 
-                  <div className="flex flex-col gap-3 sm:flex-row">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                     <button
                       type="submit"
                       className="rounded-xl bg-green-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
                       disabled={importableCount === 0}
                     >
                       Importa selezionate
+                    </button>
+
+                    <button
+                      type="submit"
+                      name="force_import"
+                      value="true"
+                      className="rounded-xl bg-red-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                      disabled={forceImportableCount === 0}
+                    >
+                      Importa comunque selezionate
                     </button>
 
                     <button
@@ -554,12 +606,18 @@ export default async function GoogleCalendarImportPage({
                     const importedFromGoogleCalendar =
                       importedBookingIdsFromGoogle.has(booking.id);
 
+                    const linkedAsAlreadyImported =
+                      alreadyImportedLinkedBookingIds.has(booking.id);
+
+                    const highlightGoogleCalendarBooking =
+                      importedFromGoogleCalendar || linkedAsAlreadyImported;
+
                     return (
                       <div
                         key={booking.id}
                         className={`rounded-2xl border p-4 shadow-sm ${
-                          importedFromGoogleCalendar
-                            ? "border-amber-300 bg-amber-50"
+                          highlightGoogleCalendarBooking
+                            ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
                             : "border-green-200 bg-white"
                         }`}
                       >
@@ -581,7 +639,22 @@ export default async function GoogleCalendarImportPage({
                               Import Google Calendar
                             </span>
                           ) : null}
+
+                          {!importedFromGoogleCalendar &&
+                          linkedAsAlreadyImported ? (
+                            <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                              Collegata a evento Google Calendar
+                            </span>
+                          ) : null}
                         </div>
+
+                        {linkedAsAlreadyImported ? (
+                          <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs text-red-800">
+                            Evidenziata perché negli eventi Google Calendar
+                            risulta già importata con questa prenotazione Todo
+                            Manager.
+                          </div>
+                        ) : null}
 
                         <div className="text-sm font-bold text-zinc-900">
                           {booking.customer_name || "Senza nome"}

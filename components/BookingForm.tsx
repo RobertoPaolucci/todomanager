@@ -57,6 +57,10 @@ function normalizeReferenceValue(value?: string | null) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+function isGoogleCalendarImportReturn(value?: string | null) {
+  return String(value ?? "").startsWith("/import/google-calendar");
+}
+
 function isFmdqChannel(channel?: Channel | null) {
   const name = normalizeText(channel?.name);
   const type = normalizeText(channel?.type);
@@ -148,6 +152,9 @@ export default function BookingForm({
   );
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const isReturningToGoogleCalendarImport =
+    isGoogleCalendarImportReturn(returnTo);
 
   const selectedChannel = useMemo(
     () => channels.find((channel) => String(channel.id) === channelId) ?? null,
@@ -345,6 +352,16 @@ export default function BookingForm({
   const sectionClass =
     "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5 md:col-span-2";
 
+  const primaryButtonLabel = isEditing
+    ? isReturningToGoogleCalendarImport
+      ? "Aggiorna e torna a Import Google Calendar"
+      : "Aggiorna"
+    : "Salva prenotazione";
+
+  const cancelButtonLabel = isReturningToGoogleCalendarImport
+    ? "Annulla e torna a Import Google Calendar"
+    : "Annulla";
+
   return (
     <form action={handleFormAction} className="grid gap-4 md:grid-cols-2">
       {isEditing && <input type="hidden" name="id" value={initialData.id} />}
@@ -355,6 +372,18 @@ export default function BookingForm({
           <p className="text-sm font-bold text-red-700">{errorMessage}</p>
         </div>
       )}
+
+      {isReturningToGoogleCalendarImport && isEditing && !viewOnly ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm md:col-span-2">
+          <p className="text-sm font-bold text-amber-900">
+            Modifica da Import Google Calendar
+          </p>
+          <p className="mt-1 text-sm text-amber-900">
+            Dopo il salvataggio tornerai automaticamente alla pagina di import
+            dello stesso giorno.
+          </p>
+        </div>
+      ) : null}
 
       <div className={sectionClass}>
         <div className="mb-4">
@@ -908,9 +937,13 @@ export default function BookingForm({
                 type="submit"
                 name="intent"
                 value="save"
-                className="w-full rounded-xl bg-zinc-900 px-5 py-3 text-[16px] font-bold text-white shadow-md transition hover:bg-zinc-700 sm:w-auto sm:px-8 sm:text-sm"
+                className={`w-full rounded-xl px-5 py-3 text-[16px] font-bold text-white shadow-md transition sm:w-auto sm:px-8 sm:text-sm ${
+                  isReturningToGoogleCalendarImport
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-zinc-900 hover:bg-zinc-700"
+                }`}
               >
-                {isEditing ? "Aggiorna" : "Salva prenotazione"}
+                {primaryButtonLabel}
               </button>
 
               {!isEditing && (
@@ -931,7 +964,7 @@ export default function BookingForm({
             onClick={handleCancel}
             className="flex w-full items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 py-3 text-[16px] font-bold text-zinc-700 transition hover:bg-zinc-100 sm:w-auto sm:px-8 sm:text-sm"
           >
-            Annulla
+            {cancelButtonLabel}
           </button>
         </div>
       </div>
