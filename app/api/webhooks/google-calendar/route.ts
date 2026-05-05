@@ -170,10 +170,7 @@ function parsePeople(title: string) {
   let infants = 0;
 
   if (plusNumber > 0) {
-    if (
-      plusLabel.includes("neonat") ||
-      plusLabel.includes("infant")
-    ) {
+    if (plusLabel.includes("neonat") || plusLabel.includes("infant")) {
       infants = plusNumber;
     } else if (
       plusLabel.includes("guida") ||
@@ -194,17 +191,9 @@ function parsePeople(title: string) {
   };
 }
 
-function hasAny(text: string, words: string[]) {
-  return words.some((word) => text.includes(word));
-}
-
 function detectExperienceId(title: string) {
   const text = normalize(title);
 
-  /*
-    PRIORITÀ IMPORTANTE:
-    cooking class vince sempre su pranzo e su Anastasiya.
-  */
   if (text.includes("cooking class") || text.includes("cooking")) {
     return EXPERIENCE_IDS.COOKING_CLASS;
   }
@@ -213,7 +202,11 @@ function detectExperienceId(title: string) {
     return EXPERIENCE_IDS.CENA;
   }
 
-  if (text.includes("cavallo") || text.includes("cavalli") || text.includes("horse")) {
+  if (
+    text.includes("cavallo") ||
+    text.includes("cavalli") ||
+    text.includes("horse")
+  ) {
     return EXPERIENCE_IDS.CAVALLO;
   }
 
@@ -257,11 +250,6 @@ function detectExperienceId(title: string) {
     return EXPERIENCE_IDS.PRANZO;
   }
 
-  /*
-    Regola storica:
-    se l'evento ha numeri partecipanti e non specifica altro,
-    lo consideriamo pranzo.
-  */
   if (/^\s*\d+/.test(text)) {
     return EXPERIENCE_IDS.PRANZO;
   }
@@ -304,7 +292,6 @@ function detectChannelLabel(title: string) {
   }
 
   if (text.includes("airbnb")) return "Airbnb";
-
   if (text.includes("freedome")) return "Freedome";
 
   if (
@@ -366,9 +353,11 @@ function extractCurioseetyCustomer(title: string) {
   const match = title.match(/curioseety\s+(.+)$/i);
   if (!match) return null;
 
-  return cleanSpaces(match[1])
-    .replace(/\s+(viator|airbnb|tod[-\s]?[a-z0-9]+|via-[a-z0-9]+).*$/i, "")
-    .trim() || null;
+  return (
+    cleanSpaces(match[1])
+      .replace(/\s+(viator|airbnb|tod[-\s]?[a-z0-9]+|via-[a-z0-9]+).*$/i, "")
+      .trim() || null
+  );
 }
 
 function extractAnastasiyaPranzoCustomer(title: string) {
@@ -436,7 +425,10 @@ async function findChannelId(params: {
   return fallback?.id ?? null;
 }
 
-async function getExistingStagingRow(supabase: ReturnType<typeof getSupabaseAdmin>, gcalUid: string) {
+async function getExistingStagingRow(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  gcalUid: string
+) {
   const { data } = await supabase
     .from("google_calendar_import_staging")
     .select("id, import_status, imported_booking_id")
@@ -450,11 +442,6 @@ function nextStatusForExisting(existingStatus?: string | null) {
   if (!existingStatus) return "pending";
 
   if (existingStatus === "imported") {
-    /*
-      Se l'evento Google viene modificato dopo l'importazione,
-      non aggiorniamo automaticamente la prenotazione.
-      Lo rimettiamo da verificare nella pagina import.
-    */
     return "needs_review";
   }
 
@@ -586,7 +573,6 @@ export async function POST(request: NextRequest) {
     const bookingReference = extractBookingReference(title, gcalUid);
 
     const existing = await getExistingStagingRow(supabase, gcalUid);
-
     const importStatus = nextStatusForExisting(existing?.import_status);
 
     const rowPayload = {
@@ -604,6 +590,7 @@ export async function POST(request: NextRequest) {
       original_title: title,
       import_status: importStatus,
       imported_booking_id: existing?.imported_booking_id ?? null,
+      import_origin: "make",
     };
 
     if (existing?.id) {
@@ -636,11 +623,13 @@ export async function POST(request: NextRequest) {
 
     revalidatePath("/import/google-calendar");
     revalidatePath("/prenotazioni");
+    revalidatePath("/");
 
     return NextResponse.json({
       ok: true,
       action: existing?.id ? "updated_staging" : "inserted_staging",
       import_status: importStatus,
+      import_origin: "make",
       booking_date: start.bookingDate,
       booking_time: start.bookingTime,
       title,

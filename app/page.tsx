@@ -24,6 +24,24 @@ function formatDate(value: string | null) {
   }).format(d);
 }
 
+function formatDateFull(value: string | null) {
+  if (!value) return "-";
+
+  const [year, month, day] = value.split("-").map(Number);
+  const d = new Date(year, (month || 1) - 1, day || 1);
+
+  return new Intl.DateTimeFormat("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
+}
+
+function formatTime(value: string | null) {
+  if (!value) return "-";
+  return String(value).slice(0, 5);
+}
+
 function getMonthName(monthIndex: number) {
   const date = new Date(2024, monthIndex, 1);
   return new Intl.DateTimeFormat("it-IT", { month: "long" }).format(date);
@@ -34,8 +52,72 @@ function getShortMonthName(monthIndex: number) {
   return new Intl.DateTimeFormat("it-IT", { month: "short" }).format(date);
 }
 
+function googleImportStatusLabel(status: string | null) {
+  switch (status) {
+    case "pending":
+      return "Nuova";
+    case "rolled_back":
+      return "Da reimportare";
+    case "needs_review":
+      return "Da verificare";
+    case "possible_duplicate":
+      return "Possibile doppione";
+    default:
+      return status || "Da controllare";
+  }
+}
+
+function googleImportStatusClass(status: string | null) {
+  switch (status) {
+    case "pending":
+    case "rolled_back":
+      return "bg-amber-100 text-amber-900";
+    case "needs_review":
+    case "possible_duplicate":
+      return "bg-red-100 text-red-800";
+    default:
+      return "bg-zinc-100 text-zinc-700";
+  }
+}
+
+function googleImportPeopleLabel(row: {
+  adults: number | null;
+  children: number | null;
+  infants: number | null;
+}) {
+  const adults = Number(row.adults || 0);
+  const children = Number(row.children || 0);
+  const infants = Number(row.infants || 0);
+  const total = adults + children + infants;
+
+  const parts = [`${total} pax`];
+
+  if (adults > 0) parts.push(`${adults} adulti`);
+  if (children > 0) parts.push(`${children} bambini`);
+  if (infants > 0) parts.push(`${infants} infanti`);
+
+  return parts.join(" · ");
+}
+
 type PageProps = {
   searchParams: Promise<{ m?: string; y?: string }>;
+};
+
+type GoogleCalendarImportRow = {
+  id: number;
+  booking_date: string | null;
+  booking_time: string | null;
+  customer_name: string | null;
+  adults: number | null;
+  children: number | null;
+  infants: number | null;
+  experience_id: number | null;
+  channel_id: number | null;
+  booking_source: string | null;
+  import_status: string | null;
+  original_title: string | null;
+  notes: string | null;
+  import_origin: string | null;
 };
 
 export default async function Home({ searchParams }: PageProps) {
@@ -70,6 +152,42 @@ export default async function Home({ searchParams }: PageProps) {
   if (error) {
     console.error("Errore caricamento prenotazioni:", error.message);
   }
+
+  const googleImportStatusesToShow = [
+    "pending",
+    "rolled_back",
+    "needs_review",
+    "possible_duplicate",
+  ];
+
+  const { data: googleCalendarImportData, error: googleCalendarImportError } =
+    await supabaseServer
+      .from("google_calendar_import_staging")
+      .select(
+        "id, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin"
+      )
+      .eq("import_origin", "make")
+      .in("import_status", googleImportStatusesToShow)
+      .order("booking_date", { ascending: true })
+      .order("booking_time", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(30);
+
+  if (googleCalendarImportError) {
+    console.error(
+      "Errore caricamento import Google Calendar:",
+      googleCalendarImportError.message
+    );
+  }
+
+  const googleCalendarImports =
+    (googleCalendarImportData || []) as GoogleCalendarImportRow[];
+
+  const urgentGoogleCalendarImports = googleCalendarImports.filter(
+    (row) =>
+      row.import_status === "needs_review" ||
+      row.import_status === "possible_duplicate"
+  );
 
   const allBookings = bookings || [];
 
@@ -141,20 +259,7 @@ export default async function Home({ searchParams }: PageProps) {
               className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-zinc-100"
               aria-label="Mese precedente"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
-                className="h-5 w-5 text-zinc-700"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.75 19.5 8.25 12l7.5-7.5"
-                />
-              </svg>
+              ←
             </Link>
 
             <div className="min-w-0 flex-1 px-2 text-center">
@@ -173,20 +278,7 @@ export default async function Home({ searchParams }: PageProps) {
               className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-zinc-100"
               aria-label="Mese successivo"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
-                className="h-5 w-5 text-zinc-700"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                />
-              </svg>
+              →
             </Link>
           </div>
 
@@ -210,50 +302,18 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
 
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-white">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="h-3 w-3"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 17a.75.75 0 01-.75-.75V5.612L5.29 9.77a.75.75 0 01-1.08-1.04l5.25-5.5a.75.75 0 011.08 0l5.25 5.5a.75.75 0 11-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0110 17z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                  <span className="text-base font-medium text-zinc-800 sm:text-lg">
-                    Entrate
-                  </span>
-                </div>
+                <span className="text-base font-medium text-zinc-800 sm:text-lg">
+                  Entrate
+                </span>
                 <span className="text-lg font-medium text-green-600 sm:text-xl">
                   {formatEuro(meseEntrate)}
                 </span>
               </div>
 
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-white">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="h-3 w-3"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                  <span className="text-base font-medium text-zinc-800 sm:text-lg">
-                    Spese
-                  </span>
-                </div>
+                <span className="text-base font-medium text-zinc-800 sm:text-lg">
+                  Spese
+                </span>
                 <span className="text-lg font-medium text-red-600 sm:text-xl">
                   -{formatEuro(meseSpese)}
                 </span>
@@ -262,7 +322,8 @@ export default async function Home({ searchParams }: PageProps) {
               <div className="mt-4 border-t border-dashed border-zinc-200 pt-5">
                 <div className="flex h-28 items-stretch justify-between gap-1 sm:h-32">
                   {chartData.map((d, idx) => {
-                    const heightPct = (Math.abs(d.value) / maxAbsChartValue) * 100;
+                    const heightPct =
+                      (Math.abs(d.value) / maxAbsChartValue) * 100;
                     const isCurrentMonth = d.index === selectedMonth;
 
                     return (
@@ -325,6 +386,105 @@ export default async function Home({ searchParams }: PageProps) {
         </div>
 
         <div className="space-y-4 sm:space-y-6">
+          <SectionCard title="📥 Nuove da Google Calendar">
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-amber-900">
+                      {googleCalendarImports.length} da controllare
+                    </div>
+                    <div className="mt-1 text-xs text-amber-800">
+                      {urgentGoogleCalendarImports.length > 0
+                        ? `${urgentGoogleCalendarImports.length} richiedono attenzione`
+                        : "Solo nuove righe arrivate da Make"}
+                    </div>
+                  </div>
+
+                  <Link
+                    href="/import/google-calendar"
+                    className="shrink-0 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-amber-700"
+                  >
+                    Apri
+                  </Link>
+                </div>
+              </div>
+
+              {googleCalendarImports.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-5 text-center text-sm text-zinc-500">
+                  Nessuna nuova prenotazione Google Calendar arrivata da Make.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {googleCalendarImports.slice(0, 8).map((row) => {
+                    const title = row.notes || row.original_title || "Senza titolo";
+                    const importDateHref = row.booking_date
+                      ? `/import/google-calendar?date=${row.booking_date}`
+                      : "/import/google-calendar";
+
+                    return (
+                      <div
+                        key={row.id}
+                        className={`rounded-2xl border p-3 ${
+                          row.import_status === "needs_review" ||
+                          row.import_status === "possible_duplicate"
+                            ? "border-red-200 bg-red-50"
+                            : "border-zinc-200 bg-white"
+                        }`}
+                      >
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-[10px] font-bold text-white">
+                            {formatDateFull(row.booking_date)}
+                          </span>
+
+                          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-bold text-zinc-700">
+                            {formatTime(row.booking_time)}
+                          </span>
+
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${googleImportStatusClass(
+                              row.import_status
+                            )}`}
+                          >
+                            {googleImportStatusLabel(row.import_status)}
+                          </span>
+                        </div>
+
+                        <div className="text-sm font-bold text-zinc-900">
+                          {title}
+                        </div>
+
+                        <div className="mt-1 text-xs text-zinc-500">
+                          {googleImportPeopleLabel(row)}
+                          {row.booking_source ? ` · ${row.booking_source}` : ""}
+                          {row.customer_name ? ` · ${row.customer_name}` : ""}
+                        </div>
+
+                        <div className="mt-3">
+                          <Link
+                            href={importDateHref}
+                            className="inline-flex rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-bold text-zinc-800 shadow-sm transition hover:bg-zinc-100"
+                          >
+                            Apri import del giorno
+                          </Link>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {googleCalendarImports.length > 8 ? (
+                    <Link
+                      href="/import/google-calendar"
+                      className="block rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-center text-xs font-bold text-zinc-700 transition hover:bg-zinc-100"
+                    >
+                      Vedi tutte le altre {googleCalendarImports.length - 8}
+                    </Link>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
           <NotificationCenter />
 
           <SectionCard title="Agenda (Prossimi 10 giorni)">
@@ -434,7 +594,9 @@ export default async function Home({ searchParams }: PageProps) {
                                 isToday ? "text-blue-700" : "text-zinc-900"
                               }`}
                             >
-                              {isToday ? "OGGI" : formatDate(booking.booking_date)}
+                              {isToday
+                                ? "OGGI"
+                                : formatDate(booking.booking_date)}
                             </div>
                             <div className="mt-0.5 text-[10px] text-zinc-500">
                               {booking.booking_time
