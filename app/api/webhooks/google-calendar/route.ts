@@ -431,7 +431,7 @@ async function getExistingStagingRow(
 ) {
   const { data } = await supabase
     .from("google_calendar_import_staging")
-    .select("id, import_status, imported_booking_id")
+    .select("*")
     .eq("gcal_uid", gcalUid)
     .maybeSingle();
 
@@ -447,8 +447,98 @@ function nextStatusForExisting(existingStatus?: string | null) {
 
   if (existingStatus === "ignored") return "ignored";
   if (existingStatus === "already_exists") return "already_exists";
+  if (existingStatus === "gcal_cancelled") return "gcal_cancelled";
 
   return "pending";
+}
+
+async function markGoogleCalendarEventCancelled(params: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  gcalUid: string;
+  title: string;
+  existing: any;
+}) {
+  const nowIso = new Date().toISOString();
+
+  if (params.existing?.id) {
+    const previousNotes = cleanSpaces(params.existing.notes || params.existing.original_title || params.title);
+    const cancellationNote = previousNotes
+      ? `🔴 Evento cancellato da Google Calendar\n${previousNotes}`
+      : "🔴 Evento cancellato da Google Calendar";
+
+    const { error } = await params.supabase
+      .from("google_calendar_import_staging")
+      .update({
+        import_status: "gcal_cancelled",
+        import_origin: "make",
+        notes: cancellationNote,
+        original_title: params.title || params.existing.original_title || previousNotes || "Evento cancellato da Google Calendar",
+      })
+      .eq("id", params.existing.id);
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 500 }
+      );
+    }
+
+    revalidatePath("/import/google-calendar");
+    revalidatePath("/prenotazioni");
+    revalidatePath("/");
+
+    return NextResponse.json({
+      ok: true,
+      action: "marked_gcal_cancelled",
+      import_status: "gcal_cancelled",
+      import_origin: "make",
+      gcal_uid: params.gcalUid,
+      imported_booking_id: params.existing.imported_booking_id ?? null,
+    });
+  }
+
+  const fallbackTitle =
+    params.title || `Evento Google Calendar cancellato ${params.gcalUid}`;
+
+  const { error } = await params.supabase
+    .from("google_calendar_import_staging")
+    .insert({
+      gcal_uid: params.gcalUid,
+      booking_date: nowIso.slice(0, 10),
+      booking_time: null,
+      booking_reference: `GCAL-${sanitizeForReference(params.gcalUid)}`,
+      customer_name: null,
+      adults: 0,
+      children: 0,
+      infants: 0,
+      experience_id: EXPERIENCE_IDS.PRANZO,
+      channel_id: null,
+      booking_source: "Google Calendar",
+      notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
+      original_title: fallbackTitle,
+      import_status: "gcal_cancelled",
+      imported_booking_id: null,
+      import_origin: "make",
+    });
+
+  if (error) {
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: 500 }
+    );
+  }
+
+  revalidatePath("/import/google-calendar");
+  revalidatePath("/prenotazioni");
+  revalidatePath("/");
+
+  return NextResponse.json({
+    ok: true,
+    action: "inserted_gcal_cancelled_notice",
+    import_status: "gcal_cancelled",
+    import_origin: "make",
+    gcal_uid: params.gcalUid,
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -480,7 +570,6 @@ export async function POST(request: NextRequest) {
     const gcalUid = getEventId(payload);
     const title = getTitle(payload);
     const status = getStatus(payload);
-    const start = parseStart(payload);
 
     if (!gcalUid) {
       return NextResponse.json(
@@ -488,6 +577,20 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const supabase = getSupabaseAdmin();
+    const existing = await getExistingStagingRow(supabase, gcalUid);
+
+    if (status === "cancelled" || status === "canceled") {
+      return await markGoogleCalendarEventCancelled({
+        supabase,
+        gcalUid,
+        title,
+        existing,
+      });
+    }
+
+    const start = parseStart(payload);
 
     if (!title) {
       return NextResponse.json(
@@ -510,18 +613,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (status === "cancelled" || status === "canceled") {
-      return NextResponse.json(
-        {
-          ok: true,
-          skipped: true,
-          reason:
-            "Evento cancellato ricevuto. Non cancelliamo automaticamente prenotazioni.",
-        },
-        { status: 200 }
-      );
-    }
-
     const people = parsePeople(title);
 
     if (!people) {
@@ -539,8 +630,6 @@ export async function POST(request: NextRequest) {
         { status: 200 }
       );
     }
-
-    const supabase = getSupabaseAdmin();
 
     const { data: channelsData, error: channelsError } = await supabase
       .from("channels")
@@ -571,8 +660,6 @@ export async function POST(request: NextRequest) {
 
     const customerName = extractCustomerName(title, channelLabel);
     const bookingReference = extractBookingReference(title, gcalUid);
-
-    const existing = await getExistingStagingRow(supabase, gcalUid);
     const importStatus = nextStatusForExisting(existing?.import_status);
 
     const rowPayload = {

@@ -60,6 +60,7 @@ function shouldForceImport(formData: FormData) {
 function redirectBack(date: string) {
   revalidatePath("/import/google-calendar");
   revalidatePath("/prenotazioni");
+  revalidatePath("/");
   redirect(`/import/google-calendar${date ? `?date=${date}` : ""}`);
 }
 
@@ -179,6 +180,10 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
   const rows = (rowsData ?? []) as StagingRow[];
 
   for (const row of rows) {
+    if (row.import_status === "gcal_cancelled") {
+      continue;
+    }
+
     const canProcessNormally =
       row.import_status === "pending" || row.import_status === "rolled_back";
 
@@ -311,6 +316,7 @@ export async function ignoreSelectedGoogleCalendarRows(formData: FormData) {
         "rolled_back",
         "needs_review",
         "possible_duplicate",
+        "gcal_cancelled",
       ]);
   }
 
@@ -334,6 +340,7 @@ export async function resetSelectedGoogleCalendarRows(formData: FormData) {
         "ignored",
         "needs_review",
         "possible_duplicate",
+        "gcal_cancelled",
       ]);
   }
 
