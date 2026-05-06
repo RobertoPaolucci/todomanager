@@ -62,6 +62,8 @@ function googleImportStatusLabel(status: string | null) {
       return "Da verificare";
     case "possible_duplicate":
       return "Possibile doppione";
+    case "gcal_cancelled":
+      return "Cancellata da Google Calendar";
     default:
       return status || "Da controllare";
   }
@@ -74,6 +76,7 @@ function googleImportStatusClass(status: string | null) {
       return "bg-amber-100 text-amber-900";
     case "needs_review":
     case "possible_duplicate":
+    case "gcal_cancelled":
       return "bg-red-100 text-red-800";
     default:
       return "bg-zinc-100 text-zinc-700";
@@ -158,6 +161,7 @@ export default async function Home({ searchParams }: PageProps) {
     "rolled_back",
     "needs_review",
     "possible_duplicate",
+    "gcal_cancelled",
   ];
 
   const { data: googleCalendarImportData, error: googleCalendarImportError } =
@@ -186,7 +190,8 @@ export default async function Home({ searchParams }: PageProps) {
   const urgentGoogleCalendarImports = googleCalendarImports.filter(
     (row) =>
       row.import_status === "needs_review" ||
-      row.import_status === "possible_duplicate"
+      row.import_status === "possible_duplicate" ||
+      row.import_status === "gcal_cancelled"
   );
 
   const allBookings = bookings || [];
@@ -427,7 +432,8 @@ export default async function Home({ searchParams }: PageProps) {
                         key={row.id}
                         className={`rounded-2xl border p-3 ${
                           row.import_status === "needs_review" ||
-                          row.import_status === "possible_duplicate"
+                          row.import_status === "possible_duplicate" ||
+                          row.import_status === "gcal_cancelled"
                             ? "border-red-200 bg-red-50"
                             : "border-zinc-200 bg-white"
                         }`}
@@ -459,6 +465,14 @@ export default async function Home({ searchParams }: PageProps) {
                           {row.booking_source ? ` · ${row.booking_source}` : ""}
                           {row.customer_name ? ` · ${row.customer_name}` : ""}
                         </div>
+
+                        {row.import_status === "gcal_cancelled" ? (
+                          <div className="mt-2 rounded-xl bg-red-100 p-2 text-xs font-bold text-red-900">
+                            Evento cancellato da Google Calendar. Controlla la
+                            prenotazione collegata prima di eliminarla o
+                            modificarla.
+                          </div>
+                        ) : null}
 
                         <div className="mt-3">
                           <Link

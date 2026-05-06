@@ -130,6 +130,8 @@ function statusLabel(status: string) {
       return "Ignorata";
     case "needs_review":
       return "Da verificare";
+    case "gcal_cancelled":
+      return "Cancellata da Google Calendar";
     default:
       return status;
   }
@@ -144,6 +146,7 @@ function statusClass(status: string) {
       return "bg-zinc-100 text-zinc-700";
     case "possible_duplicate":
     case "needs_review":
+    case "gcal_cancelled":
       return "bg-red-100 text-red-900";
     case "imported":
       return "bg-green-100 text-green-900";
@@ -278,7 +281,13 @@ export default async function GoogleCalendarImportPage({
     let matchedBooking: BookingRow | undefined;
     let matchReason = "";
 
-    if (
+    if (row.import_status === "gcal_cancelled") {
+      computedStatus = "gcal_cancelled";
+      matchedBooking = existingByImportedId;
+      matchReason = existingByImportedId
+        ? "evento cancellato da Google Calendar"
+        : "";
+    } else if (
       (row.import_status === "pending" || row.import_status === "rolled_back") &&
       existingByReference
     ) {
@@ -316,6 +325,10 @@ export default async function GoogleCalendarImportPage({
     isForceImportable(row.computedStatus)
   ).length;
 
+  const cancelledGoogleCount = rowsWithComputedStatus.filter(
+    (row) => row.computedStatus === "gcal_cancelled"
+  ).length;
+
   const importedBookingIdsFromGoogle = new Set(
     rowsWithComputedStatus
       .filter((row) => row.import_status === "imported" && row.imported_booking_id)
@@ -326,6 +339,15 @@ export default async function GoogleCalendarImportPage({
     rowsWithComputedStatus
       .filter(
         (row) => row.matchReason === "già importata" && row.matchedBooking?.id
+      )
+      .map((row) => row.matchedBooking!.id)
+  );
+
+  const googleCancelledLinkedBookingIds = new Set(
+    rowsWithComputedStatus
+      .filter(
+        (row) =>
+          row.computedStatus === "gcal_cancelled" && row.matchedBooking?.id
       )
       .map((row) => row.matchedBooking!.id)
   );
@@ -363,7 +385,7 @@ export default async function GoogleCalendarImportPage({
         </SectionCard>
 
         <SectionCard title={`Confronto del giorno - ${formatDateIt(selectedDate)}`}>
-          <div className="mb-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-700 md:grid-cols-4">
+          <div className="mb-5 grid gap-3 rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-700 md:grid-cols-5">
             <div>
               <div className="text-xs font-semibold uppercase text-zinc-500">
                 Google Calendar
@@ -397,6 +419,15 @@ export default async function GoogleCalendarImportPage({
                 {forceImportableCount}
               </div>
             </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase text-zinc-500">
+                Cancellate GCal
+              </div>
+              <div className="text-xl font-bold text-red-700">
+                {cancelledGoogleCount}
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">
@@ -406,8 +437,9 @@ export default async function GoogleCalendarImportPage({
                   Eventi Google Calendar
                 </h2>
                 <p className="text-sm text-zinc-500">
-                  Seleziona solo quelli da importare. Se un possibile doppione è
-                  stato verificato e non è un doppione, usa “Importa comunque”.
+                  Seleziona solo quelli da importare. Le cancellazioni Google
+                  Calendar non cancellano automaticamente Todo Manager: vanno
+                  verificate.
                 </p>
               </div>
 
@@ -435,11 +467,14 @@ export default async function GoogleCalendarImportPage({
                       const channelName =
                         channelMap.get(row.channel_id) ?? `ID ${row.channel_id}`;
                       const selectable = isActionSelectable(row.computedStatus);
+                      const isCancelledByGoogle =
+                        row.computedStatus === "gcal_cancelled";
 
                       return (
                         <div
                           key={row.id}
                           className={`rounded-2xl border bg-white p-4 shadow-sm ${
+                            isCancelledByGoogle ||
                             row.computedStatus === "possible_duplicate"
                               ? "border-red-300"
                               : "border-amber-200"
@@ -505,6 +540,15 @@ export default async function GoogleCalendarImportPage({
                               </span>{" "}
                               con prenotazione Todo Manager #
                               {row.matchedBooking.id}
+                            </div>
+                          ) : null}
+
+                          {isCancelledByGoogle ? (
+                            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                              Evento cancellato da Google Calendar. La
+                              prenotazione Todo Manager collegata non viene
+                              cancellata automaticamente: controllala e decidi
+                              manualmente.
                             </div>
                           ) : null}
 
@@ -609,14 +653,21 @@ export default async function GoogleCalendarImportPage({
                     const linkedAsAlreadyImported =
                       alreadyImportedLinkedBookingIds.has(booking.id);
 
+                    const linkedAsGoogleCancelled =
+                      googleCancelledLinkedBookingIds.has(booking.id);
+
                     const highlightGoogleCalendarBooking =
-                      importedFromGoogleCalendar || linkedAsAlreadyImported;
+                      importedFromGoogleCalendar ||
+                      linkedAsAlreadyImported ||
+                      linkedAsGoogleCancelled;
 
                     return (
                       <div
                         key={booking.id}
                         className={`rounded-2xl border p-4 shadow-sm ${
-                          highlightGoogleCalendarBooking
+                          linkedAsGoogleCancelled
+                            ? "border-red-300 bg-red-50 ring-2 ring-red-200"
+                            : highlightGoogleCalendarBooking
                             ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
                             : "border-green-200 bg-white"
                         }`}
@@ -646,9 +697,22 @@ export default async function GoogleCalendarImportPage({
                               Collegata a evento Google Calendar
                             </span>
                           ) : null}
+
+                          {linkedAsGoogleCancelled ? (
+                            <span className="rounded-full bg-red-200 px-2.5 py-1 text-xs font-semibold text-red-900">
+                              Evento Google cancellato
+                            </span>
+                          ) : null}
                         </div>
 
-                        {linkedAsAlreadyImported ? (
+                        {linkedAsGoogleCancelled ? (
+                          <div className="mb-3 rounded-xl bg-red-100 p-3 text-xs font-bold text-red-900">
+                            Attenzione: l’evento Google Calendar collegato a
+                            questa prenotazione è stato cancellato. La
+                            prenotazione Todo Manager è ancora attiva e va
+                            controllata manualmente.
+                          </div>
+                        ) : linkedAsAlreadyImported ? (
                           <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs text-red-800">
                             Evidenziata perché negli eventi Google Calendar
                             risulta già importata con questa prenotazione Todo
