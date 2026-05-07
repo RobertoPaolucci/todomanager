@@ -17,7 +17,10 @@ function formatEuro(value: number) {
 
 function formatDate(value: string | null) {
   if (!value) return "-";
-  const d = new Date(value);
+
+  const [year, month, day] = String(value).split("-").map(Number);
+  const d = new Date(year, (month || 1) - 1, day || 1);
+
   return new Intl.DateTimeFormat("it-IT", {
     day: "2-digit",
     month: "2-digit",
@@ -27,7 +30,7 @@ function formatDate(value: string | null) {
 function formatDateFull(value: string | null) {
   if (!value) return "-";
 
-  const [year, month, day] = value.split("-").map(Number);
+  const [year, month, day] = String(value).split("-").map(Number);
   const d = new Date(year, (month || 1) - 1, day || 1);
 
   return new Intl.DateTimeFormat("it-IT", {
@@ -37,9 +40,39 @@ function formatDateFull(value: string | null) {
   }).format(d);
 }
 
+function formatDateTimeRome(value: string | null) {
+  if (!value) return "-";
+
+  const d = new Date(value);
+
+  if (Number.isNaN(d.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("it-IT", {
+    timeZone: "Europe/Rome",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 function formatTime(value: string | null) {
   if (!value) return "-";
   return String(value).slice(0, 5);
+}
+
+function formatExperienceDateTime(row: {
+  booking_date: string | null;
+  booking_time: string | null;
+}) {
+  const date = formatDateFull(row.booking_date);
+  const time = formatTime(row.booking_time);
+
+  if (date === "-" && time === "-") return "-";
+  if (time === "-") return date;
+
+  return `${date} ore ${time}`;
 }
 
 function getMonthName(monthIndex: number) {
@@ -121,6 +154,8 @@ type GoogleCalendarImportRow = {
   original_title: string | null;
   notes: string | null;
   import_origin: string | null;
+  gcal_updated_at: string | null;
+  gcal_html_link: string | null;
 };
 
 export default async function Home({ searchParams }: PageProps) {
@@ -134,7 +169,7 @@ export default async function Home({ searchParams }: PageProps) {
   const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
 
   const nextMonth = selectedMonth === 12 ? 1 : selectedMonth + 1;
-  const nextYear = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
+  const nextYear = selectedMonth === 12 ? 1 : selectedYear;
 
   const nomeMese = getMonthName(selectedMonth - 1);
   const lastDayOfMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -168,7 +203,7 @@ export default async function Home({ searchParams }: PageProps) {
     await supabaseServer
       .from("google_calendar_import_staging")
       .select(
-        "id, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin"
+        "id, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link"
       )
       .eq("import_origin", "make")
       .in("import_status", googleImportStatusesToShow)
@@ -439,14 +474,6 @@ export default async function Home({ searchParams }: PageProps) {
                         }`}
                       >
                         <div className="mb-2 flex flex-wrap items-center gap-2">
-                          <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-[10px] font-bold text-white">
-                            {formatDateFull(row.booking_date)}
-                          </span>
-
-                          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-bold text-zinc-700">
-                            {formatTime(row.booking_time)}
-                          </span>
-
                           <span
                             className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${googleImportStatusClass(
                               row.import_status
@@ -460,7 +487,23 @@ export default async function Home({ searchParams }: PageProps) {
                           {title}
                         </div>
 
-                        <div className="mt-1 text-xs text-zinc-500">
+                        <div className="mt-2 rounded-xl bg-white/70 p-2 text-xs text-zinc-700 ring-1 ring-zinc-100">
+                          <div>
+                            <span className="font-bold text-zinc-900">
+                              Evento GCal:
+                            </span>{" "}
+                            {formatDateTimeRome(row.gcal_updated_at)}
+                          </div>
+
+                          <div className="mt-1">
+                            <span className="font-bold text-zinc-900">
+                              Esperienza:
+                            </span>{" "}
+                            {formatExperienceDateTime(row)}
+                          </div>
+                        </div>
+
+                        <div className="mt-2 text-xs text-zinc-500">
                           {googleImportPeopleLabel(row)}
                           {row.booking_source ? ` · ${row.booking_source}` : ""}
                           {row.customer_name ? ` · ${row.customer_name}` : ""}
@@ -474,13 +517,24 @@ export default async function Home({ searchParams }: PageProps) {
                           </div>
                         ) : null}
 
-                        <div className="mt-3">
+                        <div className="mt-3 flex flex-wrap gap-2">
                           <Link
                             href={importDateHref}
                             className="inline-flex rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-bold text-zinc-800 shadow-sm transition hover:bg-zinc-100"
                           >
                             Apri import del giorno
                           </Link>
+
+                          {row.gcal_html_link ? (
+                            <a
+                              href={row.gcal_html_link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 shadow-sm transition hover:bg-blue-100"
+                            >
+                              Apri evento GCal
+                            </a>
+                          ) : null}
                         </div>
                       </div>
                     );

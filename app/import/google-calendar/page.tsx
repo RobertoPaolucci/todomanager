@@ -18,21 +18,23 @@ type PageProps = {
 
 type StagingRow = {
   id: number;
-  booking_date: string;
+  booking_date: string | null;
   booking_time: string | null;
   booking_reference: string;
   customer_name: string | null;
   adults: number;
   children: number;
   infants: number | null;
-  experience_id: number;
-  channel_id: number;
+  experience_id: number | null;
+  channel_id: number | null;
   booking_source: string | null;
   notes: string | null;
   gcal_uid: string;
   original_title: string | null;
   import_status: string;
   imported_booking_id: number | null;
+  gcal_updated_at: string | null;
+  gcal_html_link: string | null;
 };
 
 type BookingRow = {
@@ -81,7 +83,9 @@ function todayRome() {
   }).format(new Date());
 }
 
-function formatDateIt(value: string) {
+function formatDateIt(value?: string | null) {
+  if (!value) return "—";
+
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(year, (month || 1) - 1, day || 1);
 
@@ -93,9 +97,52 @@ function formatDateIt(value: string) {
   }).format(date);
 }
 
+function formatDateShortIt(value?: string | null) {
+  if (!value) return "—";
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, (month || 1) - 1, day || 1);
+
+  return new Intl.DateTimeFormat("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatDateTimeIt(value?: string | null) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return new Intl.DateTimeFormat("it-IT", {
+    timeZone: "Europe/Rome",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function normalizeTime(value: string | null | undefined) {
   if (!value) return "";
   return String(value).slice(0, 5);
+}
+
+function experienceDateTimeLabel(row: {
+  booking_date: string | null;
+  booking_time: string | null;
+}) {
+  const date = formatDateShortIt(row.booking_date);
+  const time = normalizeTime(row.booking_time);
+
+  if (date === "—" && !time) return "—";
+  if (!time) return date;
+
+  return `${date} ore ${time}`;
 }
 
 function peopleLabel(row: {
@@ -205,7 +252,7 @@ export default async function GoogleCalendarImportPage({
   const { data: stagingData, error: stagingError } = await supabaseServer
     .from("google_calendar_import_staging")
     .select(
-      "id, booking_date, booking_time, booking_reference, customer_name, adults, children, infants, experience_id, channel_id, booking_source, notes, gcal_uid, original_title, import_status, imported_booking_id"
+      "id, booking_date, booking_time, booking_reference, customer_name, adults, children, infants, experience_id, channel_id, booking_source, notes, gcal_uid, original_title, import_status, imported_booking_id, gcal_updated_at, gcal_html_link"
     )
     .eq("booking_date", selectedDate)
     .order("booking_time", { ascending: true })
@@ -225,11 +272,19 @@ export default async function GoogleCalendarImportPage({
   const existingBookings = (bookingsData ?? []) as BookingRow[];
 
   const experienceIds = Array.from(
-    new Set(stagingRows.map((row) => row.experience_id).filter(Boolean))
+    new Set(
+      stagingRows
+        .map((row) => row.experience_id)
+        .filter((id): id is number => typeof id === "number")
+    )
   );
 
   const channelIds = Array.from(
-    new Set(stagingRows.map((row) => row.channel_id).filter(Boolean))
+    new Set(
+      stagingRows
+        .map((row) => row.channel_id)
+        .filter((id): id is number => typeof id === "number")
+    )
   );
 
   const { data: experiencesData } =
@@ -365,7 +420,7 @@ export default async function GoogleCalendarImportPage({
           >
             <div>
               <label className="mb-1 block text-sm font-medium text-zinc-700">
-                Giorno da controllare
+                Giorno esperienza da controllare
               </label>
               <input
                 type="date"
@@ -462,10 +517,16 @@ export default async function GoogleCalendarImportPage({
                     {rowsWithComputedStatus.map((row) => {
                       const title = row.notes || row.original_title || "";
                       const experienceName =
-                        experienceMap.get(row.experience_id) ??
-                        `ID ${row.experience_id}`;
+                        row.experience_id !== null
+                          ? experienceMap.get(row.experience_id) ??
+                            `ID ${row.experience_id}`
+                          : "Da verificare";
+
                       const channelName =
-                        channelMap.get(row.channel_id) ?? `ID ${row.channel_id}`;
+                        row.channel_id !== null
+                          ? channelMap.get(row.channel_id) ?? `ID ${row.channel_id}`
+                          : "Da verificare";
+
                       const selectable = isActionSelectable(row.computedStatus);
                       const isCancelledByGoogle =
                         row.computedStatus === "gcal_cancelled";
@@ -508,6 +569,35 @@ export default async function GoogleCalendarImportPage({
                                 {title || "Senza titolo"}
                               </div>
                             </div>
+                          </div>
+
+                          <div className="mb-3 grid gap-2 rounded-xl bg-zinc-50 p-3 text-sm text-zinc-700 sm:grid-cols-2">
+                            <div>
+                              <span className="font-semibold">
+                                Data evento GCal:
+                              </span>{" "}
+                              {formatDateTimeIt(row.gcal_updated_at)}
+                            </div>
+
+                            <div>
+                              <span className="font-semibold">
+                                Data esperienza:
+                              </span>{" "}
+                              {experienceDateTimeLabel(row)}
+                            </div>
+
+                            {row.gcal_html_link ? (
+                              <div className="sm:col-span-2">
+                                <a
+                                  href={row.gcal_html_link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-semibold text-blue-700 underline underline-offset-4"
+                                >
+                                  Apri evento Google Calendar
+                                </a>
+                              </div>
+                            ) : null}
                           </div>
 
                           <div className="grid gap-2 text-sm text-zinc-700 sm:grid-cols-2">
@@ -726,8 +816,16 @@ export default async function GoogleCalendarImportPage({
 
                         <div className="mt-3 grid gap-2 text-sm text-zinc-700 sm:grid-cols-2">
                           <div>
-                            <span className="font-semibold">Ora:</span>{" "}
-                            {normalizeTime(booking.booking_time) || "—"}
+                            <span className="font-semibold">
+                              Data esperienza:
+                            </span>{" "}
+                            {selectedDate
+                              ? `${formatDateShortIt(selectedDate)}${
+                                  normalizeTime(booking.booking_time)
+                                    ? ` ore ${normalizeTime(booking.booking_time)}`
+                                    : ""
+                                }`
+                              : "—"}
                           </div>
 
                           <div>

@@ -10,6 +10,13 @@ type ChannelRow = {
   type: string | null;
 };
 
+type ParsedStart = {
+  isValid: boolean;
+  isAllDay: boolean;
+  bookingDate: string;
+  bookingTime: string;
+};
+
 type WebhookPayload = {
   secret?: string;
   event_id?: string;
@@ -117,6 +124,28 @@ function getStartValue(payload: WebhookPayload) {
   return "";
 }
 
+function parseDateToIso(value?: string | null) {
+  const raw = cleanSpaces(value);
+
+  if (!raw) return null;
+
+  const date = new Date(raw);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
+}
+
+function getGoogleCalendarUpdatedAt(payload: WebhookPayload) {
+  return parseDateToIso(payload.updated) || new Date().toISOString();
+}
+
+function getGoogleCalendarHtmlLink(payload: WebhookPayload) {
+  return cleanSpaces(payload.htmlLink || "");
+}
+
 function getRomeDateTimeFromDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Rome",
@@ -143,7 +172,7 @@ function getRomeDateTimeFromDate(date: Date) {
   };
 }
 
-function parseStart(payload: WebhookPayload) {
+function parseStart(payload: WebhookPayload): ParsedStart {
   const raw = cleanSpaces(getStartValue(payload));
   const explicitAllDay =
     parseBoolean(payload.all_day) || parseBoolean(payload.allDay);
@@ -392,7 +421,9 @@ function channelMatchesLabel(channel: ChannelRow, label: string) {
   }
 
   if (labelKey === "fattoriamadonnadellaquerce") {
-    return channelKey.includes("fattoriamadonnadellaquerce") || channelKey === "fmdq";
+    return (
+      channelKey.includes("fattoriamadonnadellaquerce") || channelKey === "fmdq"
+    );
   }
 
   if (labelKey === "getyourguide") {
@@ -513,27 +544,64 @@ function nextStatusForExisting(existingStatus?: string | null) {
   return "pending";
 }
 
+function buildCancellationNotes(title: string, existing: any) {
+  const previousNotes = cleanSpaces(
+    existing?.notes || existing?.original_title || title
+  );
+
+  return previousNotes
+    ? `🔴 Evento cancellato da Google Calendar\n${previousNotes}`
+    : "🔴 Evento cancellato da Google Calendar";
+}
+
+async function getChannels(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const { data, error } = await supabase
+    .from("channels")
+    .select("id, name, type")
+    .order("id", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as ChannelRow[];
+}
+
 async function markGoogleCalendarEventCancelled(params: {
   supabase: ReturnType<typeof getSupabaseAdmin>;
   gcalUid: string;
   title: string;
   existing: any;
+  start: ParsedStart;
+  gcalUpdatedAt: string;
+  gcalHtmlLink: string;
 }) {
-  const nowIso = new Date().toISOString();
+  const hasValidExperienceDate =
+    params.start.isValid && !params.start.isAllDay && params.start.bookingDate;
+
+  const finalBookingDate = hasValidExperienceDate
+    ? params.start.bookingDate
+    : cleanSpaces(params.existing?.booking_date || "");
+
+  const finalBookingTime = hasValidExperienceDate
+    ? params.start.bookingTime || null
+    : params.existing?.booking_time || null;
 
   if (params.existing?.id) {
-    const previousNotes = cleanSpaces(params.existing.notes || params.existing.original_title || params.title);
-    const cancellationNote = previousNotes
-      ? `🔴 Evento cancellato da Google Calendar\n${previousNotes}`
-      : "🔴 Evento cancellato da Google Calendar";
-
     const { error } = await params.supabase
       .from("google_calendar_import_staging")
       .update({
         import_status: "gcal_cancelled",
         import_origin: "make",
-        notes: cancellationNote,
-        original_title: params.title || params.existing.original_title || previousNotes || "Evento cancellato da Google Calendar",
+        booking_date: finalBookingDate || params.existing.booking_date,
+        booking_time: finalBookingTime,
+        notes: buildCancellationNotes(params.title, params.existing),
+        original_title:
+          params.title ||
+          params.existing.original_title ||
+          "Evento cancellato da Google Calendar",
+        gcal_updated_at: params.gcalUpdatedAt,
+        gcal_html_link: params.gcalHtmlLink,
       })
       .eq("id", params.existing.id);
 
@@ -554,9 +622,39 @@ async function markGoogleCalendarEventCancelled(params: {
       import_status: "gcal_cancelled",
       import_origin: "make",
       gcal_uid: params.gcalUid,
+      booking_date: finalBookingDate || params.existing.booking_date,
+      booking_time: finalBookingTime,
       imported_booking_id: params.existing.imported_booking_id ?? null,
     });
   }
+
+  if (!hasValidExperienceDate) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      action: "skipped_cancelled_without_start",
+      reason:
+        "Evento cancellato senza data esperienza valida. Nessuna scheda fittizia creata.",
+      gcal_uid: params.gcalUid,
+      import_status: "gcal_cancelled",
+      import_origin: "make",
+      gcal_updated_at: params.gcalUpdatedAt,
+    });
+  }
+
+  const channels = await getChannels(params.supabase);
+  const channelLabel = params.title
+    ? detectChannelLabel(params.title)
+    : "Google Calendar";
+  const channelId = params.title
+    ? await findChannelId({ channels, label: channelLabel })
+    : null;
+
+  const people = params.title ? parsePeople(params.title) : null;
+  const experienceId = params.title ? detectExperienceId(params.title) : null;
+  const customerName = params.title
+    ? extractCustomerName(params.title, channelLabel)
+    : null;
 
   const fallbackTitle =
     params.title || `Evento Google Calendar cancellato ${params.gcalUid}`;
@@ -565,21 +663,23 @@ async function markGoogleCalendarEventCancelled(params: {
     .from("google_calendar_import_staging")
     .insert({
       gcal_uid: params.gcalUid,
-      booking_date: nowIso.slice(0, 10),
-      booking_time: null,
-      booking_reference: `GCAL-${sanitizeForReference(params.gcalUid)}`,
-      customer_name: null,
-      adults: 0,
-      children: 0,
-      infants: 0,
-      experience_id: EXPERIENCE_IDS.PRANZO,
-      channel_id: null,
-      booking_source: "Google Calendar",
+      booking_date: params.start.bookingDate,
+      booking_time: params.start.bookingTime || null,
+      booking_reference: extractBookingReference(fallbackTitle, params.gcalUid),
+      customer_name: customerName,
+      adults: people?.adults ?? 0,
+      children: people?.children ?? 0,
+      infants: people?.infants ?? 0,
+      experience_id: experienceId,
+      channel_id: channelId,
+      booking_source: channelId ? channelLabel : "Google Calendar",
       notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
       original_title: fallbackTitle,
       import_status: "gcal_cancelled",
       imported_booking_id: null,
       import_origin: "make",
+      gcal_updated_at: params.gcalUpdatedAt,
+      gcal_html_link: params.gcalHtmlLink,
     });
 
   if (error) {
@@ -599,6 +699,9 @@ async function markGoogleCalendarEventCancelled(params: {
     import_status: "gcal_cancelled",
     import_origin: "make",
     gcal_uid: params.gcalUid,
+    booking_date: params.start.bookingDate,
+    booking_time: params.start.bookingTime || null,
+    gcal_updated_at: params.gcalUpdatedAt,
   });
 }
 
@@ -631,6 +734,9 @@ export async function POST(request: NextRequest) {
     const gcalUid = getEventId(payload);
     const title = getTitle(payload);
     const status = getStatus(payload);
+    const start = parseStart(payload);
+    const gcalUpdatedAt = getGoogleCalendarUpdatedAt(payload);
+    const gcalHtmlLink = getGoogleCalendarHtmlLink(payload);
 
     if (!gcalUid) {
       return NextResponse.json(
@@ -648,10 +754,11 @@ export async function POST(request: NextRequest) {
         gcalUid,
         title,
         existing,
+        start,
+        gcalUpdatedAt,
+        gcalHtmlLink,
       });
     }
-
-    const start = parseStart(payload);
 
     if (!title) {
       return NextResponse.json(
@@ -692,19 +799,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: channelsData, error: channelsError } = await supabase
-      .from("channels")
-      .select("id, name, type")
-      .order("id", { ascending: true });
-
-    if (channelsError) {
-      return NextResponse.json(
-        { ok: false, error: channelsError.message },
-        { status: 500 }
-      );
-    }
-
-    const channels = (channelsData ?? []) as ChannelRow[];
+    const channels = await getChannels(supabase);
     const channelLabel = detectChannelLabel(title);
     const channelId = await findChannelId({ channels, label: channelLabel });
 
@@ -739,6 +834,8 @@ export async function POST(request: NextRequest) {
       import_status: importStatus,
       imported_booking_id: existing?.imported_booking_id ?? null,
       import_origin: "make",
+      gcal_updated_at: gcalUpdatedAt,
+      gcal_html_link: gcalHtmlLink,
     };
 
     if (existing?.id) {
@@ -786,6 +883,8 @@ export async function POST(request: NextRequest) {
       channel: channelLabel,
       customer_name: customerName,
       booking_reference: bookingReference,
+      gcal_updated_at: gcalUpdatedAt,
+      gcal_html_link: gcalHtmlLink,
     });
   } catch (error: any) {
     return NextResponse.json(
