@@ -117,6 +117,32 @@ function getStartValue(payload: WebhookPayload) {
   return "";
 }
 
+function getRomeDateTimeFromDate(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Rome",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  let hour = get("hour");
+
+  if (hour === "24") {
+    hour = "00";
+  }
+
+  return {
+    bookingDate: `${get("year")}-${get("month")}-${get("day")}`,
+    bookingTime: `${hour}:${get("minute")}`,
+  };
+}
+
 function parseStart(payload: WebhookPayload) {
   const raw = cleanSpaces(getStartValue(payload));
   const explicitAllDay =
@@ -143,11 +169,46 @@ function parseStart(payload: WebhookPayload) {
     };
   }
 
+  const hasExplicitTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(raw);
+
+  if (hasExplicitTimezone) {
+    const date = new Date(raw);
+
+    if (Number.isNaN(date.getTime())) {
+      return {
+        isValid: false,
+        isAllDay: false,
+        bookingDate: "",
+        bookingTime: "",
+      };
+    }
+
+    const romeDateTime = getRomeDateTimeFromDate(date);
+
+    return {
+      isValid: true,
+      isAllDay: false,
+      bookingDate: romeDateTime.bookingDate,
+      bookingTime: romeDateTime.bookingTime,
+    };
+  }
+
+  const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+
+  if (!localMatch) {
+    return {
+      isValid: false,
+      isAllDay: false,
+      bookingDate: "",
+      bookingTime: "",
+    };
+  }
+
   return {
     isValid: true,
     isAllDay: false,
-    bookingDate: raw.slice(0, 10),
-    bookingTime: raw.split("T")[1]?.slice(0, 5) || "",
+    bookingDate: localMatch[1],
+    bookingTime: `${localMatch[2]}:${localMatch[3]}`,
   };
 }
 
