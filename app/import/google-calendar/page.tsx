@@ -4,6 +4,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
+import { cancelBooking } from "@/app/prenotazioni/actions";
 import {
   importSelectedGoogleCalendarRows,
   ignoreSelectedGoogleCalendarRows,
@@ -51,6 +52,7 @@ type BookingRow = {
   booking_source: string;
   notes: string | null;
   business_unit_id: number | null;
+  is_cancelled: boolean | null;
 };
 
 type ExperienceRow = {
@@ -263,7 +265,7 @@ export default async function GoogleCalendarImportPage({
   const { data: bookingsData } = await supabaseServer
     .from("bookings")
     .select(
-      "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id"
+      "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id, is_cancelled"
     )
     .eq("booking_date", selectedDate)
     .order("booking_time", { ascending: true })
@@ -322,6 +324,7 @@ export default async function GoogleCalendarImportPage({
   const duplicateKeyMap = new Map<string, BookingRow>();
 
   for (const booking of existingBookings) {
+    if (booking.is_cancelled) continue;
     duplicateKeyMap.set(buildPossibleDuplicateKey(booking), booking);
   }
 
@@ -737,6 +740,8 @@ export default async function GoogleCalendarImportPage({
               ) : (
                 <div className="space-y-3">
                   {existingBookings.map((booking) => {
+                    const isCancelledBooking = booking.is_cancelled === true;
+
                     const importedFromGoogleCalendar =
                       importedBookingIdsFromGoogle.has(booking.id);
 
@@ -757,6 +762,8 @@ export default async function GoogleCalendarImportPage({
                         className={`rounded-2xl border p-4 shadow-sm ${
                           linkedAsGoogleCancelled
                             ? "border-red-300 bg-red-50 ring-2 ring-red-200"
+                            : isCancelledBooking
+                            ? "border-zinc-300 bg-zinc-100 text-zinc-500"
                             : highlightGoogleCalendarBooking
                             ? "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
                             : "border-green-200 bg-white"
@@ -774,6 +781,12 @@ export default async function GoogleCalendarImportPage({
                           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-900">
                             BU {booking.business_unit_id ?? "—"}
                           </span>
+
+                          {isCancelledBooking ? (
+                            <span className="rounded-full bg-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                              Prenotazione annullata
+                            </span>
+                          ) : null}
 
                           {importedFromGoogleCalendar ? (
                             <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900">
@@ -795,7 +808,7 @@ export default async function GoogleCalendarImportPage({
                           ) : null}
                         </div>
 
-                        {linkedAsGoogleCancelled ? (
+                        {linkedAsGoogleCancelled && !isCancelledBooking ? (
                           <div className="mb-3 rounded-xl bg-red-100 p-3 text-xs font-bold text-red-900">
                             Attenzione: l’evento Google Calendar collegato a
                             questa prenotazione è stato cancellato. La
@@ -810,7 +823,13 @@ export default async function GoogleCalendarImportPage({
                           </div>
                         ) : null}
 
-                        <div className="text-sm font-bold text-zinc-900">
+                        <div
+                          className={`text-sm font-bold ${
+                            isCancelledBooking
+                              ? "text-zinc-500 line-through"
+                              : "text-zinc-900"
+                          }`}
+                        >
                           {booking.customer_name || "Senza nome"}
                         </div>
 
@@ -862,6 +881,18 @@ export default async function GoogleCalendarImportPage({
                           >
                             Modifica
                           </Link>
+
+                          {!isCancelledBooking ? (
+                            <form action={cancelBooking} className="inline-block">
+                              <input type="hidden" name="id" value={booking.id} />
+                              <button
+                                type="submit"
+                                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 shadow-sm hover:bg-red-100"
+                              >
+                                Cancella
+                              </button>
+                            </form>
+                          ) : null}
                         </div>
                       </div>
                     );

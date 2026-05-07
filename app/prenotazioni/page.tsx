@@ -6,7 +6,7 @@ import SectionCard from "@/components/SectionCard";
 import MobileBookingCard from "@/components/MobileBookingCard";
 import SummarySelectionToolbar from "@/components/SummarySelectionToolbar";
 import { supabaseServer } from "@/lib/supabase-server";
-import { cancelBooking, clearAlert } from "./actions";
+import { cancelBooking, restoreBooking, clearAlert } from "./actions";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -675,8 +675,20 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               )}
             </div>
 
-            <div className="hidden overflow-x-auto md:block">
-              <table className="min-w-full text-left text-sm">
+            <div className="hidden overflow-x-auto rounded-2xl md:block">
+              <table className="min-w-[1520px] text-left text-sm xl:min-w-full">
+                <colgroup>
+                  <col className="w-[55px]" />
+                  <col className="w-[155px]" />
+                  <col className="w-[180px]" />
+                  <col className="w-[215px]" />
+                  <col className="w-[165px]" />
+                  <col className="w-[110px]" />
+                  <col className="w-[125px]" />
+                  <col className="w-[130px]" />
+                  <col className="w-[285px]" />
+                </colgroup>
+
                 <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
                   <tr>
                     <th className="py-3 pr-4">Sel.</th>
@@ -708,7 +720,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     <th className="py-3 pr-4">Lordo</th>
                     <th className="py-3 pr-4">Pag. Agenzia</th>
                     <th className="py-3 pr-4">Pag. Fornitore</th>
-                    <th className="py-3 pr-4 text-right">Azioni</th>
+                    <th className="sticky right-0 z-20 bg-white py-3 pl-4 pr-4 text-right shadow-[-10px_0_16px_-14px_rgba(0,0,0,0.45)]">
+                      Azioni
+                    </th>
                   </tr>
                 </thead>
 
@@ -721,6 +735,18 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const businessUnitCode = booking._business_unit_code;
                     const isInternalSupplier =
                       booking._is_internal_supplier === true;
+
+                    const rowClass = isHighlighted
+                      ? "bg-amber-50 ring-2 ring-inset ring-amber-200"
+                      : isCancelled
+                      ? "bg-zinc-50/50"
+                      : "hover:bg-zinc-50";
+
+                    const stickyCellClass = isHighlighted
+                      ? "bg-amber-50"
+                      : isCancelled
+                      ? "bg-zinc-50"
+                      : "bg-white group-hover:bg-zinc-50";
 
                     const customerStatus = booking.customer_payment_status;
                     let customerBadgeClass = "bg-red-100 text-red-700";
@@ -815,13 +841,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     return (
                       <tr
                         key={booking.id}
-                        className={`border-b border-zinc-100 transition duration-500 ${
-                          isHighlighted
-                            ? "bg-amber-50 ring-2 ring-inset ring-amber-200"
-                            : isCancelled
-                            ? "bg-zinc-50/50"
-                            : "hover:bg-zinc-50"
-                        }`}
+                        className={`group border-b border-zinc-100 transition duration-500 ${rowClass}`}
                       >
                         <td className="py-4 pr-4 align-top">
                           <input
@@ -981,7 +1001,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                           </span>
                         </td>
 
-                        <td className="py-4 pr-4 text-right">
+                        <td
+                          className={`sticky right-0 z-10 py-4 pl-4 pr-4 text-right shadow-[-10px_0_16px_-14px_rgba(0,0,0,0.45)] transition-colors ${stickyCellClass}`}
+                        >
                           <div className="flex items-center justify-end gap-2">
                             <Link
                               href={`/prenotazioni/${booking.id}/modifica?returnTo=/prenotazioni`}
@@ -1005,7 +1027,17 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                               </a>
                             )}
 
-                            {!isCancelled && (
+                            {isCancelled ? (
+                              <form action={restoreBooking} className="inline-block">
+                                <input type="hidden" name="id" value={booking.id} />
+                                <button
+                                  type="submit"
+                                  className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-[11px] font-bold text-green-700 shadow-sm hover:bg-green-100"
+                                >
+                                  Ripristina
+                                </button>
+                              </form>
+                            ) : (
                               <form action={cancelBooking} className="inline-block">
                                 <input type="hidden" name="id" value={booking.id} />
                                 <button

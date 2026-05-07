@@ -731,6 +731,10 @@ export async function updateBooking(formData: FormData) {
 export async function cancelBooking(formData: FormData) {
   const id = Number(formData.get("id") || 0);
 
+  if (!id) {
+    throw new Error("ID prenotazione non valido.");
+  }
+
   const { error } = await supabaseServer
     .from("bookings")
     .update({
@@ -740,7 +744,34 @@ export async function cancelBooking(formData: FormData) {
     .eq("id", id);
 
   if (error) throw new Error(`Errore: ${error.message}`);
+
   revalidatePath("/prenotazioni");
+  revalidatePath("/import/google-calendar");
+  revalidatePath("/");
+  revalidatePath("/pagamenti");
+}
+
+export async function restoreBooking(formData: FormData) {
+  const id = Number(formData.get("id") || 0);
+
+  if (!id) {
+    throw new Error("ID prenotazione non valido.");
+  }
+
+  const { error } = await supabaseServer
+    .from("bookings")
+    .update({
+      is_cancelled: false,
+      cancelled_at: null,
+    })
+    .eq("id", id);
+
+  if (error) throw new Error(`Errore: ${error.message}`);
+
+  revalidatePath("/prenotazioni");
+  revalidatePath("/import/google-calendar");
+  revalidatePath("/");
+  revalidatePath("/pagamenti");
 }
 
 export async function clearAlert(formData: FormData) {
