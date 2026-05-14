@@ -394,6 +394,33 @@ function todoStatusLabel(options: {
   return "Presente in Todo Manager";
 }
 
+function comparisonPriority(row: ComparisonRow) {
+  const status = row.googleRow?.computedStatus;
+
+  if (
+    row.googleRow &&
+    row.todoBooking &&
+    [
+      "already_exists",
+      "possible_duplicate",
+      "probable_match",
+      "imported",
+    ].includes(status || "")
+  ) {
+    return 1;
+  }
+
+  if (row.googleRow && ["pending", "rolled_back"].includes(status || "")) {
+    return 2;
+  }
+
+  if (row.googleRow) {
+    return 3;
+  }
+
+  return 4;
+}
+
 function MetricCard({
   label,
   value,
@@ -1147,19 +1174,41 @@ export default async function GoogleCalendarImportPage({
       .map((row) => row.matchedBooking!.id)
   );
 
-  const comparisonRows: ComparisonRow[] = [
-    ...rowsWithComputedStatus.map((row) => ({
-      id: `gcal-${row.id}`,
-      googleRow: row,
-      todoBooking: row.matchedBooking,
-    })),
-    ...existingBookings
-      .filter((booking) => !matchedBookingIds.has(booking.id))
-      .map((booking) => ({
-        id: `todo-${booking.id}`,
-        todoBooking: booking,
+  const comparisonRows: ComparisonRow[] = (
+    [
+      ...rowsWithComputedStatus.map((row) => ({
+        id: `gcal-${row.id}`,
+        googleRow: row,
+        todoBooking: row.matchedBooking,
       })),
-  ];
+      ...existingBookings
+        .filter((booking) => !matchedBookingIds.has(booking.id))
+        .map((booking) => ({
+          id: `todo-${booking.id}`,
+          todoBooking: booking,
+        })),
+    ] as ComparisonRow[]
+  ).sort((a, b) => {
+    const priorityDiff = comparisonPriority(a) - comparisonPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+
+    const timeA = normalizeTime(
+      a.googleRow?.booking_time || a.todoBooking?.booking_time || ""
+    );
+
+    const timeB = normalizeTime(
+      b.googleRow?.booking_time || b.todoBooking?.booking_time || ""
+    );
+
+    if (timeA !== timeB) {
+      return timeA.localeCompare(timeB);
+    }
+
+    const idA = a.googleRow?.id || a.todoBooking?.id || 0;
+    const idB = b.googleRow?.id || b.todoBooking?.id || 0;
+
+    return idA - idB;
+  });
 
   return (
     <AppShell
