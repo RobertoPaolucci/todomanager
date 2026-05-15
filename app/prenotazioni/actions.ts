@@ -11,6 +11,13 @@ function parseNumber(value: FormDataEntryValue | null, fallback = 0) {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function parseNullableNumber(value: FormDataEntryValue | null) {
+  const raw = String(value ?? "").replace(",", ".").trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function parseCount(value: FormDataEntryValue | null) {
   return Math.max(0, Math.floor(parseNumber(value, 0)));
 }
@@ -40,6 +47,21 @@ function isDuplicateBookingReferenceError(error: any) {
     message.includes("unique_booking_ref") ||
     message.includes("duplicate")
   );
+}
+
+function toNumberOrNull(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveChildPrice(
+  childValue: number | string | null | undefined,
+  adultFallback: number
+) {
+  const parsed = toNumberOrNull(childValue);
+  return parsed === null ? adultFallback : parsed;
 }
 
 function isDirectChannel(
@@ -232,7 +254,9 @@ export async function createBooking(formData: FormData) {
   const experience_id = Number(formData.get("experience_id") || 0);
 
   const raw_booking_reference = formData.get("booking_reference");
-  const manual_booking_reference = normalizeBookingReference(raw_booking_reference);
+  const manual_booking_reference = normalizeBookingReference(
+    raw_booking_reference
+  );
 
   const booking_created_at = String(
     formData.get("booking_created_at") || ""
@@ -251,7 +275,6 @@ export async function createBooking(formData: FormData) {
   const non_paying_adults = parseCount(formData.get("non_paying_adults"));
 
   const total_people = adults + children + infants + non_paying_adults;
-  const pricing_pax = adults + children;
 
   const customer_payment_status = String(
     formData.get("customer_payment_status") || "pending"
@@ -263,7 +286,10 @@ export async function createBooking(formData: FormData) {
     String(formData.get("supplier_payment_method") || "").trim() ||
     "Bonifico Bancario";
 
-  const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
+  const supplier_amount_paid = parseNumber(
+    formData.get("supplier_amount_paid"),
+    0
+  );
   const notes = String(formData.get("notes") || "").trim();
 
   if (!channel_id || !experience_id || !booking_date || !booking_created_at) {
@@ -307,46 +333,91 @@ export async function createBooking(formData: FormData) {
   const experience_name = String(experience.name || "").trim();
   const isGroupPricing = experience.is_group_pricing === true;
   const business_unit_id = Number(experience.business_unit_id);
+  const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
   const { data: priceRowData } = await supabaseServer
     .from("experience_channel_prices")
-    .select("your_unit_price, public_unit_price")
+    .select(
+      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost"
+    )
     .eq("experience_id", experience_id)
     .eq("channel_id", channel_id)
     .single();
 
   let your_unit_price = 0;
+  let your_child_unit_price = 0;
   let public_unit_price = 0;
+  let public_child_unit_price = 0;
+  let supplier_child_unit_cost = supplier_unit_cost;
 
   if (priceRowData) {
     your_unit_price = Number(priceRowData.your_unit_price || 0);
     public_unit_price = Number(priceRowData.public_unit_price || 0);
+
+    your_child_unit_price = resolveChildPrice(
+      priceRowData.your_child_unit_price,
+      your_unit_price
+    );
+
+    public_child_unit_price = resolveChildPrice(
+      priceRowData.public_child_unit_price,
+      public_unit_price
+    );
+
+    supplier_child_unit_cost = resolveChildPrice(
+      priceRowData.supplier_child_unit_cost,
+      supplier_unit_cost
+    );
   } else {
     your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
     public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
+
+    const new_your_child_unit_price = parseNullableNumber(
+      formData.get("new_your_child_unit_price")
+    );
+    const new_public_child_unit_price = parseNullableNumber(
+      formData.get("new_public_child_unit_price")
+    );
+    const new_supplier_child_unit_cost = parseNullableNumber(
+      formData.get("new_supplier_child_unit_cost")
+    );
+
+    your_child_unit_price = new_your_child_unit_price ?? your_unit_price;
+    public_child_unit_price =
+      new_public_child_unit_price ?? public_unit_price;
+    supplier_child_unit_cost =
+      new_supplier_child_unit_cost ?? supplier_unit_cost;
 
     if (your_unit_price > 0) {
       await supabaseServer.from("experience_channel_prices").insert({
         experience_id,
         channel_id,
         your_unit_price,
+        your_child_unit_price: new_your_child_unit_price,
         public_unit_price,
+        public_child_unit_price: new_public_child_unit_price,
+        supplier_child_unit_cost: new_supplier_child_unit_cost,
       });
     } else {
       return { error: "⚠️ Prezzo mancante. Inserisci i prezzi per procedere." };
     }
   }
 
-  const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
+  const total_to_you = isGroupPricing
+    ? your_unit_price
+    : round2(adults * your_unit_price + children * your_child_unit_price);
 
-  const total_to_you = isGroupPricing ? your_unit_price : your_unit_price * pricing_pax;
   const total_customer = isGroupPricing
     ? public_unit_price
-    : public_unit_price * pricing_pax;
+    : round2(adults * public_unit_price + children * public_child_unit_price);
+
   const total_supplier_cost = isGroupPricing
     ? supplier_unit_cost
-    : supplier_unit_cost * pricing_pax;
-  const margin_total = total_to_you - total_supplier_cost;
+    : round2(
+        adults * supplier_unit_cost + children * supplier_child_unit_cost
+      );
+
+  const margin_total = round2(total_to_you - total_supplier_cost);
 
   const shouldAutoGenerateBookingReference =
     isAutoReferenceChannel(channel) && !manual_booking_reference;
@@ -410,7 +481,10 @@ export async function createBooking(formData: FormData) {
       break;
     }
 
-    if (shouldAutoGenerateBookingReference && isDuplicateBookingReferenceError(error)) {
+    if (
+      shouldAutoGenerateBookingReference &&
+      isDuplicateBookingReferenceError(error)
+    ) {
       insertError = error;
       continue;
     }
@@ -485,7 +559,9 @@ export async function updateBooking(formData: FormData) {
   const experience_id = Number(formData.get("experience_id") || 0);
 
   const raw_booking_reference = formData.get("booking_reference");
-  const manual_booking_reference = normalizeBookingReference(raw_booking_reference);
+  const manual_booking_reference = normalizeBookingReference(
+    raw_booking_reference
+  );
 
   const booking_created_at = String(
     formData.get("booking_created_at") || ""
@@ -502,7 +578,6 @@ export async function updateBooking(formData: FormData) {
   const non_paying_adults = parseCount(formData.get("non_paying_adults"));
 
   const total_people = adults + children + infants + non_paying_adults;
-  const pricing_pax = adults + children;
 
   const customer_payment_status = String(
     formData.get("customer_payment_status") || "pending"
@@ -513,18 +588,22 @@ export async function updateBooking(formData: FormData) {
   const supplier_payment_method =
     String(formData.get("supplier_payment_method") || "").trim() ||
     "Bonifico Bancario";
-  const supplier_amount_paid = parseNumber(formData.get("supplier_amount_paid"), 0);
+  const supplier_amount_paid = parseNumber(
+    formData.get("supplier_amount_paid"),
+    0
+  );
   const notes = normalizeText(formData.get("notes"));
 
   if (!id) return { error: "ID prenotazione non valido." };
 
-  const { data: currentBooking, error: currentBookingError } = await supabaseServer
-    .from("bookings")
-    .select(
-      "id, supplier_id, booking_reference, customer_name, total_supplier_cost, supplier_payment_status, supplier_amount_paid, is_cancelled"
-    )
-    .eq("id", id)
-    .single();
+  const { data: currentBooking, error: currentBookingError } =
+    await supabaseServer
+      .from("bookings")
+      .select(
+        "id, supplier_id, booking_reference, customer_name, total_supplier_cost, supplier_payment_status, supplier_amount_paid, is_cancelled"
+      )
+      .eq("id", id)
+      .single();
 
   if (currentBookingError || !currentBooking) {
     return { error: "Prenotazione non trovata." };
@@ -566,46 +645,91 @@ export async function updateBooking(formData: FormData) {
   const customer_name = raw_customer_name || channel.name;
   const isGroupPricing = experience.is_group_pricing === true;
   const business_unit_id = Number(experience.business_unit_id);
+  const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
   const { data: priceRow } = await supabaseServer
     .from("experience_channel_prices")
-    .select("your_unit_price, public_unit_price")
+    .select(
+      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost"
+    )
     .eq("experience_id", experience_id)
     .eq("channel_id", channel_id)
     .single();
 
   let your_unit_price = 0;
+  let your_child_unit_price = 0;
   let public_unit_price = 0;
+  let public_child_unit_price = 0;
+  let supplier_child_unit_cost = supplier_unit_cost;
 
   if (priceRow) {
     your_unit_price = Number(priceRow.your_unit_price || 0);
     public_unit_price = Number(priceRow.public_unit_price || 0);
+
+    your_child_unit_price = resolveChildPrice(
+      priceRow.your_child_unit_price,
+      your_unit_price
+    );
+
+    public_child_unit_price = resolveChildPrice(
+      priceRow.public_child_unit_price,
+      public_unit_price
+    );
+
+    supplier_child_unit_cost = resolveChildPrice(
+      priceRow.supplier_child_unit_cost,
+      supplier_unit_cost
+    );
   } else {
     your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
     public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
+
+    const new_your_child_unit_price = parseNullableNumber(
+      formData.get("new_your_child_unit_price")
+    );
+    const new_public_child_unit_price = parseNullableNumber(
+      formData.get("new_public_child_unit_price")
+    );
+    const new_supplier_child_unit_cost = parseNullableNumber(
+      formData.get("new_supplier_child_unit_cost")
+    );
+
+    your_child_unit_price = new_your_child_unit_price ?? your_unit_price;
+    public_child_unit_price =
+      new_public_child_unit_price ?? public_unit_price;
+    supplier_child_unit_cost =
+      new_supplier_child_unit_cost ?? supplier_unit_cost;
 
     if (your_unit_price > 0) {
       await supabaseServer.from("experience_channel_prices").insert({
         experience_id,
         channel_id,
         your_unit_price,
+        your_child_unit_price: new_your_child_unit_price,
         public_unit_price,
+        public_child_unit_price: new_public_child_unit_price,
+        supplier_child_unit_cost: new_supplier_child_unit_cost,
       });
     } else {
       return { error: "⚠️ Prezzo mancante. Inserisci i prezzi per procedere." };
     }
   }
 
-  const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
+  const total_to_you = isGroupPricing
+    ? your_unit_price
+    : round2(adults * your_unit_price + children * your_child_unit_price);
 
-  const total_to_you = isGroupPricing ? your_unit_price : your_unit_price * pricing_pax;
   const total_customer = isGroupPricing
     ? public_unit_price
-    : public_unit_price * pricing_pax;
+    : round2(adults * public_unit_price + children * public_child_unit_price);
+
   const total_supplier_cost = isGroupPricing
     ? supplier_unit_cost
-    : supplier_unit_cost * pricing_pax;
-  const margin_total = total_to_you - total_supplier_cost;
+    : round2(
+        adults * supplier_unit_cost + children * supplier_child_unit_cost
+      );
+
+  const margin_total = round2(total_to_you - total_supplier_cost);
 
   const oldPaidAmount = getEffectiveSupplierPaid({
     is_cancelled: currentBooking.is_cancelled,
@@ -680,7 +804,10 @@ export async function updateBooking(formData: FormData) {
       break;
     }
 
-    if (shouldAutoGenerateBookingReference && isDuplicateBookingReferenceError(error)) {
+    if (
+      shouldAutoGenerateBookingReference &&
+      isDuplicateBookingReferenceError(error)
+    ) {
       updateError = error;
       continue;
     }

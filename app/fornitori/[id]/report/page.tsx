@@ -10,6 +10,7 @@ type PageProps = {
   searchParams: Promise<{
     from?: string;
     to?: string;
+    month?: string;
   }>;
 };
 
@@ -24,6 +25,20 @@ type BookingRow = {
   is_cancelled: boolean | null;
 };
 
+type EconomicBookingRow = BookingRow & {
+  booking_time: string | null;
+  customer_name: string | null;
+  experience_name: string | null;
+  booking_reference: string | null;
+  booking_source: string | null;
+  total_to_you: number | null;
+  total_customer: number | null;
+  total_supplier_cost: number | null;
+  supplier_amount_paid: number | null;
+  customer_payment_status: string | null;
+  supplier_payment_status: string | null;
+};
+
 function toYmd(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -33,6 +48,10 @@ function toYmd(date: Date) {
 
 function isValidYmd(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isValidYearMonth(value: string) {
+  return /^\d{4}-\d{2}$/.test(value);
 }
 
 function formatDateIt(value: string) {
@@ -48,6 +67,43 @@ function formatDateIt(value: string) {
   }).format(new Date(y, (m || 1) - 1, d || 1));
 }
 
+function formatYearMonthIt(value: string) {
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+
+  return new Intl.DateTimeFormat("it-IT", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+}
+
+function formatTime(value: string | null) {
+  if (!value) return "-";
+  return value.slice(0, 5);
+}
+
+function moneyValue(value: number | string | null | undefined) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatCurrency(value: number | string | null | undefined) {
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+  }).format(moneyValue(value));
+}
+
+function formatCurrencyCompact(value: number | string | null | undefined) {
+  const amount = moneyValue(value);
+
+  if (amount >= 1000) {
+    return `€${Math.round(amount).toLocaleString("it-IT")}`;
+  }
+
+  return `€${Math.round(amount)}`;
+}
+
 function getPeopleCount(booking: BookingRow) {
   const totalPeople = Number(booking.total_people || 0);
   if (totalPeople > 0) return totalPeople;
@@ -58,6 +114,25 @@ function getPeopleCount(booking: BookingRow) {
     Number(booking.infants || 0) +
     Number(booking.non_paying_adults || 0)
   );
+}
+
+function getPeopleBreakdown(booking: BookingRow) {
+  const adults = Number(booking.adults || 0);
+  const children = Number(booking.children || 0);
+  const infants = Number(booking.infants || 0);
+  const nonPayingAdults = Number(booking.non_paying_adults || 0);
+
+  const base = `${adults}+${children}+${infants}`;
+
+  if (nonPayingAdults > 0) {
+    return `${base}+${nonPayingAdults} NP`;
+  }
+
+  return base;
+}
+
+function getPayingPeopleCount(booking: BookingRow) {
+  return Number(booking.adults || 0) + Number(booking.children || 0);
 }
 
 function getMonthLabel(index: number) {
@@ -97,13 +172,72 @@ function getRangeMonths(from: string, to: string) {
   return months;
 }
 
+function getDaysInYearMonth(yearMonth: string) {
+  const year = Number(yearMonth.slice(0, 4));
+  const month = Number(yearMonth.slice(5, 7));
+
+  return new Date(year, month, 0).getDate();
+}
+
+function getMonthDates(yearMonth: string) {
+  const days = getDaysInYearMonth(yearMonth);
+
+  return Array.from({ length: days }, (_, index) => {
+    const day = String(index + 1).padStart(2, "0");
+    return `${yearMonth}-${day}`;
+  });
+}
+
+function addMonthsToYearMonth(yearMonth: string, delta: number) {
+  const year = Number(yearMonth.slice(0, 4));
+  const monthIndex = Number(yearMonth.slice(5, 7)) - 1;
+  const date = new Date(year, monthIndex + delta, 1);
+
+  const newYear = date.getFullYear();
+  const newMonth = String(date.getMonth() + 1).padStart(2, "0");
+
+  return `${newYear}-${newMonth}`;
+}
+
 function niceCeil(value: number) {
   if (value <= 0) return 10;
   if (value <= 10) return 10;
   if (value <= 20) return 20;
   if (value <= 50) return 50;
   if (value <= 100) return 100;
-  return Math.ceil(value / 10) * 10;
+  if (value <= 500) return Math.ceil(value / 50) * 50;
+  return Math.ceil(value / 100) * 100;
+}
+
+function getStatusLabel(value: string | null) {
+  if (!value) return "-";
+
+  const normalized = value.toLowerCase();
+
+  if (normalized === "paid") return "Pagato";
+  if (normalized === "partial") return "Parziale";
+  if (normalized === "pending") return "Da pagare";
+  if (normalized === "cancelled") return "Cancellato";
+
+  return value;
+}
+
+function getStatusClass(value: string | null) {
+  const normalized = String(value || "").toLowerCase();
+
+  if (normalized === "paid") {
+    return "border border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (normalized === "partial") {
+    return "border border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  if (normalized === "pending") {
+    return "border border-rose-200 bg-rose-50 text-rose-700";
+  }
+
+  return "border border-zinc-200 bg-zinc-50 text-zinc-600";
 }
 
 function ChartCard({
@@ -144,8 +278,8 @@ function ChartCard({
   const innerGroupWidth = Math.min(64, groupWidth - 12);
   const barWidth = Math.max(10, (innerGroupWidth - barGap) / 2);
 
-  const currentColor = "#2563eb"; // blue-600
-  const previousColor = "#f59e0b"; // amber-500
+  const currentColor = "#2563eb";
+  const previousColor = "#f59e0b";
 
   return (
     <SectionCard title={title}>
@@ -189,12 +323,7 @@ function ChartCard({
                     stroke="#e4e4e7"
                     strokeWidth="1"
                   />
-                  <text
-                    x={10}
-                    y={y + 4}
-                    fontSize="11"
-                    fill="#71717a"
-                  >
+                  <text x={10} y={y + 4} fontSize="11" fill="#71717a">
                     {value}
                   </text>
                 </g>
@@ -306,7 +435,9 @@ function ChartCard({
             <tbody>
               {labels.map((label, index) => (
                 <tr key={label} className="border-b border-zinc-100">
-                  <td className="py-2 pr-4 font-medium text-zinc-900">{label}</td>
+                  <td className="py-2 pr-4 font-medium text-zinc-900">
+                    {label}
+                  </td>
                   <td className="py-2 pr-4 font-semibold text-blue-700">
                     {currentValues[index]}
                   </td>
@@ -317,6 +448,133 @@ function ChartCard({
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+function IncomeDailyChartCard({
+  title,
+  dates,
+  values,
+}: {
+  title: string;
+  dates: string[];
+  values: number[];
+}) {
+  const width = 1180;
+  const height = 380;
+
+  const padTop = 34;
+  const padRight = 24;
+  const padBottom = 58;
+  const padLeft = 74;
+
+  const chartWidth = width - padLeft - padRight;
+  const chartHeight = height - padTop - padBottom;
+
+  const rawMax = Math.max(...values, 0);
+  const yMax = niceCeil(rawMax);
+
+  const gridSteps = 4;
+  const gridValues: number[] = [];
+  for (let i = 0; i <= gridSteps; i++) {
+    gridValues.push(Math.round((yMax / gridSteps) * i));
+  }
+
+  const groupCount = Math.max(dates.length, 1);
+  const groupWidth = chartWidth / groupCount;
+  const barWidth = Math.max(12, Math.min(24, groupWidth - 8));
+
+  return (
+    <SectionCard title={title}>
+      <div className="space-y-4">
+        <div className="overflow-x-auto rounded-2xl border border-zinc-200 bg-white p-3">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-[380px] min-w-[1080px] w-full"
+            role="img"
+            aria-label={title}
+          >
+            {gridValues.map((value, idx) => {
+              const ratio = yMax === 0 ? 0 : value / yMax;
+              const y = padTop + chartHeight - ratio * chartHeight;
+
+              return (
+                <g key={`income-grid-${idx}`}>
+                  <line
+                    x1={padLeft}
+                    y1={y}
+                    x2={width - padRight}
+                    y2={y}
+                    stroke="#e4e4e7"
+                    strokeWidth="1"
+                  />
+                  <text x={8} y={y + 4} fontSize="11" fill="#71717a">
+                    {formatCurrencyCompact(value)}
+                  </text>
+                </g>
+              );
+            })}
+
+            <line
+              x1={padLeft}
+              y1={padTop + chartHeight}
+              x2={width - padRight}
+              y2={padTop + chartHeight}
+              stroke="#a1a1aa"
+              strokeWidth="1.2"
+            />
+
+            {dates.map((date, index) => {
+              const value = values[index] || 0;
+              const barHeight = yMax === 0 ? 0 : (value / yMax) * chartHeight;
+
+              const groupX = padLeft + index * groupWidth;
+              const centerX = groupX + groupWidth / 2;
+              const x = centerX - barWidth / 2;
+              const y = padTop + chartHeight - barHeight;
+              const dayLabel = String(Number(date.slice(8, 10)));
+
+              return (
+                <g key={`income-day-${date}`}>
+                  <rect
+                    x={x}
+                    y={value > 0 ? y : padTop + chartHeight - 1}
+                    width={barWidth}
+                    height={value > 0 ? barHeight : 1}
+                    rx="5"
+                    fill={value > 0 ? "#16a34a" : "#e4e4e7"}
+                    opacity={value > 0 ? "0.95" : "1"}
+                  />
+
+                  {value > 0 && (
+                    <text
+                      x={centerX}
+                      y={y - 7}
+                      textAnchor="middle"
+                      fontSize="10"
+                      fill="#166534"
+                      fontWeight="700"
+                    >
+                      {formatCurrencyCompact(value)}
+                    </text>
+                  )}
+
+                  <text
+                    x={centerX}
+                    y={height - 22}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill="#71717a"
+                  >
+                    {dayLabel}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
         </div>
       </div>
     </SectionCard>
@@ -339,20 +597,36 @@ export default async function SupplierReportPage({
   const now = new Date();
   const defaultFrom = `${now.getFullYear()}-01-01`;
   const defaultTo = toYmd(now);
+  const defaultEconomicMonth = `${now.getFullYear()}-${String(
+    now.getMonth() + 1
+  ).padStart(2, "0")}`;
 
   const from = sp.from && isValidYmd(sp.from) ? sp.from : defaultFrom;
   const to = sp.to && isValidYmd(sp.to) ? sp.to : defaultTo;
+  const economicMonth =
+    sp.month && isValidYearMonth(sp.month) ? sp.month : defaultEconomicMonth;
+
+  const economicMonthStart = `${economicMonth}-01`;
+  const economicMonthEnd = `${economicMonth}-${String(
+    getDaysInYearMonth(economicMonth)
+  ).padStart(2, "0")}`;
+
+  const previousEconomicMonth = addMonthsToYearMonth(economicMonth, -1);
+  const nextEconomicMonth = addMonthsToYearMonth(economicMonth, 1);
 
   const fromYear = Number(from.slice(0, 4));
   const toYear = Number(to.slice(0, 4));
 
-  const previousFrom = `${String(fromYear - 1).padStart(4, "0")}${from.slice(4)}`;
+  const previousFrom = `${String(fromYear - 1).padStart(4, "0")}${from.slice(
+    4
+  )}`;
   const previousTo = `${String(toYear - 1).padStart(4, "0")}${to.slice(4)}`;
 
   const [
     { data: supplier, error: supplierError },
     { data: bookings, error: bookingsError },
     { data: previousBookings, error: previousBookingsError },
+    { data: economicBookings, error: economicBookingsError },
   ] = await Promise.all([
     supabaseServer
       .from("suppliers")
@@ -377,6 +651,17 @@ export default async function SupplierReportPage({
       .eq("supplier_id", supplierId)
       .gte("booking_date", previousFrom)
       .lte("booking_date", previousTo),
+
+    supabaseServer
+      .from("bookings")
+      .select(
+        "id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled"
+      )
+      .eq("supplier_id", supplierId)
+      .gte("booking_date", economicMonthStart)
+      .lte("booking_date", economicMonthEnd)
+      .order("booking_date", { ascending: true })
+      .order("booking_time", { ascending: true }),
   ]);
 
   if (supplierError) {
@@ -395,6 +680,10 @@ export default async function SupplierReportPage({
     throw new Error(previousBookingsError.message);
   }
 
+  if (economicBookingsError) {
+    throw new Error(economicBookingsError.message);
+  }
+
   const validBookings = ((bookings || []) as BookingRow[]).filter(
     (b) => b.is_cancelled !== true
   );
@@ -402,6 +691,10 @@ export default async function SupplierReportPage({
   const validPreviousBookings = ((previousBookings || []) as BookingRow[]).filter(
     (b) => b.is_cancelled !== true
   );
+
+  const validEconomicBookings = (
+    (economicBookings || []) as EconomicBookingRow[]
+  ).filter((b) => b.is_cancelled !== true);
 
   const totalBookings = validBookings.length;
   const totalPeople = validBookings.reduce(
@@ -457,6 +750,66 @@ export default async function SupplierReportPage({
     Number(previousMonthlyMap.get(monthIndex) || 0)
   );
 
+  const economicMonthDates = getMonthDates(economicMonth);
+
+  const dailyIncomeMap = new Map<string, number>();
+  const dailyTransactionsMap = new Map<string, EconomicBookingRow[]>();
+
+  economicMonthDates.forEach((date) => {
+    dailyIncomeMap.set(date, 0);
+    dailyTransactionsMap.set(date, []);
+  });
+
+  validEconomicBookings.forEach((booking) => {
+    if (!booking.booking_date) return;
+
+    dailyIncomeMap.set(
+      booking.booking_date,
+      moneyValue(dailyIncomeMap.get(booking.booking_date)) +
+        moneyValue(booking.total_to_you)
+    );
+
+    const rows = dailyTransactionsMap.get(booking.booking_date) || [];
+    rows.push(booking);
+    dailyTransactionsMap.set(booking.booking_date, rows);
+  });
+
+  const dailyIncomeValues = economicMonthDates.map((date) =>
+    moneyValue(dailyIncomeMap.get(date))
+  );
+
+  const economicIncomeTotal = validEconomicBookings.reduce(
+    (sum, booking) => sum + moneyValue(booking.total_to_you),
+    0
+  );
+
+  const economicGrossCustomerTotal = validEconomicBookings.reduce(
+    (sum, booking) => sum + moneyValue(booking.total_customer),
+    0
+  );
+
+  const economicSupplierCostTotal = validEconomicBookings.reduce(
+    (sum, booking) => sum + moneyValue(booking.total_supplier_cost),
+    0
+  );
+
+  const economicSupplierPaidTotal = validEconomicBookings.reduce(
+    (sum, booking) => sum + moneyValue(booking.supplier_amount_paid),
+    0
+  );
+
+  const economicEstimatedMargin =
+    economicIncomeTotal - economicSupplierCostTotal;
+
+  const economicSupplierBalance =
+    economicSupplierCostTotal - economicSupplierPaidTotal;
+
+  const transactionDatesWithRows = economicMonthDates.filter(
+    (date) => (dailyTransactionsMap.get(date) || []).length > 0
+  );
+
+  const economicMonthQuery = `from=${from}&to=${to}&month=`;
+
   return (
     <AppShell title="Report Fornitore" subtitle={supplier.name}>
       <div className="space-y-6">
@@ -470,7 +823,7 @@ export default async function SupplierReportPage({
         </div>
 
         <SectionCard title="Periodo report">
-          <form method="GET" className="grid gap-3 md:grid-cols-3">
+          <form method="GET" className="grid gap-3 md:grid-cols-4">
             <div>
               <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
                 Dal
@@ -495,6 +848,18 @@ export default async function SupplierReportPage({
               />
             </div>
 
+            <div>
+              <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
+                Mese economia
+              </label>
+              <input
+                type="month"
+                name="month"
+                defaultValue={economicMonth}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-[16px] outline-none focus:border-zinc-500 sm:text-sm"
+              />
+            </div>
+
             <div className="flex items-end">
               <button
                 type="submit"
@@ -505,9 +870,36 @@ export default async function SupplierReportPage({
             </div>
           </form>
 
-          <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-            Periodo attivo: <strong>{formatDateIt(from)}</strong> →{" "}
-            <strong>{formatDateIt(to)}</strong>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+              Periodo attivo: <strong>{formatDateIt(from)}</strong> →{" "}
+              <strong>{formatDateIt(to)}</strong>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <div>
+                Mese economico:{" "}
+                <strong className="capitalize">
+                  {formatYearMonthIt(economicMonth)}
+                </strong>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/fornitori/${supplierId}/report?${economicMonthQuery}${previousEconomicMonth}`}
+                  className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                >
+                  ← Mese prima
+                </Link>
+
+                <Link
+                  href={`/fornitori/${supplierId}/report?${economicMonthQuery}${nextEconomicMonth}`}
+                  className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                >
+                  Mese dopo →
+                </Link>
+              </div>
+            </div>
           </div>
         </SectionCard>
 
@@ -537,6 +929,254 @@ export default async function SupplierReportPage({
           currentValues={currentValues}
           previousValues={previousValues}
         />
+
+        <SectionCard title="Economia mensile">
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-[11px] font-black uppercase tracking-wide text-emerald-700">
+                  Incasso reale
+                </div>
+                <div className="mt-2 text-3xl font-black text-emerald-800">
+                  {formatCurrency(economicIncomeTotal)}
+                </div>
+                <p className="mt-2 text-xs text-emerald-700">
+                  Somma di total_to_you. Questo è il valore usato per grafico e
+                  totali.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                <div className="text-[11px] font-black uppercase tracking-wide text-zinc-500">
+                  Costo fornitore
+                </div>
+                <div className="mt-2 text-3xl font-black text-zinc-900">
+                  {formatCurrency(economicSupplierCostTotal)}
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">
+                  Somma dei costi fornitore delle prenotazioni.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <div className="text-[11px] font-black uppercase tracking-wide text-blue-700">
+                  Margine stimato
+                </div>
+                <div className="mt-2 text-3xl font-black text-blue-800">
+                  {formatCurrency(economicEstimatedMargin)}
+                </div>
+                <p className="mt-2 text-xs text-blue-700">
+                  Incasso reale meno costo fornitore.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="text-[11px] font-black uppercase tracking-wide text-amber-700">
+                  Saldo fornitore
+                </div>
+                <div className="mt-2 text-3xl font-black text-amber-800">
+                  {formatCurrency(economicSupplierBalance)}
+                </div>
+                <p className="mt-2 text-xs text-amber-700">
+                  Costo fornitore meno pagato al fornitore.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+              Mese analizzato:{" "}
+              <strong className="capitalize">
+                {formatYearMonthIt(economicMonth)}
+              </strong>{" "}
+              · Prenotazioni economiche:{" "}
+              <strong>{validEconomicBookings.length}</strong> · Lordo cliente
+              solo informativo nelle singole righe:{" "}
+              <strong>{formatCurrency(economicGrossCustomerTotal)}</strong>
+            </div>
+          </div>
+        </SectionCard>
+
+        <IncomeDailyChartCard
+          title={`Grafico incasso reale giornaliero · ${formatYearMonthIt(
+            economicMonth
+          )}`}
+          dates={economicMonthDates}
+          values={dailyIncomeValues}
+        />
+
+        <div className="lg:relative lg:left-1/2 lg:w-[min(1600px,calc(100vw-4rem))] lg:-translate-x-1/2">
+          <SectionCard title="Transazioni giornaliere">
+            {transactionDatesWithRows.length === 0 ? (
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+                Nessuna transazione trovata per il mese selezionato.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {transactionDatesWithRows.map((date) => {
+                  const rows = dailyTransactionsMap.get(date) || [];
+
+                  const dayIncome = rows.reduce(
+                    (sum, row) => sum + moneyValue(row.total_to_you),
+                    0
+                  );
+                  const daySupplierCost = rows.reduce(
+                    (sum, row) => sum + moneyValue(row.total_supplier_cost),
+                    0
+                  );
+                  const daySupplierPaid = rows.reduce(
+                    (sum, row) => sum + moneyValue(row.supplier_amount_paid),
+                    0
+                  );
+                  const dayMargin = dayIncome - daySupplierCost;
+
+                  return (
+                    <div
+                      key={`transactions-${date}`}
+                      className="overflow-hidden rounded-2xl border border-zinc-200 bg-white"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                        <div>
+                          <div className="text-sm font-black text-zinc-900">
+                            {formatDateIt(date)}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {rows.length} transazioni
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-bold text-emerald-700">
+                            Incasso: {formatCurrency(dayIncome)}
+                          </div>
+                          <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 font-bold text-zinc-700">
+                            Costo: {formatCurrency(daySupplierCost)}
+                          </div>
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 font-bold text-blue-700">
+                            Margine: {formatCurrency(dayMargin)}
+                          </div>
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-bold text-amber-700">
+                            Pagato forn.: {formatCurrency(daySupplierPaid)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto lg:overflow-x-visible">
+                        <table className="min-w-[1200px] lg:min-w-0 lg:w-full lg:table-auto text-left text-xs xl:text-sm">
+                          <thead className="border-b border-zinc-200 text-[11px] font-black uppercase text-zinc-500">
+                            <tr>
+                              <th className="px-2 py-3 xl:px-3">Ora</th>
+                              <th className="px-2 py-3 xl:px-3">Cliente</th>
+                              <th className="px-2 py-3 xl:px-3">Canale</th>
+                              <th className="px-2 py-3 xl:px-3">Esperienza</th>
+                              <th className="px-2 py-3 xl:px-3">Rif.</th>
+                              <th className="px-2 py-3 text-right xl:px-3">
+                                Persone
+                              </th>
+                              <th className="px-2 py-3 text-right xl:px-3">
+                                Paganti
+                              </th>
+                              <th className="px-2 py-3 text-right xl:px-3">
+                                Incasso
+                              </th>
+                              <th className="px-2 py-3 text-right xl:px-3">
+                                Lordo
+                              </th>
+                              <th className="px-2 py-3 text-right xl:px-3">
+                                Costo
+                              </th>
+                              <th className="px-2 py-3 text-right xl:px-3">
+                                Pagato forn.
+                              </th>
+                              <th className="px-2 py-3 xl:px-3">
+                                Stato cliente
+                              </th>
+                              <th className="px-2 py-3 xl:px-3">
+                                Stato fornitore
+                              </th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {rows.map((row) => (
+                              <tr
+                                key={row.id}
+                                className="border-b border-zinc-100 last:border-0"
+                              >
+                                <td className="px-2 py-3 font-medium text-zinc-700 xl:px-3">
+                                  {formatTime(row.booking_time)}
+                                </td>
+
+                                <td className="px-2 py-3 font-bold text-zinc-900 xl:px-3">
+                                  {row.customer_name || "-"}
+                                </td>
+
+                                <td className="px-2 py-3 text-zinc-700 xl:px-3">
+                                  {row.booking_source || "-"}
+                                </td>
+
+                                <td className="min-w-[220px] px-2 py-3 text-zinc-700 xl:px-3">
+                                  {row.experience_name || "-"}
+                                </td>
+
+                                <td className="px-2 py-3 font-mono text-[11px] text-zinc-600 xl:px-3">
+                                  {row.booking_reference || "-"}
+                                </td>
+
+                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-900 xl:px-3">
+                                  {getPeopleBreakdown(row)}
+                                </td>
+
+                                <td className="px-2 py-3 text-right font-bold text-zinc-900 xl:px-3">
+                                  {getPayingPeopleCount(row)}
+                                </td>
+
+                                <td className="whitespace-nowrap px-2 py-3 text-right font-black text-emerald-700 xl:px-3">
+                                  {formatCurrency(row.total_to_you)}
+                                </td>
+
+                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-600 xl:px-3">
+                                  {formatCurrency(row.total_customer)}
+                                </td>
+
+                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-700 xl:px-3">
+                                  {formatCurrency(row.total_supplier_cost)}
+                                </td>
+
+                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-blue-700 xl:px-3">
+                                  {formatCurrency(row.supplier_amount_paid)}
+                                </td>
+
+                                <td className="px-2 py-3 xl:px-3">
+                                  <span
+                                    className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-black ${getStatusClass(
+                                      row.customer_payment_status
+                                    )}`}
+                                  >
+                                    {getStatusLabel(row.customer_payment_status)}
+                                  </span>
+                                </td>
+
+                                <td className="px-2 py-3 xl:px-3">
+                                  <span
+                                    className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-black ${getStatusClass(
+                                      row.supplier_payment_status
+                                    )}`}
+                                  >
+                                    {getStatusLabel(row.supplier_payment_status)}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </div>
       </div>
     </AppShell>
   );

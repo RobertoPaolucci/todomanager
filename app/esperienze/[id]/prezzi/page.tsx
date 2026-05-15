@@ -13,9 +13,27 @@ function valueForInput(value: number | string | null | undefined) {
   return String(value);
 }
 
+function valueForOptionalInput(value: number | string | null | undefined) {
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function formatCurrency(value: number | string | null | undefined) {
+  const amount = Number(value || 0);
+
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 export default async function PrezziEsperienzaPage({ params }: PageProps) {
   const { id } = await params;
   const experienceId = Number(id);
+
+  if (!experienceId || Number.isNaN(experienceId)) {
+    throw new Error("ID esperienza non valido");
+  }
 
   const [
     { data: experience, error: experienceError },
@@ -24,16 +42,20 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
   ] = await Promise.all([
     supabaseServer
       .from("experiences")
-      .select("id, name")
+      .select("id, name, supplier_unit_cost")
       .eq("id", experienceId)
       .single(),
+
     supabaseServer
       .from("channels")
       .select("id, name, type")
       .order("name", { ascending: true }),
+
     supabaseServer
       .from("experience_channel_prices")
-      .select("id, channel_id, your_unit_price, public_unit_price, currency, notes")
+      .select(
+        "id, channel_id, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, currency, notes"
+      )
       .eq("experience_id", experienceId),
   ]);
 
@@ -49,7 +71,9 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
     throw new Error(`Errore caricamento prezzi canale: ${pricesError.message}`);
   }
 
-  const pricesMap = new Map((prices ?? []).map((price) => [price.channel_id, price]));
+  const pricesMap = new Map(
+    (prices ?? []).map((price) => [price.channel_id, price])
+  );
 
   return (
     <AppShell title="Prezzi canali" subtitle={experience?.name ?? ""}>
@@ -66,14 +90,28 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
         <form action={saveExperienceChannelPrices} className="space-y-6">
           <input type="hidden" name="experience_id" value={experienceId} />
 
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <strong>Prezzi bambini:</strong> se lasci vuoto il prezzo bambino,
+            Todo Manager userà automaticamente il prezzo adulto. Il costo
+            fornitore adulto resta quello impostato nella scheda esperienza:{" "}
+            <strong>{formatCurrency(experience?.supplier_unit_cost)}</strong>.
+          </div>
+
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table className="min-w-[1320px] w-full text-left text-sm">
               <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500">
                 <tr>
                   <th className="py-3 pr-4">Canale</th>
                   <th className="py-3 pr-4">Tipo</th>
-                  <th className="py-3 pr-4 text-zinc-900">Prezzo agenzia</th>
-                  <th className="py-3 pr-4">Prezzo pubblico</th>
+                  <th className="py-3 pr-4 text-zinc-900">
+                    Agenzia adulto
+                  </th>
+                  <th className="py-3 pr-4 text-zinc-900">
+                    Agenzia bambino
+                  </th>
+                  <th className="py-3 pr-4">Pubblico adulto</th>
+                  <th className="py-3 pr-4">Pubblico bambino</th>
+                  <th className="py-3 pr-4">Costo forn. bambino</th>
                   <th className="py-3 pr-4">Valuta</th>
                   <th className="py-3 pr-4">Note</th>
                 </tr>
@@ -102,8 +140,24 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
                           type="number"
                           step="0.01"
                           min="0"
-                          defaultValue={valueForInput(current?.your_unit_price)}
+                          defaultValue={valueForInput(
+                            current?.your_unit_price
+                          )}
                           className="w-32 rounded-xl border border-zinc-300 px-3 py-2 text-sm outline-none transition focus:border-zinc-500"
+                        />
+                      </td>
+
+                      <td className="py-4 pr-4">
+                        <input
+                          name={`your_child_unit_price_${channel.id}`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          defaultValue={valueForOptionalInput(
+                            current?.your_child_unit_price
+                          )}
+                          className="w-32 rounded-xl border border-zinc-300 px-3 py-2 text-sm outline-none transition focus:border-zinc-500"
+                          placeholder="Come adulto"
                         />
                       </td>
 
@@ -113,8 +167,38 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
                           type="number"
                           step="0.01"
                           min="0"
-                          defaultValue={valueForInput(current?.public_unit_price)}
+                          defaultValue={valueForInput(
+                            current?.public_unit_price
+                          )}
                           className="w-32 rounded-xl border border-zinc-300 px-3 py-2 text-sm outline-none transition focus:border-zinc-500"
+                        />
+                      </td>
+
+                      <td className="py-4 pr-4">
+                        <input
+                          name={`public_child_unit_price_${channel.id}`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          defaultValue={valueForOptionalInput(
+                            current?.public_child_unit_price
+                          )}
+                          className="w-32 rounded-xl border border-zinc-300 px-3 py-2 text-sm outline-none transition focus:border-zinc-500"
+                          placeholder="Come adulto"
+                        />
+                      </td>
+
+                      <td className="py-4 pr-4">
+                        <input
+                          name={`supplier_child_unit_cost_${channel.id}`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          defaultValue={valueForOptionalInput(
+                            current?.supplier_child_unit_cost
+                          )}
+                          className="w-36 rounded-xl border border-zinc-300 px-3 py-2 text-sm outline-none transition focus:border-zinc-500"
+                          placeholder="Come costo adulto"
                         />
                       </td>
 
