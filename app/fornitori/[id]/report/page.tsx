@@ -458,12 +458,14 @@ function IncomeDailyChartCard({
   title,
   dates,
   values,
+  todayYmd,
 }: {
   title: string;
   dates: string[];
   values: number[];
+  todayYmd: string;
 }) {
-  const width = 1180;
+  const width = 1600;
   const height = 380;
 
   const padTop = 34;
@@ -490,10 +492,22 @@ function IncomeDailyChartCard({
   return (
     <SectionCard title={title}>
       <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+            <span className="h-3 w-3 rounded-sm bg-emerald-600" />
+            Giorni passati / oggi
+          </div>
+
+          <div className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-500">
+            <span className="h-3 w-3 rounded-sm bg-zinc-300" />
+            Giorni futuri
+          </div>
+        </div>
+
         <div className="overflow-x-auto rounded-2xl border border-zinc-200 bg-white p-3">
           <svg
             viewBox={`0 0 ${width} ${height}`}
-            className="h-[380px] min-w-[1080px] w-full"
+            className="h-[380px] min-w-[1200px] w-full"
             role="img"
             aria-label={title}
           >
@@ -529,6 +543,8 @@ function IncomeDailyChartCard({
 
             {dates.map((date, index) => {
               const value = values[index] || 0;
+              const isFutureDay = date > todayYmd;
+
               const barHeight = yMax === 0 ? 0 : (value / yMax) * chartHeight;
 
               const groupX = padLeft + index * groupWidth;
@@ -536,6 +552,19 @@ function IncomeDailyChartCard({
               const x = centerX - barWidth / 2;
               const y = padTop + chartHeight - barHeight;
               const dayLabel = String(Number(date.slice(8, 10)));
+
+              const barFill =
+                value > 0
+                  ? isFutureDay
+                    ? "#86efac"
+                    : "#16a34a"
+                  : isFutureDay
+                    ? "#f4f4f5"
+                    : "#e4e4e7";
+
+              const barOpacity = isFutureDay ? "0.55" : value > 0 ? "0.95" : "1";
+              const valueLabelColor = isFutureDay ? "#71717a" : "#166534";
+              const dayLabelColor = isFutureDay ? "#a1a1aa" : "#71717a";
 
               return (
                 <g key={`income-day-${date}`}>
@@ -545,8 +574,8 @@ function IncomeDailyChartCard({
                     width={barWidth}
                     height={value > 0 ? barHeight : 1}
                     rx="5"
-                    fill={value > 0 ? "#16a34a" : "#e4e4e7"}
-                    opacity={value > 0 ? "0.95" : "1"}
+                    fill={barFill}
+                    opacity={barOpacity}
                   />
 
                   {value > 0 && (
@@ -555,7 +584,7 @@ function IncomeDailyChartCard({
                       y={y - 7}
                       textAnchor="middle"
                       fontSize="10"
-                      fill="#166534"
+                      fill={valueLabelColor}
                       fontWeight="700"
                     >
                       {formatCurrencyCompact(value)}
@@ -567,7 +596,7 @@ function IncomeDailyChartCard({
                     y={height - 22}
                     textAnchor="middle"
                     fontSize="10"
-                    fill="#71717a"
+                    fill={dayLabelColor}
                   >
                     {dayLabel}
                   </text>
@@ -595,8 +624,9 @@ export default async function SupplierReportPage({
   }
 
   const now = new Date();
+  const todayYmd = toYmd(now);
   const defaultFrom = `${now.getFullYear()}-01-01`;
-  const defaultTo = toYmd(now);
+  const defaultTo = todayYmd;
   const defaultEconomicMonth = `${now.getFullYear()}-${String(
     now.getMonth() + 1
   ).padStart(2, "0")}`;
@@ -996,13 +1026,16 @@ export default async function SupplierReportPage({
           </div>
         </SectionCard>
 
-        <IncomeDailyChartCard
-          title={`Grafico incasso reale giornaliero · ${formatYearMonthIt(
-            economicMonth
-          )}`}
-          dates={economicMonthDates}
-          values={dailyIncomeValues}
-        />
+        <div className="lg:relative lg:left-1/2 lg:w-[min(1600px,calc(100vw-4rem))] lg:-translate-x-1/2">
+          <IncomeDailyChartCard
+            title={`Grafico incasso reale giornaliero · ${formatYearMonthIt(
+              economicMonth
+            )}`}
+            dates={economicMonthDates}
+            values={dailyIncomeValues}
+            todayYmd={todayYmd}
+          />
+        </div>
 
         <div className="lg:relative lg:left-1/2 lg:w-[min(1600px,calc(100vw-4rem))] lg:-translate-x-1/2">
           <SectionCard title="Transazioni giornaliere">
