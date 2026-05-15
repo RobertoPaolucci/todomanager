@@ -65,6 +65,10 @@ export async function saveExperienceChannelPrices(formData: FormData) {
       formData.get(`public_child_unit_price_${channelId}`)
     );
 
+    const supplier_adult_unit_cost = parseNullableNumber(
+      formData.get(`supplier_adult_unit_cost_${channelId}`)
+    );
+
     const supplier_child_unit_cost = parseNullableNumber(
       formData.get(`supplier_child_unit_cost_${channelId}`)
     );
@@ -79,6 +83,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
       your_child_unit_price,
       public_unit_price,
       public_child_unit_price,
+      supplier_adult_unit_cost,
       supplier_child_unit_cost,
       currency,
       notes,
