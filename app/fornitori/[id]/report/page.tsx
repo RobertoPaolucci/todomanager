@@ -988,14 +988,38 @@ export default async function SupplierReportPage({
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                <div className="text-[11px] font-black uppercase tracking-wide text-blue-700">
+              <div
+                className={`rounded-2xl border p-4 ${
+                  economicEstimatedMargin < 0
+                    ? "border-rose-200 bg-rose-50"
+                    : "border-blue-200 bg-blue-50"
+                }`}
+              >
+                <div
+                  className={`text-[11px] font-black uppercase tracking-wide ${
+                    economicEstimatedMargin < 0
+                      ? "text-rose-700"
+                      : "text-blue-700"
+                  }`}
+                >
                   Margine stimato
                 </div>
-                <div className="mt-2 text-3xl font-black text-blue-800">
+                <div
+                  className={`mt-2 text-3xl font-black ${
+                    economicEstimatedMargin < 0
+                      ? "text-rose-800"
+                      : "text-blue-800"
+                  }`}
+                >
                   {formatCurrency(economicEstimatedMargin)}
                 </div>
-                <p className="mt-2 text-xs text-blue-700">
+                <p
+                  className={`mt-2 text-xs ${
+                    economicEstimatedMargin < 0
+                      ? "text-rose-700"
+                      : "text-blue-700"
+                  }`}
+                >
                   Incasso reale meno costo fornitore.
                 </p>
               </div>
@@ -1061,6 +1085,7 @@ export default async function SupplierReportPage({
                     0
                   );
                   const dayMargin = dayIncome - daySupplierCost;
+                  const dayIncomeBelowCost = dayIncome < daySupplierCost;
 
                   return (
                     <div
@@ -1078,15 +1103,36 @@ export default async function SupplierReportPage({
                         </div>
 
                         <div className="flex flex-wrap gap-2 text-xs">
-                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-bold text-emerald-700">
+                          <div
+                            className={`rounded-lg border px-3 py-2 font-bold ${
+                              dayIncomeBelowCost
+                                ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            }`}
+                          >
                             Incasso: {formatCurrency(dayIncome)}
                           </div>
-                          <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 font-bold text-zinc-700">
+
+                          <div
+                            className={`rounded-lg border px-3 py-2 font-bold ${
+                              dayIncomeBelowCost
+                                ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : "border-zinc-200 bg-white text-zinc-700"
+                            }`}
+                          >
                             Costo: {formatCurrency(daySupplierCost)}
                           </div>
-                          <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 font-bold text-blue-700">
+
+                          <div
+                            className={`rounded-lg border px-3 py-2 font-bold ${
+                              dayMargin < 0
+                                ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : "border-blue-200 bg-blue-50 text-blue-700"
+                            }`}
+                          >
                             Margine: {formatCurrency(dayMargin)}
                           </div>
+
                           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-bold text-amber-700">
                             Pagato forn.: {formatCurrency(daySupplierPaid)}
                           </div>
@@ -1094,7 +1140,7 @@ export default async function SupplierReportPage({
                       </div>
 
                       <div className="overflow-x-auto lg:overflow-x-visible">
-                        <table className="min-w-[1200px] lg:min-w-0 lg:w-full lg:table-auto text-left text-xs xl:text-sm">
+                        <table className="min-w-[1200px] text-left text-xs lg:w-full lg:min-w-0 lg:table-auto xl:text-sm">
                           <thead className="border-b border-zinc-200 text-[11px] font-black uppercase text-zinc-500">
                             <tr>
                               <th className="px-2 py-3 xl:px-3">Ora</th>
@@ -1130,76 +1176,103 @@ export default async function SupplierReportPage({
                           </thead>
 
                           <tbody>
-                            {rows.map((row) => (
-                              <tr
-                                key={row.id}
-                                className="border-b border-zinc-100 last:border-0"
-                              >
-                                <td className="px-2 py-3 font-medium text-zinc-700 xl:px-3">
-                                  {formatTime(row.booking_time)}
-                                </td>
+                            {rows.map((row) => {
+                              const rowIncome = moneyValue(row.total_to_you);
+                              const rowSupplierCost = moneyValue(
+                                row.total_supplier_cost
+                              );
+                              const incomeBelowCost =
+                                rowIncome < rowSupplierCost;
 
-                                <td className="px-2 py-3 font-bold text-zinc-900 xl:px-3">
-                                  {row.customer_name || "-"}
-                                </td>
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className={`border-b border-zinc-100 last:border-0 ${
+                                    incomeBelowCost ? "bg-rose-50/70" : ""
+                                  }`}
+                                >
+                                  <td className="px-2 py-3 font-medium text-zinc-700 xl:px-3">
+                                    {formatTime(row.booking_time)}
+                                  </td>
 
-                                <td className="px-2 py-3 text-zinc-700 xl:px-3">
-                                  {row.booking_source || "-"}
-                                </td>
+                                  <td className="px-2 py-3 font-bold text-zinc-900 xl:px-3">
+                                    {row.customer_name || "-"}
+                                  </td>
 
-                                <td className="min-w-[220px] px-2 py-3 text-zinc-700 xl:px-3">
-                                  {row.experience_name || "-"}
-                                </td>
+                                  <td className="px-2 py-3 text-zinc-700 xl:px-3">
+                                    {row.booking_source || "-"}
+                                  </td>
 
-                                <td className="px-2 py-3 font-mono text-[11px] text-zinc-600 xl:px-3">
-                                  {row.booking_reference || "-"}
-                                </td>
+                                  <td className="min-w-[220px] px-2 py-3 text-zinc-700 xl:px-3">
+                                    {row.experience_name || "-"}
+                                  </td>
 
-                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-900 xl:px-3">
-                                  {getPeopleBreakdown(row)}
-                                </td>
+                                  <td className="px-2 py-3 font-mono text-[11px] text-zinc-600 xl:px-3">
+                                    {row.booking_reference || "-"}
+                                  </td>
 
-                                <td className="px-2 py-3 text-right font-bold text-zinc-900 xl:px-3">
-                                  {getPayingPeopleCount(row)}
-                                </td>
+                                  <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-900 xl:px-3">
+                                    {getPeopleBreakdown(row)}
+                                  </td>
 
-                                <td className="whitespace-nowrap px-2 py-3 text-right font-black text-emerald-700 xl:px-3">
-                                  {formatCurrency(row.total_to_you)}
-                                </td>
+                                  <td className="px-2 py-3 text-right font-bold text-zinc-900 xl:px-3">
+                                    {getPayingPeopleCount(row)}
+                                  </td>
 
-                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-600 xl:px-3">
-                                  {formatCurrency(row.total_customer)}
-                                </td>
-
-                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-700 xl:px-3">
-                                  {formatCurrency(row.total_supplier_cost)}
-                                </td>
-
-                                <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-blue-700 xl:px-3">
-                                  {formatCurrency(row.supplier_amount_paid)}
-                                </td>
-
-                                <td className="px-2 py-3 xl:px-3">
-                                  <span
-                                    className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-black ${getStatusClass(
-                                      row.customer_payment_status
-                                    )}`}
+                                  <td
+                                    className={`whitespace-nowrap px-2 py-3 text-right font-black xl:px-3 ${
+                                      incomeBelowCost
+                                        ? "text-rose-700"
+                                        : "text-emerald-700"
+                                    }`}
                                   >
-                                    {getStatusLabel(row.customer_payment_status)}
-                                  </span>
-                                </td>
+                                    {formatCurrency(row.total_to_you)}
+                                  </td>
 
-                                <td className="px-2 py-3 xl:px-3">
-                                  <span
-                                    className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-black ${getStatusClass(
-                                      row.supplier_payment_status
-                                    )}`}
+                                  <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-600 xl:px-3">
+                                    {formatCurrency(row.total_customer)}
+                                  </td>
+
+                                  <td
+                                    className={`whitespace-nowrap px-2 py-3 text-right font-bold xl:px-3 ${
+                                      incomeBelowCost
+                                        ? "text-rose-700"
+                                        : "text-zinc-700"
+                                    }`}
                                   >
-                                    {getStatusLabel(row.supplier_payment_status)}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
+                                    {formatCurrency(row.total_supplier_cost)}
+                                  </td>
+
+                                  <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-blue-700 xl:px-3">
+                                    {formatCurrency(row.supplier_amount_paid)}
+                                  </td>
+
+                                  <td className="px-2 py-3 xl:px-3">
+                                    <span
+                                      className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-black ${getStatusClass(
+                                        row.customer_payment_status
+                                      )}`}
+                                    >
+                                      {getStatusLabel(
+                                        row.customer_payment_status
+                                      )}
+                                    </span>
+                                  </td>
+
+                                  <td className="px-2 py-3 xl:px-3">
+                                    <span
+                                      className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-black ${getStatusClass(
+                                        row.supplier_payment_status
+                                      )}`}
+                                    >
+                                      {getStatusLabel(
+                                        row.supplier_payment_status
+                                      )}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
