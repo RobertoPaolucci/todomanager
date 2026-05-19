@@ -188,7 +188,9 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       row.import_status === "pending" || row.import_status === "rolled_back";
 
     const canProcessWithForce =
-      canProcessNormally || row.import_status === "possible_duplicate";
+      canProcessNormally ||
+      row.import_status === "possible_duplicate" ||
+      row.import_status === "probable_match";
 
     if (forceImport ? !canProcessWithForce : !canProcessNormally) {
       continue;
@@ -316,6 +318,7 @@ export async function ignoreSelectedGoogleCalendarRows(formData: FormData) {
         "rolled_back",
         "needs_review",
         "possible_duplicate",
+        "probable_match",
         "gcal_cancelled",
       ]);
   }
@@ -340,9 +343,45 @@ export async function resetSelectedGoogleCalendarRows(formData: FormData) {
         "ignored",
         "needs_review",
         "possible_duplicate",
+        "probable_match",
         "gcal_cancelled",
       ]);
   }
+
+  redirectBack(returnDate);
+}
+
+export async function restoreBookingFromImport(formData: FormData) {
+  const bookingId = Number(formData.get("id"));
+  const returnDate = getReturnDate(formData);
+
+  if (!Number.isFinite(bookingId) || bookingId <= 0) {
+    redirectBack(returnDate);
+  }
+
+  await supabaseServer
+    .from("bookings")
+    .update({
+      is_cancelled: false,
+    })
+    .eq("id", bookingId);
+
+  redirectBack(returnDate);
+}
+
+export async function deleteBookingFromImport(formData: FormData) {
+  const bookingId = Number(formData.get("id"));
+  const returnDate = getReturnDate(formData);
+
+  if (!Number.isFinite(bookingId) || bookingId <= 0) {
+    redirectBack(returnDate);
+  }
+
+  await supabaseServer
+    .from("bookings")
+    .delete()
+    .eq("id", bookingId)
+    .eq("is_cancelled", true);
 
   redirectBack(returnDate);
 }

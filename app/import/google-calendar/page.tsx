@@ -10,6 +10,8 @@ import {
   importSelectedGoogleCalendarRows,
   ignoreSelectedGoogleCalendarRows,
   resetSelectedGoogleCalendarRows,
+  restoreBookingFromImport,
+  deleteBookingFromImport,
 } from "./actions";
 
 type PageProps = {
@@ -786,7 +788,31 @@ function TodoBookingCard({
           Modifica
         </Link>
 
-        {!isCancelledBooking ? (
+        {isCancelledBooking ? (
+          <>
+            <form action={restoreBookingFromImport} className="inline-block">
+              <input type="hidden" name="id" value={booking.id} />
+              <input type="hidden" name="return_date" value={selectedDate} />
+              <button
+                type="submit"
+                className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700 shadow-sm hover:bg-green-100"
+              >
+                Ripristina
+              </button>
+            </form>
+
+            <form action={deleteBookingFromImport} className="inline-block">
+              <input type="hidden" name="id" value={booking.id} />
+              <input type="hidden" name="return_date" value={selectedDate} />
+              <button
+                type="submit"
+                className="rounded-xl border border-red-300 bg-red-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-red-700"
+              >
+                Elimina
+              </button>
+            </form>
+          </>
+        ) : (
           <form action={cancelBooking} className="inline-block">
             <input type="hidden" name="id" value={booking.id} />
             <button
@@ -796,7 +822,7 @@ function TodoBookingCard({
               Cancella
             </button>
           </form>
-        ) : null}
+        )}
       </div>
     </div>
   );
@@ -847,6 +873,8 @@ function RowActions({
   const canResetRow = status ? canReset(status) : false;
   const canModifyBooking = Boolean(todoBooking);
   const canCancelBooking = Boolean(todoBooking && !todoBooking.is_cancelled);
+  const canRestoreBooking = Boolean(todoBooking && todoBooking.is_cancelled);
+  const canDeleteBooking = Boolean(todoBooking && todoBooking.is_cancelled);
 
   const statusText = status
     ? status === "possible_duplicate"
@@ -953,7 +981,18 @@ function RowActions({
         </button>
       )}
 
-      {canCancelBooking ? (
+      {canRestoreBooking ? (
+        <form action={restoreBookingFromImport}>
+          <input type="hidden" name="id" value={todoBooking!.id} />
+          <input type="hidden" name="return_date" value={selectedDate} />
+          <button
+            type="submit"
+            className="w-full rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-xs font-black text-green-700 shadow-sm hover:bg-green-100"
+          >
+            Ripristina prenotazione
+          </button>
+        </form>
+      ) : canCancelBooking ? (
         <form action={cancelBooking}>
           <input type="hidden" name="id" value={todoBooking!.id} />
           <button
@@ -972,6 +1011,19 @@ function RowActions({
           Cancella prenotazione
         </button>
       )}
+
+      {canDeleteBooking ? (
+        <form action={deleteBookingFromImport}>
+          <input type="hidden" name="id" value={todoBooking!.id} />
+          <input type="hidden" name="return_date" value={selectedDate} />
+          <button
+            type="submit"
+            className="w-full rounded-xl border border-red-300 bg-red-600 px-3 py-3 text-xs font-black text-white shadow-sm hover:bg-red-700"
+          >
+            Elimina prenotazione
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }
