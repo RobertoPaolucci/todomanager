@@ -219,9 +219,7 @@ function statusClass(status: string) {
 }
 
 function rowToneClass(status?: string, todoOnly = false) {
-  if (todoOnly) {
-    return "border-blue-200 bg-blue-50/20";
-  }
+  if (todoOnly) return "border-blue-200 bg-blue-50/20";
 
   switch (status) {
     case "imported":
@@ -416,9 +414,7 @@ function comparisonPriority(row: ComparisonRow) {
     return 2;
   }
 
-  if (row.googleRow) {
-    return 3;
-  }
+  if (row.googleRow) return 3;
 
   return 4;
 }
@@ -1045,126 +1041,163 @@ function TodoStickySummaryTable({
   });
 
   return (
-   <div className="fixed left-[260px] right-6 top-[88px] z-40 rounded-2xl border border-yellow-300 bg-yellow-50/95 p-3 shadow-2xl backdrop-blur">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-black text-zinc-950">
-            Prenotazioni Todo Manager del giorno
-          </h3>
-          <p className="text-xs font-semibold text-zinc-600">
-            Nome, ora, esperienza, canale, persone e riferimento
-          </p>
+    <details className="fixed right-6 top-[88px] z-40 rounded-2xl border border-yellow-300 bg-yellow-50/95 p-3 shadow-2xl backdrop-blur open:left-[260px] open:right-6 [&:not([open])]:w-[270px]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl bg-yellow-200 px-3 py-2 text-sm font-black text-yellow-950">
+  <span className="truncate">
+    📌 Todo · {formatDateShortIt(selectedDate)} · {sortedBookings.length}
+  </span>
+  <span className="shrink-0 text-xs font-bold text-yellow-800">↕</span>
+</summary>
+
+      <div className="mt-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-black text-zinc-950">
+              Prenotazioni Todo Manager del giorno
+            </h3>
+            <p className="text-xs font-semibold text-zinc-600">
+              Nome, ora, esperienza, canale, persone e riferimento
+            </p>
+          </div>
+
+          <div className="rounded-full bg-yellow-200 px-3 py-1 text-xs font-black text-yellow-900">
+            {formatDateShortIt(selectedDate)} · {sortedBookings.length}{" "}
+            prenotazioni
+          </div>
         </div>
 
-        <div className="rounded-full bg-yellow-200 px-3 py-1 text-xs font-black text-yellow-900">
-          {formatDateShortIt(selectedDate)} · {sortedBookings.length}{" "}
-          prenotazioni
-        </div>
+        {sortedBookings.length === 0 ? (
+          <div className="rounded-xl bg-white p-3 text-sm font-semibold text-zinc-600">
+            Nessuna prenotazione Todo Manager presente per questa data.
+          </div>
+        ) : (
+          <div className="max-h-[360px] overflow-auto rounded-xl border border-yellow-200 bg-white">
+            <table className="w-full min-w-[1050px] border-collapse text-left text-xs">
+              <thead className="sticky top-0 z-10 bg-yellow-100 text-[11px] uppercase tracking-wide text-yellow-950">
+                <tr>
+                  <th className="border-b border-yellow-200 px-2 py-2">Ora</th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Nome cliente
+                  </th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Esperienza
+                  </th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Canale
+                  </th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Persone
+                  </th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Rif. / ID
+                  </th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Stato
+                  </th>
+                  <th className="border-b border-yellow-200 px-2 py-2">
+                    Azioni
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-yellow-100">
+                {sortedBookings.map((booking) => {
+                  const isCancelledBooking = booking.is_cancelled === true;
+
+                  return (
+                    <tr
+                      key={booking.id}
+                      className={
+                        isCancelledBooking
+                          ? "bg-red-50 text-zinc-500"
+                          : "bg-white hover:bg-yellow-50"
+                      }
+                    >
+                      <td className="px-2 py-2 align-top">
+                        <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-black text-white">
+                          {normalizeTime(booking.booking_time) || "—"}
+                        </span>
+                      </td>
+
+                      <td className="px-2 py-2 align-top font-black text-zinc-950">
+                        <span
+                          className={isCancelledBooking ? "line-through" : ""}
+                        >
+                          {booking.customer_name || "Senza nome"}
+                        </span>
+                      </td>
+
+                      <td className="max-w-[220px] px-2 py-2 align-top font-bold text-zinc-800">
+                        {booking.experience_name || "—"}
+                      </td>
+
+                      <td className="max-w-[160px] px-2 py-2 align-top font-bold text-zinc-800">
+                        {booking.booking_source || "—"}
+                      </td>
+
+                      <td className="px-2 py-2 align-top font-black text-zinc-950">
+                        {peopleLabel(booking)}
+                      </td>
+
+                      <td className="max-w-[150px] break-all px-2 py-2 align-top font-mono text-[11px] font-bold text-zinc-800">
+                        {booking.booking_reference || "—"}
+                      </td>
+
+                      <td className="px-2 py-2 align-top">
+                        {isCancelledBooking ? (
+                          <span className="rounded-full bg-red-100 px-2 py-1 text-[11px] font-black text-red-800">
+                            Annullata
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-green-100 px-2 py-1 text-[11px] font-black text-green-800">
+                            Attiva
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-2 py-2 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            href={bookingEditHref(booking.id, selectedDate)}
+                            className="rounded-lg bg-zinc-900 px-2 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-zinc-800"
+                          >
+                            Modifica
+                          </Link>
+
+                          {isCancelledBooking ? (
+                            <form
+                              action={deleteBookingFromImport}
+                              className="inline-block"
+                            >
+                              <input
+                                type="hidden"
+                                name="id"
+                                value={booking.id}
+                              />
+                              <input
+                                type="hidden"
+                                name="return_date"
+                                value={selectedDate}
+                              />
+                              <button
+                                type="submit"
+                                className="rounded-lg border border-red-300 bg-red-600 px-2 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-red-700"
+                              >
+                                Elimina
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-
-      {sortedBookings.length === 0 ? (
-        <div className="rounded-xl bg-white p-3 text-sm font-semibold text-zinc-600">
-          Nessuna prenotazione Todo Manager presente per questa data.
-        </div>
-      ) : (
-        <div className="max-h-[210px] overflow-auto rounded-xl border border-yellow-200 bg-white">
-          <table className="w-full min-w-[900px] border-collapse text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-yellow-100 text-[11px] uppercase tracking-wide text-yellow-950">
-              <tr>
-                <th className="border-b border-yellow-200 px-2 py-2">Ora</th>
-                <th className="border-b border-yellow-200 px-2 py-2">
-                  Nome cliente
-                </th>
-                <th className="border-b border-yellow-200 px-2 py-2">
-                  Esperienza
-                </th>
-                <th className="border-b border-yellow-200 px-2 py-2">
-                  Canale
-                </th>
-                <th className="border-b border-yellow-200 px-2 py-2">
-                  Persone
-                </th>
-                <th className="border-b border-yellow-200 px-2 py-2">
-                  Rif. / ID
-                </th>
-                <th className="border-b border-yellow-200 px-2 py-2">Stato</th>
-                <th className="border-b border-yellow-200 px-2 py-2">
-                  Azione
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-yellow-100">
-              {sortedBookings.map((booking) => {
-                const isCancelledBooking = booking.is_cancelled === true;
-
-                return (
-                  <tr
-                    key={booking.id}
-                    className={
-                      isCancelledBooking
-                        ? "bg-red-50 text-zinc-500"
-                        : "bg-white hover:bg-yellow-50"
-                    }
-                  >
-                    <td className="px-2 py-2 align-top">
-                      <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-black text-white">
-                        {normalizeTime(booking.booking_time) || "—"}
-                      </span>
-                    </td>
-
-                    <td className="px-2 py-2 align-top font-black text-zinc-950">
-                      <span
-                        className={isCancelledBooking ? "line-through" : ""}
-                      >
-                        {booking.customer_name || "Senza nome"}
-                      </span>
-                    </td>
-
-                    <td className="max-w-[220px] px-2 py-2 align-top font-bold text-zinc-800">
-                      {booking.experience_name || "—"}
-                    </td>
-
-                    <td className="max-w-[160px] px-2 py-2 align-top font-bold text-zinc-800">
-                      {booking.booking_source || "—"}
-                    </td>
-
-                    <td className="px-2 py-2 align-top font-black text-zinc-950">
-                      {peopleLabel(booking)}
-                    </td>
-
-                    <td className="max-w-[150px] break-all px-2 py-2 align-top font-mono text-[11px] font-bold text-zinc-800">
-                      {booking.booking_reference || "—"}
-                    </td>
-
-                    <td className="px-2 py-2 align-top">
-                      {isCancelledBooking ? (
-                        <span className="rounded-full bg-red-100 px-2 py-1 text-[11px] font-black text-red-800">
-                          Annullata
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-green-100 px-2 py-1 text-[11px] font-black text-green-800">
-                          Attiva
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="px-2 py-2 align-top">
-                      <Link
-                        href={bookingEditHref(booking.id, selectedDate)}
-                        className="rounded-lg bg-zinc-900 px-2 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-zinc-800"
-                      >
-                        Modifica
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
 
@@ -1392,9 +1425,7 @@ export default async function GoogleCalendarImportPage({
       b.googleRow?.booking_time || b.todoBooking?.booking_time || ""
     );
 
-    if (timeA !== timeB) {
-      return timeA.localeCompare(timeB);
-    }
+    if (timeA !== timeB) return timeA.localeCompare(timeB);
 
     const idA = a.googleRow?.id || a.todoBooking?.id || 0;
     const idB = b.googleRow?.id || b.todoBooking?.id || 0;
@@ -1455,7 +1486,9 @@ export default async function GoogleCalendarImportPage({
             bookings={existingBookings}
             selectedDate={selectedDate}
           />
-<div className="h-[260px]" />
+
+          <div className="h-[70px]" />
+
           {stagingError ? (
             <div className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
               Errore lettura staging: {stagingError.message}
