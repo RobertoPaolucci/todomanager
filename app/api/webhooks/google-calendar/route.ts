@@ -126,14 +126,10 @@ function getStartValue(payload: WebhookPayload) {
 
 function parseDateToIso(value?: string | null) {
   const raw = cleanSpaces(value);
-
   if (!raw) return null;
 
   const date = new Date(raw);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
+  if (Number.isNaN(date.getTime())) return null;
 
   return date.toISOString();
 }
@@ -161,10 +157,7 @@ function getRomeDateTimeFromDate(date: Date) {
     parts.find((part) => part.type === type)?.value ?? "";
 
   let hour = get("hour");
-
-  if (hour === "24") {
-    hour = "00";
-  }
+  if (hour === "24") hour = "00";
 
   return {
     bookingDate: `${get("year")}-${get("month")}-${get("day")}`,
@@ -248,9 +241,7 @@ function parsePeople(title: string) {
     /^\s*(\d+)(?:\s*\+\s*(\d+)(?:\s*(bambin[aoie]*|child|children|neonat[oi]?|infant[is]?|guida|guide|driver|autista))?)?/i
   );
 
-  if (!match) {
-    return null;
-  }
+  if (!match) return null;
 
   const adults = Math.max(0, Number(match[1] || 0));
   const plusNumber = Math.max(0, Number(match[2] || 0));
@@ -288,9 +279,7 @@ function detectExperienceId(title: string) {
     return EXPERIENCE_IDS.COOKING_CLASS;
   }
 
-  if (text.includes("cena")) {
-    return EXPERIENCE_IDS.CENA;
-  }
+  if (text.includes("cena")) return EXPERIENCE_IDS.CENA;
 
   if (
     text.includes("cavallo") ||
@@ -340,9 +329,7 @@ function detectExperienceId(title: string) {
     return EXPERIENCE_IDS.PRANZO;
   }
 
-  if (/^\s*\d+/.test(text)) {
-    return EXPERIENCE_IDS.PRANZO;
-  }
+  if (/^\s*\d+/.test(text)) return EXPERIENCE_IDS.PRANZO;
 
   return null;
 }
@@ -517,7 +504,7 @@ async function findChannelId(params: {
   return fallback?.id ?? null;
 }
 
-async function getExistingStagingRow(
+async function getExistingStagingRowByGcalUid(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   gcalUid: string
 ) {
@@ -525,6 +512,19 @@ async function getExistingStagingRow(
     .from("google_calendar_import_staging")
     .select("*")
     .eq("gcal_uid", gcalUid)
+    .maybeSingle();
+
+  return data;
+}
+
+async function getExistingStagingRowByBookingReference(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  bookingReference: string
+) {
+  const { data } = await supabase
+    .from("google_calendar_import_staging")
+    .select("*")
+    .eq("booking_reference", bookingReference)
     .maybeSingle();
 
   return data;
@@ -591,6 +591,7 @@ async function markGoogleCalendarEventCancelled(params: {
     const { error } = await params.supabase
       .from("google_calendar_import_staging")
       .update({
+        gcal_uid: params.gcalUid,
         import_status: "gcal_cancelled",
         import_origin: "make",
         booking_date: finalBookingDate || params.existing.booking_date,
@@ -659,34 +660,79 @@ async function markGoogleCalendarEventCancelled(params: {
   const fallbackTitle =
     params.title || `Evento Google Calendar cancellato ${params.gcalUid}`;
 
-  const { error } = await params.supabase
-    .from("google_calendar_import_staging")
-    .insert({
-      gcal_uid: params.gcalUid,
-      booking_date: params.start.bookingDate,
-      booking_time: params.start.bookingTime || null,
-      booking_reference: extractBookingReference(fallbackTitle, params.gcalUid),
-      customer_name: customerName,
-      adults: people?.adults ?? 0,
-      children: people?.children ?? 0,
-      infants: people?.infants ?? 0,
-      experience_id: experienceId,
-      channel_id: channelId,
-      booking_source: channelId ? channelLabel : "Google Calendar",
-      notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
-      original_title: fallbackTitle,
-      import_status: "gcal_cancelled",
-      imported_booking_id: null,
-      import_origin: "make",
-      gcal_updated_at: params.gcalUpdatedAt,
-      gcal_html_link: params.gcalHtmlLink,
-    });
+  const bookingReference = extractBookingReference(fallbackTitle, params.gcalUid);
 
-  if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
-    );
+  const existingByReference = await getExistingStagingRowByBookingReference(
+    params.supabase,
+    bookingReference
+  );
+
+  if (existingByReference?.id) {
+    const { error } = await params.supabase
+      .from("google_calendar_import_staging")
+      .update({
+        gcal_uid: params.gcalUid,
+        booking_date: params.start.bookingDate,
+        booking_time: params.start.bookingTime || null,
+        booking_reference: bookingReference,
+        customer_name: customerName,
+        adults: people?.adults ?? 0,
+        children: people?.children ?? 0,
+        infants: people?.infants ?? 0,
+        experience_id: experienceId,
+        channel_id: channelId,
+        booking_source: channelId ? channelLabel : "Google Calendar",
+        notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
+        original_title: fallbackTitle,
+        import_status: "gcal_cancelled",
+        imported_booking_id: existingByReference.imported_booking_id ?? null,
+        import_origin: "make",
+        gcal_updated_at: params.gcalUpdatedAt,
+        gcal_html_link: params.gcalHtmlLink,
+      })
+      .eq("id", existingByReference.id);
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 500 }
+      );
+    }
+  } else {
+    const { error } = await params.supabase
+      .from("google_calendar_import_staging")
+      .upsert(
+        {
+          gcal_uid: params.gcalUid,
+          booking_date: params.start.bookingDate,
+          booking_time: params.start.bookingTime || null,
+          booking_reference: bookingReference,
+          customer_name: customerName,
+          adults: people?.adults ?? 0,
+          children: people?.children ?? 0,
+          infants: people?.infants ?? 0,
+          experience_id: experienceId,
+          channel_id: channelId,
+          booking_source: channelId ? channelLabel : "Google Calendar",
+          notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
+          original_title: fallbackTitle,
+          import_status: "gcal_cancelled",
+          imported_booking_id: null,
+          import_origin: "make",
+          gcal_updated_at: params.gcalUpdatedAt,
+          gcal_html_link: params.gcalHtmlLink,
+        },
+        {
+          onConflict: "gcal_uid",
+        }
+      );
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 500 }
+      );
+    }
   }
 
   revalidatePath("/import/google-calendar");
@@ -695,7 +741,7 @@ async function markGoogleCalendarEventCancelled(params: {
 
   return NextResponse.json({
     ok: true,
-    action: "inserted_gcal_cancelled_notice",
+    action: "upserted_gcal_cancelled_notice",
     import_status: "gcal_cancelled",
     import_origin: "make",
     gcal_uid: params.gcalUid,
@@ -746,14 +792,17 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
-    const existing = await getExistingStagingRow(supabase, gcalUid);
+    const existingByGcalUid = await getExistingStagingRowByGcalUid(
+      supabase,
+      gcalUid
+    );
 
     if (status === "cancelled" || status === "canceled") {
       return await markGoogleCalendarEventCancelled({
         supabase,
         gcalUid,
         title,
-        existing,
+        existing: existingByGcalUid,
         start,
         gcalUpdatedAt,
         gcalHtmlLink,
@@ -816,9 +865,19 @@ export async function POST(request: NextRequest) {
 
     const customerName = extractCustomerName(title, channelLabel);
     const bookingReference = extractBookingReference(title, gcalUid);
+
+    const existingByBookingReference = existingByGcalUid?.id
+      ? null
+      : await getExistingStagingRowByBookingReference(
+          supabase,
+          bookingReference
+        );
+
+    const existing = existingByGcalUid || existingByBookingReference;
     const importStatus = nextStatusForExisting(existing?.import_status);
 
     const rowPayload = {
+      gcal_uid: gcalUid,
       booking_date: start.bookingDate,
       booking_time: start.bookingTime,
       booking_reference: bookingReference,
@@ -851,16 +910,15 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      const { error: insertError } = await supabase
+      const { error: upsertError } = await supabase
         .from("google_calendar_import_staging")
-        .insert({
-          ...rowPayload,
-          gcal_uid: gcalUid,
+        .upsert(rowPayload, {
+          onConflict: "gcal_uid",
         });
 
-      if (insertError) {
+      if (upsertError) {
         return NextResponse.json(
-          { ok: false, error: insertError.message },
+          { ok: false, error: upsertError.message },
           { status: 500 }
         );
       }
@@ -872,7 +930,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      action: existing?.id ? "updated_staging" : "inserted_staging",
+      action: existing?.id ? "updated_staging" : "upserted_staging",
       import_status: importStatus,
       import_origin: "make",
       booking_date: start.bookingDate,
