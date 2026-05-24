@@ -419,6 +419,176 @@ function comparisonPriority(row: ComparisonRow) {
   return 4;
 }
 
+
+function normalizeTextForMatch(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTodoReferenceCodes(value: string | null | undefined) {
+  const text = normalizeTextForMatch(value);
+  const matches = text.match(/\bT\d{5,}\b/g) ?? [];
+  return Array.from(new Set(matches));
+}
+
+function googleSearchText(row: StagingRow) {
+  return [
+    row.notes,
+    row.original_title,
+    row.customer_name,
+    row.booking_reference,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildReferenceCodeMap(bookings: BookingRow[]) {
+  const map = new Map<string, BookingRow[]>();
+
+  for (const booking of bookings) {
+    const codes = extractTodoReferenceCodes(booking.booking_reference);
+
+    for (const code of codes) {
+      const current = map.get(code) ?? [];
+      current.push(booking);
+      map.set(code, current);
+    }
+  }
+
+  return map;
+}
+
+function getBestReferenceMatchFromGoogleTitle(
+  row: StagingRow,
+  referenceCodeMap: Map<string, BookingRow[]>
+) {
+  const codes = extractTodoReferenceCodes(googleSearchText(row));
+
+  for (const code of codes) {
+    const candidates = referenceCodeMap.get(code) ?? [];
+
+    if (candidates.length === 1) {
+      return candidates[0];
+    }
+
+    if (candidates.length > 1) {
+      const activeCandidates = candidates.filter(
+        (booking) => booking.is_cancelled !== true
+      );
+
+      if (activeCandidates.length === 1) {
+        return activeCandidates[0];
+      }
+
+      const sameExperience = activeCandidates.filter(
+        (booking) =>
+          row.experience_id !== null &&
+          booking.experience_id === row.experience_id
+      );
+
+      if (sameExperience.length === 1) {
+        return sameExperience[0];
+      }
+
+      return activeCandidates[0] ?? candidates[0];
+    }
+  }
+
+  return undefined;
+}
+
+const NAME_STOP_WORDS = new Set([
+  "ADULTO",
+  "ADULTI",
+  "BAMBINO",
+  "BAMBINI",
+  "BAMBINA",
+  "NEONATO",
+  "NEONATI",
+  "INFANTE",
+  "INFANTI",
+  "PRANZO",
+  "CENA",
+  "TOUR",
+  "CON",
+  "ORE",
+  "ALLE",
+  "DA",
+  "PER",
+  "E",
+  "IL",
+  "LA",
+  "LO",
+  "GLI",
+  "LE",
+  "DI",
+  "DEL",
+  "DELLA",
+  "DEI",
+  "FATTORIA",
+  "MADONNA",
+  "QUERCE",
+  "GOOGLE",
+  "CALENDAR",
+  "GCAL",
+  "TOD",
+]);
+
+function nameTokens(value: string | null | undefined) {
+  return normalizeTextForMatch(value)
+    .split(" ")
+    .filter((token) => {
+      if (token.length < 3) return false;
+      if (NAME_STOP_WORDS.has(token)) return false;
+      if (/^\d+$/.test(token)) return false;
+      if (/^T\d+$/i.test(token)) return false;
+      if (/^GCAL$/i.test(token)) return false;
+      return true;
+    });
+}
+
+function getBestNameMatchFromGoogleTitle(row: StagingRow, bookings: BookingRow[]) {
+  const googleText = googleSearchText(row);
+  const googleTokens = new Set(nameTokens(googleText));
+
+  if (googleTokens.size === 0) return undefined;
+
+  const candidates = bookings.filter((booking) => {
+    if (booking.is_cancelled === true) return false;
+
+    const customerTokens = nameTokens(booking.customer_name);
+
+    if (customerTokens.length === 0) return false;
+
+    const matchedNameTokens = customerTokens.filter((token) =>
+      googleTokens.has(token)
+    );
+
+    const hasStrongNameMatch =
+      matchedNameTokens.length >= 2 ||
+      (customerTokens.length === 1 && matchedNameTokens.length === 1);
+
+    if (!hasStrongNameMatch) return false;
+
+    const sameExperience =
+      row.experience_id !== null && booking.experience_id === row.experience_id;
+
+    const sameChannel =
+      row.channel_id !== null && booking.channel_id === row.channel_id;
+
+    return sameExperience || sameChannel;
+  });
+
+  if (candidates.length !== 1) return undefined;
+
+  return candidates[0];
+}
+
 function MetricCard({
   label,
   value,
@@ -1041,13 +1211,13 @@ function TodoStickySummaryTable({
   });
 
   return (
-    <details className="fixed right-6 top-[88px] z-40 rounded-2xl border border-yellow-300 bg-yellow-50/95 p-3 shadow-2xl backdrop-blur open:left-[260px] open:right-6 [&:not([open])]:w-[270px]">
+    <details className="fixed right-6 top-[88px] z-40 w-[270px] rounded-2xl border border-yellow-300 bg-yellow-50/95 p-3 shadow-2xl backdrop-blur [&[open]]:left-[260px] [&[open]]:right-6 [&[open]]:w-auto">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl bg-yellow-200 px-3 py-2 text-sm font-black text-yellow-950">
-  <span className="truncate">
-    📌 Todo · {formatDateShortIt(selectedDate)} · {sortedBookings.length}
-  </span>
-  <span className="shrink-0 text-xs font-bold text-yellow-800">↕</span>
-</summary>
+        <span className="truncate">
+          📌 Todo · {formatDateShortIt(selectedDate)} · {sortedBookings.length}
+        </span>
+        <span className="shrink-0 text-xs font-bold text-yellow-800">↕</span>
+      </summary>
 
       <div className="mt-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1279,6 +1449,7 @@ export default async function GoogleCalendarImportPage({
 
   const duplicateKeyMap = new Map<string, BookingRow>();
   const probableMatchMap = new Map<string, BookingRow[]>();
+  const referenceCodeMap = buildReferenceCodeMap(existingBookings);
 
   for (const booking of existingBookings) {
     if (booking.is_cancelled) continue;
@@ -1298,9 +1469,19 @@ export default async function GoogleCalendarImportPage({
       : undefined;
     const possibleDuplicate = duplicateKeyMap.get(buildPossibleDuplicateKey(row));
 
+    const referenceMatchFromGoogleTitle = getBestReferenceMatchFromGoogleTitle(
+      row,
+      referenceCodeMap
+    );
+
     const probableMatch = getBestProbableMatch(
       row,
       probableMatchMap.get(buildProbableMatchKey(row))
+    );
+
+    const probableNameMatch = getBestNameMatchFromGoogleTitle(
+      row,
+      existingBookings
     );
 
     let computedStatus = row.import_status;
@@ -1322,6 +1503,13 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stesso riferimento";
     } else if (
       (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      referenceMatchFromGoogleTitle
+    ) {
+      computedStatus = "already_exists";
+      matchedBooking = referenceMatchFromGoogleTitle;
+      matchReason = "stesso riferimento trovato nel titolo Google Calendar";
+    } else if (
+      (row.import_status === "pending" || row.import_status === "rolled_back") &&
       possibleDuplicate
     ) {
       computedStatus = "possible_duplicate";
@@ -1334,6 +1522,13 @@ export default async function GoogleCalendarImportPage({
       computedStatus = "probable_match";
       matchedBooking = probableMatch;
       matchReason = "stessa ora, esperienza e canale, ma persone diverse";
+    } else if (
+      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      probableNameMatch
+    ) {
+      computedStatus = "probable_match";
+      matchedBooking = probableNameMatch;
+      matchReason = "nome cliente trovato nel titolo Google Calendar";
     } else if (existingByImportedId) {
       matchedBooking = existingByImportedId;
       matchReason = "già importata";
@@ -1371,7 +1566,10 @@ export default async function GoogleCalendarImportPage({
   const alreadyImportedLinkedBookingIds = new Set(
     rowsWithComputedStatus
       .filter(
-        (row) => row.matchReason === "già importata" && row.matchedBooking?.id
+        (row) =>
+          Boolean(row.matchedBooking?.id) &&
+          (row.matchReason === "già importata" ||
+            row.computedStatus === "already_exists")
       )
       .map((row) => row.matchedBooking!.id)
   );
