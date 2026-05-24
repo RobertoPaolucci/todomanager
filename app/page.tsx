@@ -141,6 +141,7 @@ type PageProps = {
 
 type GoogleCalendarImportRow = {
   id: number;
+  booking_reference: string | null;
   booking_date: string | null;
   booking_time: string | null;
   customer_name: string | null;
@@ -157,6 +158,185 @@ type GoogleCalendarImportRow = {
   gcal_updated_at: string | null;
   gcal_html_link: string | null;
 };
+
+
+type DashboardBookingForMatch = {
+  id: number;
+  booking_reference: string | null;
+  booking_date: string | null;
+  booking_time: string | null;
+  experience_id: number | null;
+  channel_id: number | null;
+  customer_name: string | null;
+  is_cancelled: boolean | null;
+};
+
+function normalizeTextForMatch(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTodoReferenceCodes(value: string | null | undefined) {
+  const text = normalizeTextForMatch(value);
+  const matches = text.match(/\bT\d{5,}\b/g) ?? [];
+  return Array.from(new Set(matches));
+}
+
+function googleSearchText(row: GoogleCalendarImportRow) {
+  return [
+    row.notes,
+    row.original_title,
+    row.customer_name,
+    row.booking_reference,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildReferenceCodeMap(bookings: DashboardBookingForMatch[]) {
+  const map = new Map<string, DashboardBookingForMatch[]>();
+
+  for (const booking of bookings) {
+    const codes = extractTodoReferenceCodes(booking.booking_reference);
+
+    for (const code of codes) {
+      const current = map.get(code) ?? [];
+      current.push(booking);
+      map.set(code, current);
+    }
+  }
+
+  return map;
+}
+
+function hasReferenceMatchFromGoogleTitle(
+  row: GoogleCalendarImportRow,
+  referenceCodeMap: Map<string, DashboardBookingForMatch[]>
+) {
+  const codes = extractTodoReferenceCodes(googleSearchText(row));
+
+  for (const code of codes) {
+    const candidates = referenceCodeMap.get(code) ?? [];
+    const activeCandidates = candidates.filter(
+      (booking) => booking.is_cancelled !== true
+    );
+
+    if (activeCandidates.length > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const DASHBOARD_NAME_STOP_WORDS = new Set([
+  "ADULTO",
+  "ADULTI",
+  "BAMBINO",
+  "BAMBINI",
+  "BAMBINA",
+  "NEONATO",
+  "NEONATI",
+  "INFANTE",
+  "INFANTI",
+  "PRANZO",
+  "CENA",
+  "TOUR",
+  "CON",
+  "ORE",
+  "ALLE",
+  "DA",
+  "PER",
+  "E",
+  "IL",
+  "LA",
+  "LO",
+  "GLI",
+  "LE",
+  "DI",
+  "DEL",
+  "DELLA",
+  "DEI",
+  "FATTORIA",
+  "MADONNA",
+  "QUERCE",
+  "GOOGLE",
+  "CALENDAR",
+  "GCAL",
+  "TOD",
+]);
+
+function nameTokens(value: string | null | undefined) {
+  return normalizeTextForMatch(value)
+    .split(" ")
+    .filter((token) => {
+      if (token.length < 3) return false;
+      if (DASHBOARD_NAME_STOP_WORDS.has(token)) return false;
+      if (/^\d+$/.test(token)) return false;
+      if (/^T\d+$/i.test(token)) return false;
+      if (/^GCAL$/i.test(token)) return false;
+      return true;
+    });
+}
+
+function hasUniqueNameMatchFromGoogleTitle(
+  row: GoogleCalendarImportRow,
+  bookings: DashboardBookingForMatch[]
+) {
+  const googleTokens = new Set(nameTokens(googleSearchText(row)));
+
+  if (googleTokens.size === 0) return false;
+
+  const candidates = bookings.filter((booking) => {
+    if (booking.is_cancelled === true) return false;
+    if (booking.booking_date !== row.booking_date) return false;
+
+    const customerTokens = nameTokens(booking.customer_name);
+
+    if (customerTokens.length === 0) return false;
+
+    const matchedNameTokens = customerTokens.filter((token) =>
+      googleTokens.has(token)
+    );
+
+    const hasStrongNameMatch =
+      matchedNameTokens.length >= 2 ||
+      (customerTokens.length === 1 && matchedNameTokens.length === 1);
+
+    if (!hasStrongNameMatch) return false;
+
+    const sameExperience =
+      row.experience_id !== null && booking.experience_id === row.experience_id;
+
+    const sameChannel =
+      row.channel_id !== null && booking.channel_id === row.channel_id;
+
+    return sameExperience || sameChannel;
+  });
+
+  return candidates.length === 1;
+}
+
+function isGoogleCalendarRowAlreadyManaged(
+  row: GoogleCalendarImportRow,
+  bookings: DashboardBookingForMatch[],
+  referenceCodeMap: Map<string, DashboardBookingForMatch[]>
+) {
+  if (row.import_status === "gcal_cancelled") {
+    return false;
+  }
+
+  return (
+    hasReferenceMatchFromGoogleTitle(row, referenceCodeMap) ||
+    hasUniqueNameMatchFromGoogleTitle(row, bookings)
+  );
+}
+
 
 export default async function Home({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -203,7 +383,7 @@ export default async function Home({ searchParams }: PageProps) {
     await supabaseServer
       .from("google_calendar_import_staging")
       .select(
-        "id, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link"
+        "id, booking_reference, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link"
       )
       .eq("import_origin", "make")
       .in("import_status", googleImportStatusesToShow)
@@ -219,8 +399,41 @@ export default async function Home({ searchParams }: PageProps) {
     );
   }
 
-  const googleCalendarImports =
+  const allBookings = bookings || [];
+  const bookingsForGoogleCalendarMatch =
+    allBookings as DashboardBookingForMatch[];
+
+  const bookingsByDateForGoogleCalendarMatch = new Map<
+    string,
+    DashboardBookingForMatch[]
+  >();
+
+  for (const booking of bookingsForGoogleCalendarMatch) {
+    if (!booking.booking_date) continue;
+
+    const current =
+      bookingsByDateForGoogleCalendarMatch.get(booking.booking_date) ?? [];
+
+    current.push(booking);
+    bookingsByDateForGoogleCalendarMatch.set(booking.booking_date, current);
+  }
+
+  const googleCalendarImportsRaw =
     (googleCalendarImportData || []) as GoogleCalendarImportRow[];
+
+  const googleCalendarImports = googleCalendarImportsRaw.filter((row) => {
+    if (!row.booking_date) return true;
+
+    const bookingsForDate =
+      bookingsByDateForGoogleCalendarMatch.get(row.booking_date) ?? [];
+    const referenceCodeMap = buildReferenceCodeMap(bookingsForDate);
+
+    return !isGoogleCalendarRowAlreadyManaged(
+      row,
+      bookingsForDate,
+      referenceCodeMap
+    );
+  });
 
   const urgentGoogleCalendarImports = googleCalendarImports.filter(
     (row) =>
@@ -229,7 +442,6 @@ export default async function Home({ searchParams }: PageProps) {
       row.import_status === "gcal_cancelled"
   );
 
-  const allBookings = bookings || [];
 
   let meseEntrate = 0;
   let meseSpese = 0;
