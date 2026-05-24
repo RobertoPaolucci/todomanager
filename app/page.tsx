@@ -376,8 +376,7 @@ export default async function Home({ searchParams }: PageProps) {
     "rolled_back",
     "needs_review",
     "possible_duplicate",
-    "gcal_cancelled",
-  ];
+      ];
 
   const { data: googleCalendarImportData, error: googleCalendarImportError } =
     await supabaseServer
