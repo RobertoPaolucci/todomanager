@@ -1202,13 +1202,100 @@ function TodoStickySummaryTable({
   selectedDate: string;
 }) {
   const sortedBookings = [...bookings].sort((a, b) => {
+    const experienceA = normalizeTextForMatch(a.experience_name || "");
+    const experienceB = normalizeTextForMatch(b.experience_name || "");
+
+    if (experienceA !== experienceB) {
+      return experienceA.localeCompare(experienceB);
+    }
+
+    const channelA = normalizeTextForMatch(a.booking_source || "");
+    const channelB = normalizeTextForMatch(b.booking_source || "");
+
+    if (channelA !== channelB) {
+      return channelA.localeCompare(channelB);
+    }
+
     const timeA = normalizeTime(a.booking_time);
     const timeB = normalizeTime(b.booking_time);
 
     if (timeA !== timeB) return timeA.localeCompare(timeB);
 
+    const customerA = normalizeTextForMatch(a.customer_name || "");
+    const customerB = normalizeTextForMatch(b.customer_name || "");
+
+    if (customerA !== customerB) {
+      return customerA.localeCompare(customerB);
+    }
+
     return a.id - b.id;
   });
+
+  const experienceNames = Array.from(
+    new Set(
+      sortedBookings.map((booking) => booking.experience_name || "Senza esperienza")
+    )
+  );
+
+  const experienceColorClasses = [
+    {
+      row: "bg-blue-50/70 hover:bg-blue-100/80",
+      left: "border-l-blue-400",
+      badge: "bg-blue-100 text-blue-900 ring-blue-200",
+    },
+    {
+      row: "bg-emerald-50/70 hover:bg-emerald-100/80",
+      left: "border-l-emerald-400",
+      badge: "bg-emerald-100 text-emerald-900 ring-emerald-200",
+    },
+    {
+      row: "bg-purple-50/70 hover:bg-purple-100/80",
+      left: "border-l-purple-400",
+      badge: "bg-purple-100 text-purple-900 ring-purple-200",
+    },
+    {
+      row: "bg-orange-50/70 hover:bg-orange-100/80",
+      left: "border-l-orange-400",
+      badge: "bg-orange-100 text-orange-900 ring-orange-200",
+    },
+    {
+      row: "bg-cyan-50/70 hover:bg-cyan-100/80",
+      left: "border-l-cyan-400",
+      badge: "bg-cyan-100 text-cyan-900 ring-cyan-200",
+    },
+    {
+      row: "bg-pink-50/70 hover:bg-pink-100/80",
+      left: "border-l-pink-400",
+      badge: "bg-pink-100 text-pink-900 ring-pink-200",
+    },
+    {
+      row: "bg-lime-50/70 hover:bg-lime-100/80",
+      left: "border-l-lime-400",
+      badge: "bg-lime-100 text-lime-900 ring-lime-200",
+    },
+    {
+      row: "bg-rose-50/70 hover:bg-rose-100/80",
+      left: "border-l-rose-400",
+      badge: "bg-rose-100 text-rose-900 ring-rose-200",
+    },
+    {
+      row: "bg-sky-50/70 hover:bg-sky-100/80",
+      left: "border-l-sky-400",
+      badge: "bg-sky-100 text-sky-900 ring-sky-200",
+    },
+    {
+      row: "bg-teal-50/70 hover:bg-teal-100/80",
+      left: "border-l-teal-400",
+      badge: "bg-teal-100 text-teal-900 ring-teal-200",
+    },
+  ];
+
+  const experienceColorMap = new Map(
+    experienceNames.map((name, index) => [
+      name,
+      experienceColorClasses[index % experienceColorClasses.length],
+    ])
+  );
 
   return (
     <details className="fixed right-6 top-[88px] z-40 w-[270px] rounded-2xl border border-yellow-300 bg-yellow-50/95 p-3 shadow-2xl backdrop-blur [&[open]]:left-[260px] [&[open]]:right-6 [&[open]]:w-auto">
@@ -1226,7 +1313,7 @@ function TodoStickySummaryTable({
               Prenotazioni Todo Manager del giorno
             </h3>
             <p className="text-xs font-semibold text-zinc-600">
-              Nome, ora, esperienza, canale, persone e riferimento
+              Ordinate per esperienza, poi canale, ora e cliente
             </p>
           </div>
 
@@ -1273,15 +1360,20 @@ function TodoStickySummaryTable({
               <tbody className="divide-y divide-yellow-100">
                 {sortedBookings.map((booking) => {
                   const isCancelledBooking = booking.is_cancelled === true;
+                  const experienceName =
+                    booking.experience_name || "Senza esperienza";
+                  const colors =
+                    experienceColorMap.get(experienceName) ??
+                    experienceColorClasses[0];
 
                   return (
                     <tr
                       key={booking.id}
-                      className={
+                      className={`border-l-4 ${colors.left} ${
                         isCancelledBooking
                           ? "bg-red-50 text-zinc-500"
-                          : "bg-white hover:bg-yellow-50"
-                      }
+                          : colors.row
+                      }`}
                     >
                       <td className="px-2 py-2 align-top">
                         <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-black text-white">
@@ -1297,8 +1389,12 @@ function TodoStickySummaryTable({
                         </span>
                       </td>
 
-                      <td className="max-w-[220px] px-2 py-2 align-top font-bold text-zinc-800">
-                        {booking.experience_name || "—"}
+                      <td className="max-w-[240px] px-2 py-2 align-top">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ring-1 ${colors.badge}`}
+                        >
+                          {experienceName}
+                        </span>
                       </td>
 
                       <td className="max-w-[160px] px-2 py-2 align-top font-bold text-zinc-800">
