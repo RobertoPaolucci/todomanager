@@ -375,15 +375,16 @@ export default async function RiepilogoPrenotazioniPage({
                       key={booking.id}
                       className="border-b border-zinc-100 align-top"
                     >
-                      <td className="min-w-[180px] py-4 pr-3 print:min-w-[135px]">
-                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 print:border-zinc-300 print:bg-white print:px-2 print:py-1">
-                          <div className="text-lg font-black leading-tight text-zinc-900 print:text-[14px]">
+                      <td className="min-w-[180px] py-4 pr-3 print:min-w-[145px]">
+                        <div className="rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2 print:border-zinc-400 print:bg-white print:px-2 print:py-1.5">
+                          <div className="text-3xl font-black leading-none tracking-tight text-zinc-950 print:text-[24px]">
                             {breakdown}
                           </div>
 
                           {showTotalLine && (
-                            <div className="mt-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 print:text-[9px]">
-                              Totale posti: {total}
+                            <div className="mt-2 text-xs font-black uppercase tracking-wide text-zinc-700 print:mt-1 print:text-[10.5px]">
+                              Totale posti:{" "}
+                              <span className="text-zinc-950">{total}</span>
                             </div>
                           )}
                         </div>
@@ -405,7 +406,7 @@ export default async function RiepilogoPrenotazioniPage({
                       </td>
 
                       <td className="py-4 pr-3">
-                        <div className="font-black text-zinc-900">
+                        <div className="w-fit max-w-[190px] rounded-lg border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-sm font-black leading-tight text-zinc-950 break-words print:max-w-[140px] print:border-zinc-400 print:bg-white print:px-2 print:py-1 print:text-[12px]">
                           {getChannelName(booking) || "-"}
                         </div>
                       </td>
