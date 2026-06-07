@@ -19,6 +19,25 @@ type ExistingBooking = {
   channel_id: number | null;
   experience_id: number | null;
   is_cancelled: boolean | null;
+  your_unit_price: number | null;
+  public_unit_price: number | null;
+  supplier_unit_cost: number | null;
+  total_to_you: number | null;
+  total_customer: number | null;
+  total_supplier_cost: number | null;
+  margin_total: number | null;
+};
+
+type ExperienceChannelPrice = {
+  id: number;
+  experience_id: number;
+  channel_id: number;
+  your_unit_price: number | null;
+  public_unit_price: number | null;
+  your_child_unit_price: number | null;
+  public_child_unit_price: number | null;
+  supplier_adult_unit_cost: number | null;
+  supplier_child_unit_cost: number | null;
 };
 
 function cleanString(value: unknown) {
@@ -33,6 +52,12 @@ function toOptionalNumber(value: unknown) {
   if (!hasValue(value)) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function toMoney(value: unknown, fallback = 0) {
+  const n = Number(value ?? fallback);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.round(n * 100) / 100;
 }
 
 function normalizeText(value: unknown) {
@@ -167,6 +192,82 @@ function resolveChannel(body: any, bookingReference: string) {
   }
 
   return null;
+}
+
+async function getExperienceChannelPrice(params: {
+  experienceId: number;
+  channelId: number;
+}) {
+  const { experienceId, channelId } = params;
+
+  const { data, error } = await supabaseServer
+    .from("experience_channel_prices")
+    .select(
+      "id, experience_id, channel_id, your_unit_price, public_unit_price, your_child_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost"
+    )
+    .eq("experience_id", experienceId)
+    .eq("channel_id", channelId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Errore lettura prezzi canale: ${error.message}`);
+  }
+
+  return (data || null) as ExperienceChannelPrice | null;
+}
+
+function calculateBookingEconomics(params: {
+  priceRule: ExperienceChannelPrice;
+  isGroupPricing: boolean;
+  adults: number;
+  children: number;
+  infants: number;
+}) {
+  const { priceRule, isGroupPricing, adults, children } = params;
+
+  const adultYourPrice = toMoney(priceRule.your_unit_price);
+  const adultPublicPrice = toMoney(priceRule.public_unit_price);
+
+  const childYourPrice = toMoney(
+    priceRule.your_child_unit_price ?? priceRule.your_unit_price
+  );
+
+  const childPublicPrice = toMoney(
+    priceRule.public_child_unit_price ?? priceRule.public_unit_price
+  );
+
+  const adultSupplierCost = toMoney(
+    priceRule.supplier_adult_unit_cost ?? priceRule.your_unit_price
+  );
+
+  const childSupplierCost = toMoney(
+    priceRule.supplier_child_unit_cost ??
+      priceRule.supplier_adult_unit_cost ??
+      priceRule.your_child_unit_price ??
+      priceRule.your_unit_price
+  );
+
+  const totalToYou = isGroupPricing
+    ? adultYourPrice
+    : adultYourPrice * adults + childYourPrice * children;
+
+  const totalCustomer = isGroupPricing
+    ? adultPublicPrice
+    : adultPublicPrice * adults + childPublicPrice * children;
+
+  const totalSupplierCost = isGroupPricing
+    ? adultSupplierCost
+    : adultSupplierCost * adults + childSupplierCost * children;
+
+  return {
+    your_unit_price: adultYourPrice,
+    public_unit_price: adultPublicPrice,
+    supplier_unit_cost: adultSupplierCost,
+    total_to_you: toMoney(totalToYou),
+    total_customer: toMoney(totalCustomer),
+    total_supplier_cost: toMoney(totalSupplierCost),
+    margin_total: toMoney(totalToYou - totalSupplierCost),
+  };
 }
 
 function scoreCandidate(params: {
@@ -462,7 +563,7 @@ async function findExistingBooking(params: {
   } = params;
 
   const selectFields =
-    "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id, experience_id, is_cancelled";
+    "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id, experience_id, is_cancelled, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, margin_total";
 
   if (bookingReference) {
     const { data, error } = await supabaseServer
@@ -759,6 +860,35 @@ export async function POST(req: Request) {
         ? infantsFromBody
         : Number(existing?.infants || 0);
 
+    const priceRule = await getExperienceChannelPrice({
+      experienceId: Number(experience.id),
+      channelId,
+    });
+
+    if (!isCancelled && !priceRule) {
+      return NextResponse.json(
+        {
+          error:
+            "Prezzo canale mancante: prenotazione non salvata per evitare importi a zero. Configura experience_channel_prices per questa esperienza e questo canale.",
+          experience_id: experience.id,
+          experience_name: experience.name,
+          channel_id: channelId,
+          booking_source: bookingSource,
+        },
+        { status: 400 }
+      );
+    }
+
+    const economicData = priceRule
+      ? calculateBookingEconomics({
+          priceRule,
+          isGroupPricing: Boolean(experience.is_group_pricing),
+          adults: finalAdults,
+          children: finalChildren,
+          infants: finalInfants,
+        })
+      : {};
+
     const bookingData = {
       channel_id: channelId,
       booking_source: bookingSource,
@@ -781,6 +911,7 @@ export async function POST(req: Request) {
       total_people: finalAdults + finalChildren + finalInfants,
 
       is_cancelled: isCancelled,
+      ...(isCancelled ? {} : economicData),
     };
 
     const previousNotes = cleanString(existing?.notes || body.notes);
@@ -838,6 +969,15 @@ export async function POST(req: Request) {
       business_unit_id: bookingData.business_unit_id,
       matched_existing_booking: Boolean(existing),
       preserved_existing_reference: Boolean(existing?.booking_reference),
+      applied_channel_price: Boolean(priceRule),
+      totals: isCancelled
+        ? null
+        : {
+            total_to_you: (bookingData as any).total_to_you,
+            total_customer: (bookingData as any).total_customer,
+            total_supplier_cost: (bookingData as any).total_supplier_cost,
+            margin_total: (bookingData as any).margin_total,
+          },
     });
   } catch (error: any) {
     console.error("Errore webhook prenotazioni:", error.message);
