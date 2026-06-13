@@ -279,18 +279,19 @@ export default function BookingForm({
 
   const supplierUnitCost = Number(selectedExperience?.supplier_unit_cost || 0);
   const isGroupPricing = selectedExperience?.is_group_pricing === true;
+  const isQuadExperience = normalizeText(selectedExperience?.name).includes("quad");
 
-  const totalToYou = isGroupPricing
-    ? yourUnitPrice
-    : yourUnitPrice * pricingPax;
+  const groupPricingUnits = isGroupPricing
+    ? isQuadExperience
+      ? Math.max(1, Math.ceil(pricingPax / 2))
+      : 1
+    : pricingPax;
 
-  const totalCustomer = isGroupPricing
-    ? publicUnitPrice
-    : publicUnitPrice * pricingPax;
+  const totalToYou = yourUnitPrice * groupPricingUnits;
 
-  const totalSupplierCost = isGroupPricing
-    ? supplierUnitCost
-    : supplierUnitCost * pricingPax;
+  const totalCustomer = publicUnitPrice * groupPricingUnits;
+
+  const totalSupplierCost = supplierUnitCost * groupPricingUnits;
 
   const marginTotal = totalToYou - totalSupplierCost;
 
@@ -575,7 +576,9 @@ export default function BookingForm({
 
           {isGroupPricing && (
             <span className="rounded-lg bg-purple-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-purple-700">
-              Prezzo a gruppo
+              {isQuadExperience
+                ? `Prezzo a gruppo da 2 · gruppi: ${groupPricingUnits}`
+                : "Prezzo a gruppo"}
             </span>
           )}
         </div>
@@ -847,7 +850,7 @@ export default function BookingForm({
           <div className="relative flex flex-col justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50/80 p-3">
             {isGroupPricing && (
               <div className="absolute right-0 top-0 rounded-bl-lg bg-purple-100 px-1 py-0.5 text-[8px] font-bold uppercase text-purple-700">
-                Fisso
+                {isQuadExperience ? `${groupPricingUnits} gruppi` : "Fisso"}
               </div>
             )}
             <p className="text-[10px] font-bold uppercase text-zinc-400">
@@ -861,7 +864,7 @@ export default function BookingForm({
           <div className="relative flex flex-col justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50/80 p-3">
             {isGroupPricing && (
               <div className="absolute right-0 top-0 rounded-bl-lg bg-purple-100 px-1 py-0.5 text-[8px] font-bold uppercase text-purple-700">
-                Fisso
+                {isQuadExperience ? `${groupPricingUnits} gruppi` : "Fisso"}
               </div>
             )}
             <p className="text-[10px] font-bold uppercase text-zinc-400">
@@ -875,7 +878,7 @@ export default function BookingForm({
           <div className="relative flex flex-col justify-center overflow-hidden rounded-xl border border-zinc-100 bg-zinc-50/80 p-3">
             {isGroupPricing && (
               <div className="absolute right-0 top-0 rounded-bl-lg bg-purple-100 px-1 py-0.5 text-[8px] font-bold uppercase text-purple-700">
-                Fisso
+                {isQuadExperience ? `${groupPricingUnits} gruppi` : "Fisso"}
               </div>
             )}
             <p className="text-[10px] font-bold uppercase text-zinc-400">
@@ -896,8 +899,9 @@ export default function BookingForm({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-2 border-t border-zinc-100 pt-3 text-[11px] font-medium italic text-zinc-500 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid grid-cols-1 gap-2 border-t border-zinc-100 pt-3 text-[11px] font-medium italic text-zinc-500 sm:grid-cols-2 xl:grid-cols-6">
           <div>Paganti: {pricingPax}</div>
+          <div>Gruppi calcolati: {groupPricingUnits}</div>
           <div>Non paganti: {nonPayingAdults}</div>
           <div>Unit. Te: €{yourUnitPrice.toFixed(2)}</div>
           <div>Unit. Lordo: €{publicUnitPrice.toFixed(2)}</div>

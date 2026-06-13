@@ -64,6 +64,24 @@ function resolveChildPrice(
   return parsed === null ? adultFallback : parsed;
 }
 
+function isQuadExperienceName(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase().includes("quad");
+}
+
+function getGroupPricingUnits(params: {
+  isGroupPricing: boolean;
+  experienceName: string | null | undefined;
+  pricingPax: number;
+}) {
+  if (!params.isGroupPricing) return params.pricingPax;
+
+  if (isQuadExperienceName(params.experienceName)) {
+    return Math.max(1, Math.ceil(params.pricingPax / 2));
+  }
+
+  return 1;
+}
+
 function isDirectChannel(
   channel?: { name?: string | null; type?: string | null } | null
 ) {
@@ -403,16 +421,23 @@ export async function createBooking(formData: FormData) {
     }
   }
 
+  const pricingPax = adults + children;
+  const groupPricingUnits = getGroupPricingUnits({
+    isGroupPricing,
+    experienceName: experience_name,
+    pricingPax,
+  });
+
   const total_to_you = isGroupPricing
-    ? your_unit_price
+    ? round2(your_unit_price * groupPricingUnits)
     : round2(adults * your_unit_price + children * your_child_unit_price);
 
   const total_customer = isGroupPricing
-    ? public_unit_price
+    ? round2(public_unit_price * groupPricingUnits)
     : round2(adults * public_unit_price + children * public_child_unit_price);
 
   const total_supplier_cost = isGroupPricing
-    ? supplier_unit_cost
+    ? round2(supplier_unit_cost * groupPricingUnits)
     : round2(
         adults * supplier_unit_cost + children * supplier_child_unit_cost
       );
@@ -643,6 +668,7 @@ export async function updateBooking(formData: FormData) {
   }
 
   const customer_name = raw_customer_name || channel.name;
+  const experience_name = String(experience.name || "").trim();
   const isGroupPricing = experience.is_group_pricing === true;
   const business_unit_id = Number(experience.business_unit_id);
   const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
@@ -715,16 +741,23 @@ export async function updateBooking(formData: FormData) {
     }
   }
 
+  const pricingPax = adults + children;
+  const groupPricingUnits = getGroupPricingUnits({
+    isGroupPricing,
+    experienceName: experience_name,
+    pricingPax,
+  });
+
   const total_to_you = isGroupPricing
-    ? your_unit_price
+    ? round2(your_unit_price * groupPricingUnits)
     : round2(adults * your_unit_price + children * your_child_unit_price);
 
   const total_customer = isGroupPricing
-    ? public_unit_price
+    ? round2(public_unit_price * groupPricingUnits)
     : round2(adults * public_unit_price + children * public_child_unit_price);
 
   const total_supplier_cost = isGroupPricing
-    ? supplier_unit_cost
+    ? round2(supplier_unit_cost * groupPricingUnits)
     : round2(
         adults * supplier_unit_cost + children * supplier_child_unit_cost
       );
