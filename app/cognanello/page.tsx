@@ -54,6 +54,7 @@ type BookingRow = {
   adults: number | null;
   children: number | null;
   infants: number | null;
+  status: string | null;
   channel_id: number | null;
   experience_id: number | null;
   channel: RelationChannel;
@@ -70,6 +71,7 @@ type BookingListItem = {
   adults: number | null;
   children: number | null;
   infants: number | null;
+  status: string | null;
   channel_name: string;
   experience_name: string;
 };
@@ -229,6 +231,7 @@ export default async function CognanelloPage({
       adults,
       children,
       infants,
+      status,
       channel_id,
       experience_id,
       channel:channels (
@@ -285,6 +288,7 @@ export default async function CognanelloPage({
     adults: row.adults,
     children: row.children,
     infants: row.infants,
+    status: row.status,
     channel_name: getChannelName(row.channel),
     experience_name: getExperienceName(row.experience),
   }));

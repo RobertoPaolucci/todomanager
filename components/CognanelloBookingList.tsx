@@ -13,6 +13,7 @@ type BookingItem = {
   adults: number | null;
   children: number | null;
   infants: number | null;
+  status: string | null;
   channel_name: string;
   experience_name: string;
 };
@@ -72,7 +73,36 @@ function peopleLabel(row: BookingItem) {
   return `${total} persone · ${parts.join(" · ")}`;
 }
 
-function getDateClass(bookingDate: string | null, today: string, tomorrow: string) {
+function normalizeStatus(status: string | null) {
+  return String(status || "").toLowerCase().trim();
+}
+
+function isCancelledStatus(status: string | null) {
+  const value = normalizeStatus(status);
+
+  return (
+    value.includes("cancel") ||
+    value.includes("annull") ||
+    value === "deleted"
+  );
+}
+
+function getStatusLabel(status: string | null) {
+  if (isCancelledStatus(status)) return "CANCELLATA";
+
+  const value = String(status || "").trim();
+  if (!value) return "";
+
+  return value.toUpperCase();
+}
+
+function getDateClass(
+  bookingDate: string | null,
+  today: string,
+  tomorrow: string,
+  status: string | null
+) {
+  if (isCancelledStatus(status)) return "text-red-700";
   if (!bookingDate) return "text-zinc-900";
   if (bookingDate === today) return "text-green-700";
   if (bookingDate === tomorrow) return "text-amber-600";
@@ -177,14 +207,27 @@ export default function CognanelloBookingList({
         <div className="space-y-3">
           {bookings.map((row) => {
             const isSelected = selectedSet.has(row.id);
-            const dateClass = getDateClass(row.booking_date, today, tomorrow);
+            const isCancelled = isCancelledStatus(row.status);
+            const statusLabel = getStatusLabel(row.status);
+            const dateClass = getDateClass(
+              row.booking_date,
+              today,
+              tomorrow,
+              row.status
+            );
 
             return (
               <article
                 key={row.id}
                 className={`rounded-2xl border bg-white p-4 shadow-sm transition ${
                   isSelected
-                    ? "border-zinc-900 ring-1 ring-zinc-900/10"
+                    ? "ring-1 ring-zinc-900/10"
+                    : ""
+                } ${
+                  isCancelled
+                    ? "border-red-200 bg-red-50/40"
+                    : isSelected
+                    ? "border-zinc-900"
                     : "border-zinc-200"
                 }`}
               >
@@ -201,20 +244,42 @@ export default function CognanelloBookingList({
                   <div className="min-w-0 flex-1">
                     <div className={`text-base font-extrabold ${dateClass}`}>
                       {formatDateIt(row.booking_date)} ·{" "}
-                      <span className="inline-flex rounded-md bg-blue-50 px-2 py-0.5 text-sm font-bold text-blue-700">
+                      <span
+                        className={`inline-flex rounded-md px-2 py-0.5 text-sm font-bold ${
+                          isCancelled
+                            ? "bg-red-100 text-red-700"
+                            : "bg-blue-50 text-blue-700"
+                        }`}
+                      >
                         {formatTime(row.booking_time)}
                       </span>
                     </div>
 
-                    <div className="mt-1 text-xs text-zinc-500">
-                      Rif. {row.booking_reference || "—"}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                      <span>Rif. {row.booking_reference || "—"}</span>
+
+                      {statusLabel ? (
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                            isCancelled
+                              ? "bg-red-100 text-red-700"
+                              : "bg-zinc-100 text-zinc-700"
+                          }`}
+                        >
+                          {statusLabel}
+                        </span>
+                      ) : null}
                     </div>
 
                     <div className="mt-4">
                       <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                         Cliente
                       </div>
-                      <div className="text-base font-bold text-zinc-900">
+                      <div
+                        className={`text-base font-bold ${
+                          isCancelled ? "text-red-800" : "text-zinc-900"
+                        }`}
+                      >
                         {row.customer_name || "—"}
                       </div>
                     </div>
