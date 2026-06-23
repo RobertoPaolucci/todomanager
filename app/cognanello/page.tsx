@@ -57,6 +57,13 @@ type BookingRow = {
   status?: string | null;
   booking_status?: string | null;
   state?: string | null;
+  deleted_at?: string | null;
+  cancelled_at?: string | null;
+  canceled_at?: string | null;
+  is_cancelled?: boolean | string | number | null;
+  is_canceled?: boolean | string | number | null;
+  is_deleted?: boolean | string | number | null;
+  active?: boolean | string | number | null;
   channel_id: number | null;
   experience_id: number | null;
   channel: RelationChannel;
@@ -104,8 +111,41 @@ function getExperienceName(experience: RelationExperience) {
   return experience.name || "—";
 }
 
+function truthyFlag(value: unknown) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const v = value.toLowerCase().trim();
+    return ["true", "1", "yes", "y", "t"].includes(v);
+  }
+  return false;
+}
+
 function getBookingStatus(row: BookingRow) {
-  return row.status ?? row.booking_status ?? row.state ?? null;
+  const hasCancelledFlag =
+    Boolean(row.deleted_at) ||
+    Boolean(row.cancelled_at) ||
+    Boolean(row.canceled_at) ||
+    truthyFlag(row.is_deleted) ||
+    truthyFlag(row.is_cancelled) ||
+    truthyFlag(row.is_canceled) ||
+    row.active === false ||
+    row.active === 0 ||
+    row.active === "0" ||
+    row.active === "false";
+
+  if (hasCancelledFlag) {
+    return "cancelled";
+  }
+
+  const explicit =
+    row.status?.trim() ||
+    row.booking_status?.trim() ||
+    row.state?.trim() ||
+    "";
+
+  return explicit || null;
 }
 
 function countPeople(row: {
