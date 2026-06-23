@@ -220,9 +220,7 @@ export default function CognanelloBookingList({
               <article
                 key={row.id}
                 className={`rounded-2xl border bg-white p-4 shadow-sm transition ${
-                  isSelected
-                    ? "ring-1 ring-zinc-900/10"
-                    : ""
+                  isSelected ? "ring-1 ring-zinc-900/10" : ""
                 } ${
                   isCancelled
                     ? "border-red-200 bg-red-50/40"
@@ -277,7 +275,9 @@ export default function CognanelloBookingList({
                       </div>
                       <div
                         className={`text-base font-bold ${
-                          isCancelled ? "text-red-800 line-through" : "text-zinc-900"
+                          isCancelled
+                            ? "text-red-800 line-through"
+                            : "text-zinc-900"
                         }`}
                       >
                         {row.customer_name || "—"}

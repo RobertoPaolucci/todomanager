@@ -17,11 +17,6 @@ function getParam(value?: string | string[]) {
   return value ?? "";
 }
 
-function toSafeNumber(value: unknown) {
-  const num = Number(value ?? 0);
-  return Number.isFinite(num) ? num : 0;
-}
-
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("it-IT", {
@@ -60,133 +55,43 @@ function getSupplierData(booking: any) {
   return booking.suppliers || null;
 }
 
-function getAdultsCount(booking: any) {
-  return toSafeNumber(booking.adults);
+function getPayingPeopleCount(booking: any) {
+  return Number(booking.adults || 0) + Number(booking.children || 0);
 }
 
-function getChildrenCount(booking: any) {
-  return toSafeNumber(booking.children);
+function getNonPayingAdultsCount(booking: any) {
+  return Number(booking.non_paying_adults || 0);
 }
 
 function getInfantsCount(booking: any) {
-  return toSafeNumber(booking.infants);
-}
-
-/**
- * Nel Todo Manager i "non_paying_adults" sono usati come guide/accompagnatori.
- * Ho lasciato anche altri nomi come fallback, così il riepilogo resta robusto
- * se in futuro aggiungi una colonna più esplicita tipo guides o guide_count.
- */
-function getGuidesCount(booking: any) {
-  return toSafeNumber(
-    booking.guides ??
-      booking.guide_count ??
-      booking.guides_count ??
-      booking.number_of_guides ??
-      booking.total_guides ??
-      booking.non_paying_adults ??
-      0
-  );
-}
-
-function getPayingPeopleCount(booking: any) {
-  return getAdultsCount(booking) + getChildrenCount(booking);
+  return Number(booking.infants || 0);
 }
 
 function getTotalSeatsCount(booking: any) {
-  const adults = getAdultsCount(booking);
-  const children = getChildrenCount(booking);
-  const infants = getInfantsCount(booking);
-  const guides = getGuidesCount(booking);
+  const totalPeople = Number(booking.total_people || 0);
+  if (totalPeople > 0) return totalPeople;
 
-  const totalFromSeparatedFields = adults + children + infants + guides;
-
-  if (totalFromSeparatedFields > 0) {
-    return totalFromSeparatedFields;
-  }
-
-  return toSafeNumber(booking.total_people);
-}
-
-function hasSeparatedSeatsDetails(booking: any) {
   return (
-    getChildrenCount(booking) > 0 ||
-    getInfantsCount(booking) > 0 ||
-    getGuidesCount(booking) > 0
+    getPayingPeopleCount(booking) +
+    getInfantsCount(booking) +
+    getNonPayingAdultsCount(booking)
   );
-}
-
-function formatSeatsBreakdown(booking: any) {
-  const adults = getAdultsCount(booking);
-  const children = getChildrenCount(booking);
-  const infants = getInfantsCount(booking);
-  const guides = getGuidesCount(booking);
-  const total = getTotalSeatsCount(booking);
-
-  const parts: string[] = [];
-
-  if (adults > 0) {
-    parts.push(String(adults));
-  }
-
-  if (children > 0) {
-    parts.push(`${children} ${children === 1 ? "bambino" : "bambini"}`);
-  }
-
-  if (infants > 0) {
-    parts.push(`${infants} ${infants === 1 ? "infante" : "infanti"}`);
-  }
-
-  if (guides > 0) {
-    parts.push(`${guides} ${guides === 1 ? "guida" : "guide"}`);
-  }
-
-  if (parts.length === 0) {
-    return String(total);
-  }
-
-  return parts.join(" + ");
-}
-
-function stripSystemAlert(notes: string) {
-  return notes
-    .split("\n")
-    .filter((line) => {
-      const text = line.trim();
-      return (
-        !text.startsWith("🟢") &&
-        !text.startsWith("🟡") &&
-        !text.startsWith("🔴")
-      );
-    })
-    .join("\n")
-    .trim();
-}
-
-function getInternalNotes(booking: any) {
-  const rawNotes = String(
-    booking.internal_notes ??
-      booking.private_notes ??
-      booking.notes ??
-      ""
-  ).trim();
-
-  const cleanedNotes = stripSystemAlert(rawNotes);
-
-  return cleanedNotes || "-";
 }
 
 function getPeopleSummaryForWhatsapp(booking: any) {
   const paying = getPayingPeopleCount(booking);
+  const nonPaying = getNonPayingAdultsCount(booking);
+  const infants = getInfantsCount(booking);
   const totalSeats = getTotalSeatsCount(booking);
-  const breakdown = formatSeatsBreakdown(booking);
 
-  const parts = [`${breakdown}`];
+  const parts = [`${totalSeats} posti`];
 
-  if (hasSeparatedSeatsDetails(booking)) {
-    parts.push(`totale posti ${totalSeats}`);
-  } else {
-    parts.push(`${totalSeats} posti`);
+  if (nonPaying > 0) {
+    parts.push(`guide ${nonPaying}`);
+  }
+
+  if (infants > 0) {
+    parts.push(`infanti ${infants}`);
   }
 
   parts.push(`paganti ${paying}`);
@@ -204,6 +109,45 @@ function parseIds(raw: string | string[] | undefined) {
         .map((value) => Number(value.trim()))
         .filter((value) => Number.isInteger(value) && value > 0)
     )
+  );
+}
+
+function truthyFlag(value: unknown) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const v = value.toLowerCase().trim();
+    return ["true", "1", "yes", "y", "t"].includes(v);
+  }
+  return false;
+}
+
+function getBookingStatus(booking: any) {
+  const hasCancelledFlag =
+    Boolean(booking.deleted_at) ||
+    Boolean(booking.cancelled_at) ||
+    Boolean(booking.canceled_at) ||
+    truthyFlag(booking.is_deleted) ||
+    truthyFlag(booking.is_cancelled) ||
+    truthyFlag(booking.is_canceled) ||
+    booking.active === false ||
+    booking.active === 0 ||
+    booking.active === "0" ||
+    booking.active === "false";
+
+  if (hasCancelledFlag) return "cancelled";
+
+  return booking.status || booking.booking_status || booking.state || null;
+}
+
+function isCancelledStatus(status: string | null) {
+  const value = String(status || "").toLowerCase().trim();
+
+  return (
+    value.includes("cancel") ||
+    value.includes("annull") ||
+    value === "deleted"
   );
 }
 
@@ -299,7 +243,7 @@ export default async function RiepilogoPrenotazioniPage({
       const bookingCreated = formatDate(booking.booking_created_at);
       const peopleSummary = getPeopleSummaryForWhatsapp(booking);
 
-      return `${peopleSummary} | ${date} ore ${time} | ${customer} | ${channel} | ${reference} | ${experience} | prenotata il ${bookingCreated}`;
+      return `${peopleSummary} | ${date} ore ${time} | ${customer} | ${reference} | ${channel} | ${experience} | prenotata il ${bookingCreated}`;
     }),
     "",
     `Numero di prenotazioni: ${totalBookings}`,
@@ -343,92 +287,102 @@ export default async function RiepilogoPrenotazioniPage({
             </p>
           </div>
 
-          <div className="overflow-x-auto print:overflow-visible">
-            <table className="min-w-full text-left text-sm print:text-[10px]">
-              <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500 print:text-[9px]">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm print:text-[11px]">
+              <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500">
                 <tr>
-                  <th className="py-3 pr-3">Posti</th>
-                  <th className="py-3 pr-3">Data e Ora</th>
-                  <th className="py-3 pr-3">Nome Cliente</th>
-                  <th className="py-3 pr-3">Canale Prenotazione</th>
-                  <th className="py-3 pr-3">
-                    Rif Prenotazione
-                    <br />
-                    <span className="normal-case text-zinc-400">
-                      Data pren.
-                    </span>
-                  </th>
-                  <th className="py-3 pr-3">Tipo Esperienza</th>
-                  <th className="py-3 pr-0">Note interne</th>
+                  <th className="py-3 pr-4">Posti</th>
+                  <th className="py-3 pr-4">Data e Ora</th>
+                  <th className="py-3 pr-4">Nome Cliente</th>
+                  <th className="py-3 pr-4">Rif Prenotazione</th>
+                  <th className="py-3 pr-4">Canale Prenotazione</th>
+                  <th className="py-3 pr-4">Tipo Esperienza</th>
+                  <th className="py-3 pr-0">Data Prenotazione</th>
                 </tr>
               </thead>
 
               <tbody>
                 {bookings.map((booking) => {
+                  const nonPaying = getNonPayingAdultsCount(booking);
                   const total = getTotalSeatsCount(booking);
-                  const breakdown = formatSeatsBreakdown(booking);
-                  const showTotalLine = hasSeparatedSeatsDetails(booking);
-                  const internalNotes = getInternalNotes(booking);
+                  const bookingStatus = getBookingStatus(booking);
+                  const isCancelled = isCancelledStatus(bookingStatus);
 
                   return (
                     <tr
                       key={booking.id}
-                      className="border-b border-zinc-100 align-top"
+                      className={`border-b border-zinc-100 align-top ${
+                        isCancelled ? "bg-red-50/40" : ""
+                      }`}
                     >
-                      <td className="min-w-[180px] py-4 pr-3 print:min-w-[145px]">
-                        <div className="rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2 print:border-zinc-400 print:bg-white print:px-2 print:py-1.5">
-                          <div className="text-3xl font-black leading-none tracking-tight text-zinc-950 print:text-[24px]">
-                            {breakdown}
-                          </div>
-
-                          {showTotalLine && (
-                            <div className="mt-2 text-xs font-black uppercase tracking-wide text-zinc-700 print:mt-1 print:text-[10.5px]">
-                              Totale posti:{" "}
-                              <span className="text-zinc-950">{total}</span>
-                            </div>
-                          )}
+                      <td className="py-4 pr-4">
+                        <div
+                          className={`text-xl font-black leading-none print:text-[18px] ${
+                            isCancelled ? "text-red-700" : "text-zinc-900"
+                          }`}
+                        >
+                          {total}
                         </div>
+
+                        {nonPaying > 0 && (
+                          <div className="mt-1 text-[11px] font-bold text-amber-700 print:text-[10px]">
+                            (guide {nonPaying})
+                          </div>
+                        )}
                       </td>
 
-                      <td className="py-4 pr-3 whitespace-nowrap">
-                        <div className="font-medium text-zinc-900">
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <div
+                          className={`font-medium ${
+                            isCancelled ? "text-red-700" : "text-zinc-900"
+                          }`}
+                        >
                           {formatDate(booking.booking_date)}
                         </div>
-                        <div className="text-xs text-zinc-500 print:text-[9px]">
+                        <div className="text-xs text-zinc-500">
                           ore {formatTime(booking.booking_time)}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-3">
-                        <div className="font-black text-zinc-900">
+                      <td className="py-4 pr-4">
+                        <div
+                          className={`font-medium ${
+                            isCancelled
+                              ? "text-red-800 line-through"
+                              : "text-zinc-900"
+                          }`}
+                        >
                           {booking.customer_name || "-"}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-3">
-                        <div className="w-fit max-w-[190px] rounded-lg border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-sm font-black leading-tight text-zinc-950 break-words print:max-w-[140px] print:border-zinc-400 print:bg-white print:px-2 print:py-1 print:text-[12px]">
+                      <td className="py-4 pr-4">
+                        <div className="font-mono text-zinc-700">
+                          {booking.booking_reference || "-"}
+                        </div>
+
+                        {isCancelled && (
+                          <div className="mt-1 inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">
+                            CANCELLATA
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-4 pr-4">
+                        <div className="text-zinc-900">
                           {getChannelName(booking) || "-"}
                         </div>
                       </td>
 
-                      <td className="py-4 pr-3">
-                        <div className="font-mono font-bold text-zinc-800">
-                          {booking.booking_reference || "-"}
-                        </div>
-                        <div className="mt-1 text-[11px] font-semibold text-zinc-500 print:text-[9px]">
-                          Prenotata il {formatDate(booking.booking_created_at)}
-                        </div>
-                      </td>
-
-                      <td className="py-4 pr-3">
+                      <td className="py-4 pr-4">
                         <div className="text-zinc-900">
                           {booking.experience_name || "-"}
                         </div>
                       </td>
 
-                      <td className="max-w-[220px] py-4 pr-0 print:max-w-[150px]">
-                        <div className="whitespace-pre-line text-zinc-800">
-                          {internalNotes}
+                      <td className="py-4 pr-0 whitespace-nowrap">
+                        <div className="text-zinc-900">
+                          {formatDate(booking.booking_created_at)}
                         </div>
                       </td>
                     </tr>
@@ -437,10 +391,7 @@ export default async function RiepilogoPrenotazioniPage({
 
                 {bookings.length === 0 && (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="py-8 text-center text-sm text-zinc-500"
-                    >
+                    <td colSpan={7} className="py-8 text-center text-sm text-zinc-500">
                       Nessuna prenotazione trovata.
                     </td>
                   </tr>
@@ -450,20 +401,20 @@ export default async function RiepilogoPrenotazioniPage({
           </div>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-2 print:mt-6">
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 print:p-3">
-              <div className="text-[11px] font-bold uppercase text-zinc-500 print:text-[9.5px]">
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+              <div className="text-[11px] font-bold uppercase text-zinc-500">
                 Numero di prenotazioni
               </div>
-              <div className="mt-2 text-2xl font-black text-zinc-900 print:text-[22px]">
+              <div className="mt-2 text-2xl font-black text-zinc-900">
                 {totalBookings}
               </div>
             </div>
 
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 print:p-3">
-              <div className="text-[11px] font-bold uppercase text-zinc-500 print:text-[9.5px]">
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+              <div className="text-[11px] font-bold uppercase text-zinc-500">
                 Posti totali
               </div>
-              <div className="mt-2 text-2xl font-black text-zinc-900 print:text-[22px]">
+              <div className="mt-2 text-2xl font-black text-zinc-900">
                 {totalSeats}
               </div>
             </div>
