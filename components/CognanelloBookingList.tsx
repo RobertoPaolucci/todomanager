@@ -277,7 +277,7 @@ export default function CognanelloBookingList({
                       </div>
                       <div
                         className={`text-base font-bold ${
-                          isCancelled ? "text-red-800" : "text-zinc-900"
+                          isCancelled ? "text-red-800 line-through" : "text-zinc-900"
                         }`}
                       >
                         {row.customer_name || "—"}
