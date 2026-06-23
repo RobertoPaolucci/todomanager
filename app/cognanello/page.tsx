@@ -54,7 +54,9 @@ type BookingRow = {
   adults: number | null;
   children: number | null;
   infants: number | null;
-  status: string | null;
+  status?: string | null;
+  booking_status?: string | null;
+  state?: string | null;
   channel_id: number | null;
   experience_id: number | null;
   channel: RelationChannel;
@@ -100,6 +102,10 @@ function getExperienceName(experience: RelationExperience) {
   if (!experience) return "—";
   if (Array.isArray(experience)) return experience[0]?.name || "—";
   return experience.name || "—";
+}
+
+function getBookingStatus(row: BookingRow) {
+  return row.status ?? row.booking_status ?? row.state ?? null;
 }
 
 function countPeople(row: {
@@ -222,18 +228,7 @@ export default async function CognanelloPage({
     .from("bookings")
     .select(
       `
-      id,
-      booking_reference,
-      booking_date,
-      booking_time,
-      booking_created_at,
-      customer_name,
-      adults,
-      children,
-      infants,
-      status,
-      channel_id,
-      experience_id,
+      *,
       channel:channels (
         id,
         name
@@ -273,6 +268,7 @@ export default async function CognanelloPage({
     .order("id", { ascending: true });
 
   if (error) {
+    console.error("Errore query Cognanello:", error.message);
     throw new Error(error.message);
   }
 
@@ -288,7 +284,7 @@ export default async function CognanelloPage({
     adults: row.adults,
     children: row.children,
     infants: row.infants,
-    status: row.status,
+    status: getBookingStatus(row),
     channel_name: getChannelName(row.channel),
     experience_name: getExperienceName(row.experience),
   }));
