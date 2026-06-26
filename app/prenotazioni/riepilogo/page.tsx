@@ -78,25 +78,42 @@ function getTotalSeatsCount(booking: any) {
   );
 }
 
-function getPeopleSummaryForWhatsapp(booking: any) {
-  const paying = getPayingPeopleCount(booking);
-  const nonPaying = getNonPayingAdultsCount(booking);
-  const infants = getInfantsCount(booking);
-  const totalSeats = getTotalSeatsCount(booking);
+function formatPeopleBreakdown(booking: any) {
+  const adults = Number(booking.adults || 0);
+  const children = Number(booking.children || 0);
+  const infants = Number(booking.infants || 0);
+  const nonPaying = Number(booking.non_paying_adults || 0);
 
-  const parts = [`${totalSeats} posti`];
+  const parts: string[] = [];
 
-  if (nonPaying > 0) {
-    parts.push(`guide ${nonPaying}`);
+  if (adults > 0) {
+    parts.push(`${adults} adult${adults === 1 ? "o" : "i"}`);
+  }
+
+  if (children > 0) {
+    parts.push(`${children} bambin${children === 1 ? "o" : "i"}`);
   }
 
   if (infants > 0) {
-    parts.push(`infanti ${infants}`);
+    parts.push(`${infants} infant${infants === 1 ? "e" : "i"}`);
   }
 
-  parts.push(`paganti ${paying}`);
+  if (nonPaying > 0) {
+    parts.push(`${nonPaying} guid${nonPaying === 1 ? "a" : "e"}`);
+  }
 
-  return parts.join(" | ");
+  return parts.join(" + ");
+}
+
+function getPeopleSummaryForWhatsapp(booking: any) {
+  const totalSeats = getTotalSeatsCount(booking);
+  const breakdown = formatPeopleBreakdown(booking);
+
+  if (!breakdown) {
+    return `${totalSeats} posti`;
+  }
+
+  return `${totalSeats} posti | ${breakdown}`;
 }
 
 function parseIds(raw: string | string[] | undefined) {
@@ -115,11 +132,16 @@ function parseIds(raw: string | string[] | undefined) {
 function truthyFlag(value: unknown) {
   if (value === true) return true;
   if (value === false || value == null) return false;
-  if (typeof value === "number") return value === 1;
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
   if (typeof value === "string") {
     const v = value.toLowerCase().trim();
     return ["true", "1", "yes", "y", "t"].includes(v);
   }
+
   return false;
 }
 
@@ -157,6 +179,7 @@ export default async function RiepilogoPrenotazioniPage({
   const params = await searchParams;
   const ids = parseIds(params.ids);
   const source = getParam(params.source).trim();
+
   const isCognanello = source === "cognanello";
   const backHref = isCognanello ? "/cognanello" : "/prenotazioni";
   const backLabel = isCognanello
@@ -170,6 +193,7 @@ export default async function RiepilogoPrenotazioniPage({
           <h1 className="text-2xl font-bold text-zinc-900">
             Riepilogo Prenotazioni
           </h1>
+
           <p className="mt-2 text-zinc-600">
             Non hai selezionato nessuna prenotazione.
           </p>
@@ -258,6 +282,7 @@ export default async function RiepilogoPrenotazioniPage({
             <h1 className="text-2xl font-bold text-zinc-900">
               Riepilogo Prenotazioni
             </h1>
+
             <p className="mt-1 text-sm text-zinc-600">
               {isCognanello
                 ? "Selezione pronta per stampa PDF."
@@ -282,6 +307,7 @@ export default async function RiepilogoPrenotazioniPage({
             <h1 className="text-2xl font-bold text-zinc-900 print:text-[24px]">
               Riepilogo Prenotazioni
             </h1>
+
             <p className="mt-2 text-sm text-zinc-600 print:text-[12px]">
               Documento creato il {formatDateTime(createdAt)}
             </p>
@@ -303,8 +329,8 @@ export default async function RiepilogoPrenotazioniPage({
 
               <tbody>
                 {bookings.map((booking) => {
-                  const nonPaying = getNonPayingAdultsCount(booking);
                   const total = getTotalSeatsCount(booking);
+                  const breakdown = formatPeopleBreakdown(booking);
                   const bookingStatus = getBookingStatus(booking);
                   const isCancelled = isCancelledStatus(bookingStatus);
 
@@ -324,9 +350,13 @@ export default async function RiepilogoPrenotazioniPage({
                           {total}
                         </div>
 
-                        {nonPaying > 0 && (
-                          <div className="mt-1 text-[11px] font-bold text-amber-700 print:text-[10px]">
-                            (guide {nonPaying})
+                        {breakdown && (
+                          <div
+                            className={`mt-1 text-[12px] font-bold leading-tight print:text-[10px] ${
+                              isCancelled ? "text-red-700" : "text-zinc-700"
+                            }`}
+                          >
+                            {breakdown}
                           </div>
                         )}
                       </td>
@@ -339,6 +369,7 @@ export default async function RiepilogoPrenotazioniPage({
                         >
                           {formatDate(booking.booking_date)}
                         </div>
+
                         <div className="text-xs text-zinc-500">
                           ore {formatTime(booking.booking_time)}
                         </div>
@@ -391,7 +422,10 @@ export default async function RiepilogoPrenotazioniPage({
 
                 {bookings.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-sm text-zinc-500">
+                    <td
+                      colSpan={7}
+                      className="py-8 text-center text-sm text-zinc-500"
+                    >
                       Nessuna prenotazione trovata.
                     </td>
                   </tr>
@@ -405,6 +439,7 @@ export default async function RiepilogoPrenotazioniPage({
               <div className="text-[11px] font-bold uppercase text-zinc-500">
                 Numero di prenotazioni
               </div>
+
               <div className="mt-2 text-2xl font-black text-zinc-900">
                 {totalBookings}
               </div>
@@ -414,6 +449,7 @@ export default async function RiepilogoPrenotazioniPage({
               <div className="text-[11px] font-bold uppercase text-zinc-500">
                 Posti totali
               </div>
+
               <div className="mt-2 text-2xl font-black text-zinc-900">
                 {totalSeats}
               </div>
@@ -434,6 +470,7 @@ export default async function RiepilogoPrenotazioniPage({
               <div className="mb-2 text-sm font-black text-zinc-900">
                 Anteprima messaggio WhatsApp
               </div>
+
               <pre className="whitespace-pre-wrap rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
                 {whatsappMessage}
               </pre>
