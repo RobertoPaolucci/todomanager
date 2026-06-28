@@ -33,6 +33,21 @@ type ReconcilePaymentsResult = {
   alreadyPaidBookings: ReconciledBookingItem[];
 };
 
+type ReconciliationImportItem = {
+  id: number;
+  created_at: string;
+  file_name: string | null;
+  file_type: string | null;
+  reference_month: string | null;
+  reference_start_date: string | null;
+  reference_end_date: string | null;
+  parsed: number;
+  found_in_db: number;
+  updated: number;
+  already_paid: number;
+  not_found: number;
+};
+
 function normalizeBookingReference(value: unknown) {
   return String(value ?? "")
     .trim()
@@ -84,8 +99,87 @@ function sortByDateAndReference<T extends { booking_date: string; booking_refere
   });
 }
 
+function sortReconciledBookings(items: ReconciledBookingItem[]) {
+  return [...items].sort((a, b) => {
+    const dateA = a.booking_date || "";
+    const dateB = b.booking_date || "";
+
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    return a.booking_reference.localeCompare(b.booking_reference);
+  });
+}
+
+export async function getReconciledPaymentsHistory(
+  limit = 300
+): Promise<ReconciledBookingItem[]> {
+  const safeLimit = Math.min(Math.max(Number(limit) || 300, 1), 500);
+
+  const { data, error } = await supabaseServer
+    .from("bookings")
+    .select("id, booking_reference, booking_date, customer_name, experience_name")
+    .eq("customer_payment_status", "paid")
+    .order("booking_date", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []).map((booking) =>
+    toSerializableBooking({
+      id: booking.id,
+      booking_reference: booking.booking_reference,
+      booking_date: booking.booking_date,
+      customer_name: booking.customer_name,
+      experience_name: booking.experience_name,
+    })
+  );
+}
+
+export async function getPaymentReconciliationImportHistory(
+  limit = 50
+): Promise<ReconciliationImportItem[]> {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+  const { data, error } = await supabaseServer
+    .from("payment_reconciliation_imports")
+    .select(
+      "id, created_at, file_name, file_type, reference_month, reference_start_date, reference_end_date, parsed, found_in_db, updated, already_paid, not_found"
+    )
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []).map((item) => ({
+    id: Number(item.id),
+    created_at: String(item.created_at),
+    file_name: item.file_name ?? null,
+    file_type: item.file_type ?? null,
+    reference_month: item.reference_month ?? null,
+    reference_start_date: item.reference_start_date ?? null,
+    reference_end_date: item.reference_end_date ?? null,
+    parsed: Number(item.parsed || 0),
+    found_in_db: Number(item.found_in_db || 0),
+    updated: Number(item.updated || 0),
+    already_paid: Number(item.already_paid || 0),
+    not_found: Number(item.not_found || 0),
+  }));
+}
+
 export async function reconcilePayments(
-  items: ExtractedReferenceItem[]
+  items: ExtractedReferenceItem[],
+  fileMeta?: {
+    file_name?: string | null;
+    file_type?: string | null;
+    reference_month?: string | null;
+    reference_start_date?: string | null;
+    reference_end_date?: string | null;
+  }
 ): Promise<ReconcilePaymentsResult> {
   const dedupeMap = new Map<string, ExtractedReferenceItem>();
 
@@ -164,8 +258,8 @@ export async function reconcilePayments(
     }
   }
 
-  const alreadyPaidBookings = alreadyPaidRows
-    .map((booking) =>
+  const alreadyPaidBookings = sortReconciledBookings(
+    alreadyPaidRows.map((booking) =>
       toSerializableBooking({
         id: booking.id,
         booking_reference: booking.booking_reference,
@@ -174,13 +268,7 @@ export async function reconcilePayments(
         experience_name: booking.experience_name,
       })
     )
-    .sort((a, b) => {
-      const dateA = a.booking_date || "";
-      const dateB = b.booking_date || "";
-
-      if (dateA !== dateB) return dateA.localeCompare(dateB);
-      return a.booking_reference.localeCompare(b.booking_reference);
-    });
+  );
 
   updatedBookings.sort((a, b) => {
     const dateA = a.booking_date || "";
@@ -194,7 +282,7 @@ export async function reconcilePayments(
   revalidatePath("/prenotazioni");
   revalidatePath("/prenotazioni/riconciliazione");
 
-  return {
+  const result = {
     parsed: cleanedItems.length,
     foundInDb: foundBookings.length,
     updated: updatedBookings.length,
@@ -205,4 +293,28 @@ export async function reconcilePayments(
     updatedBookings,
     alreadyPaidBookings,
   };
+
+  const { error: importLogError } = await supabaseServer
+    .from("payment_reconciliation_imports")
+    .insert({
+      file_name: fileMeta?.file_name || null,
+      file_type: fileMeta?.file_type || null,
+      reference_month: fileMeta?.reference_month || null,
+      reference_start_date: fileMeta?.reference_start_date || null,
+      reference_end_date: fileMeta?.reference_end_date || null,
+      parsed: result.parsed,
+      found_in_db: result.foundInDb,
+      updated: result.updated,
+      already_paid: result.alreadyPaid,
+      not_found: result.notFound,
+    });
+
+  if (importLogError) {
+    console.error(
+      "Errore salvataggio storico riconciliazione:",
+      importLogError.message
+    );
+  }
+
+  return result;
 }

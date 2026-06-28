@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
-import { reconcilePayments } from "./actions";
+import { getPaymentReconciliationImportHistory, reconcilePayments } from "./actions";
 import * as XLSX from "xlsx";
 import Link from "next/link";
 
@@ -35,6 +35,21 @@ type ReconcileStatus = {
   notFoundItems: NotFoundReferenceItem[];
   updatedBookings: ReconciledBookingItem[];
   alreadyPaidBookings: ReconciledBookingItem[];
+};
+
+type ImportHistoryItem = {
+  id: number;
+  created_at: string;
+  file_name: string | null;
+  file_type: string | null;
+  reference_month: string | null;
+  reference_start_date: string | null;
+  reference_end_date: string | null;
+  parsed: number;
+  found_in_db: number;
+  updated: number;
+  already_paid: number;
+  not_found: number;
 };
 
 function normalizeBookingReference(value: unknown) {
@@ -76,6 +91,152 @@ function formatDateIt(value: string | null) {
     month: "2-digit",
     year: "numeric",
   }).format(dt);
+}
+
+function formatDateTimeIt(value: string | null) {
+  if (!value) return { date: "Data non disponibile", time: "" };
+
+  const dt = new Date(value);
+  if (isNaN(dt.getTime())) return { date: "Data non disponibile", time: "" };
+
+  return {
+    date: new Intl.DateTimeFormat("it-IT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(dt),
+    time: new Intl.DateTimeFormat("it-IT", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(dt),
+  };
+}
+
+function formatReferenceMonth(value: string | null) {
+  if (!value) return "Mese non trovato";
+
+  const match = value.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return value;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const dt = new Date(year, month - 1, 1);
+
+  return new Intl.DateTimeFormat("it-IT", {
+    month: "long",
+    year: "numeric",
+  }).format(dt);
+}
+
+function formatReferencePeriod(
+  startDate: string | null,
+  endDate: string | null,
+  fallbackMonth: string | null
+) {
+  if (startDate && endDate) {
+    if (startDate === endDate) return formatDateIt(startDate);
+    return `${formatDateIt(startDate)} - ${formatDateIt(endDate)}`;
+  }
+
+  if (startDate) return formatDateIt(startDate);
+  if (endDate) return formatDateIt(endDate);
+
+  return formatReferenceMonth(fallbackMonth);
+}
+
+function findReferenceMonthInText(value: string) {
+  const text = value.toLowerCase();
+  const monthNames: Record<string, string> = {
+    gennaio: "01",
+    january: "01",
+    febbraio: "02",
+    february: "02",
+    marzo: "03",
+    march: "03",
+    aprile: "04",
+    april: "04",
+    maggio: "05",
+    may: "05",
+    giugno: "06",
+    june: "06",
+    luglio: "07",
+    july: "07",
+    agosto: "08",
+    august: "08",
+    settembre: "09",
+    september: "09",
+    ottobre: "10",
+    october: "10",
+    novembre: "11",
+    november: "11",
+    dicembre: "12",
+    december: "12",
+  };
+
+  const numericYearMonth = text.match(/\b(20\d{2})[-_/](0?[1-9]|1[0-2])\b/);
+  if (numericYearMonth) {
+    return `${numericYearMonth[1]}-${pad2(Number(numericYearMonth[2]))}`;
+  }
+
+  const numericMonthYear = text.match(/\b(0?[1-9]|1[0-2])[-_/](20\d{2})\b/);
+  if (numericMonthYear) {
+    return `${numericMonthYear[2]}-${pad2(Number(numericMonthYear[1]))}`;
+  }
+
+  const namePattern = new RegExp(
+    `\\b(${Object.keys(monthNames).join("|")})\\s+(20\\d{2})\\b`
+  );
+  const monthNameMatch = text.match(namePattern);
+  if (monthNameMatch) {
+    return `${monthNameMatch[2]}-${monthNames[monthNameMatch[1]]}`;
+  }
+
+  return null;
+}
+
+function inferReferenceMonth(
+  items: ExtractedReferenceItem[],
+  rows: any[][],
+  fileName: string
+) {
+  const monthCounts = new Map<string, number>();
+
+  items.forEach((item) => {
+    const month = item.booking_date.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(month)) {
+      monthCounts.set(month, (monthCounts.get(month) || 0) + 1);
+    }
+  });
+
+  if (monthCounts.size > 0) {
+    return Array.from(monthCounts.entries()).sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return b[0].localeCompare(a[0]);
+    })[0][0];
+  }
+
+  const topRowsText = rows
+    .slice(0, 40)
+    .map((row) => row.join(" "))
+    .join(" ");
+
+  return findReferenceMonthInText(topRowsText) || findReferenceMonthInText(fileName);
+}
+
+function inferReferencePeriod(items: ExtractedReferenceItem[]) {
+  const dates = Array.from(
+    new Set(
+      items
+        .map((item) => item.booking_date)
+        .filter((date) => isValidYmdDate(date))
+    )
+  ).sort();
+
+  return {
+    startDate: dates[0] || null,
+    endDate: dates[dates.length - 1] || null,
+  };
 }
 
 function pad2(value: number) {
@@ -295,10 +456,35 @@ function BookingResultList({
 
 export default function ReconcilePage() {
   const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [status, setStatus] = useState<ReconcileStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [extractedItems, setExtractedItems] = useState<ExtractedReferenceItem[]>([]);
   const [fileType, setFileType] = useState<string>("");
+  const [fileName, setFileName] = useState<string>("");
+  const [referenceMonth, setReferenceMonth] = useState<string>("");
+  const [referenceStartDate, setReferenceStartDate] = useState<string>("");
+  const [referenceEndDate, setReferenceEndDate] = useState<string>("");
+  const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
+
+  const refreshImportHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+
+    try {
+      const items = await getPaymentReconciliationImportHistory();
+      setImportHistory(items);
+    } catch (err: any) {
+      setHistoryError(`Errore caricamento storico: ${err.message}`);
+    }
+
+    setHistoryLoading(false);
+  };
+
+  useEffect(function () {
+    refreshImportHistory();
+  }, []);
 
   const notFoundDates = useMemo(function () {
     if (!status) return [];
@@ -326,9 +512,14 @@ export default function ReconcilePage() {
     setStatus(null);
     setExtractedItems([]);
     setFileType("");
+    setFileName("");
+    setReferenceMonth("");
+    setReferenceStartDate("");
+    setReferenceEndDate("");
 
     const file = e.target.files?.[0];
     if (!file) return;
+    setFileName(file.name);
 
     const reader = new FileReader();
 
@@ -472,6 +663,10 @@ export default function ReconcilePage() {
           return;
         }
 
+        const referencePeriod = inferReferencePeriod(finalItems);
+        setReferenceMonth(inferReferenceMonth(finalItems, rows, file.name) || "");
+        setReferenceStartDate(referencePeriod.startDate || "");
+        setReferenceEndDate(referencePeriod.endDate || "");
         setExtractedItems(finalItems);
       } catch (err) {
         console.error(err);
@@ -487,8 +682,15 @@ export default function ReconcilePage() {
     setError(null);
 
     try {
-      const result = await reconcilePayments(extractedItems);
+      const result = await reconcilePayments(extractedItems, {
+        file_name: fileName || null,
+        file_type: fileType || null,
+        reference_month: referenceMonth || null,
+        reference_start_date: referenceStartDate || null,
+        reference_end_date: referenceEndDate || null,
+      });
       setStatus(result);
+      await refreshImportHistory();
     } catch (err: any) {
       setError(`Errore: ${err.message}`);
     }
@@ -501,6 +703,10 @@ export default function ReconcilePage() {
     setExtractedItems([]);
     setError(null);
     setFileType("");
+    setFileName("");
+    setReferenceMonth("");
+    setReferenceStartDate("");
+    setReferenceEndDate("");
   };
 
   return (
@@ -540,6 +746,14 @@ export default function ReconcilePage() {
                 <p className="mt-1 text-xs text-blue-700">
                   Trovati <strong>{extractedItems.length}</strong> codici
                   riferimento validi con data esperienza da controllare.
+                </p>
+                <p className="mt-1 text-xs font-bold text-blue-800">
+                  Periodo nel file:{" "}
+                  {formatReferencePeriod(
+                    referenceStartDate || null,
+                    referenceEndDate || null,
+                    referenceMonth || null
+                  )}
                 </p>
               </div>
             </div>
@@ -692,6 +906,96 @@ export default function ReconcilePage() {
             </div>
           </div>
         )}
+
+        <SectionCard title={`Storico file riconciliazione (${importHistory.length})`}>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-zinc-500">
+              Ultimi file Viator/GetYourGuide caricati per segnare le prenotazioni
+              come incassate.
+            </p>
+
+            <button
+              type="button"
+              onClick={refreshImportHistory}
+              disabled={historyLoading}
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-bold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {historyLoading ? "Aggiorno..." : "Aggiorna storico"}
+            </button>
+          </div>
+
+          {historyError && (
+            <p className="mb-4 rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-bold text-red-600">
+              {historyError}
+            </p>
+          )}
+
+          {historyLoading && importHistory.length === 0 ? (
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-500">
+              Caricamento storico...
+            </div>
+          ) : importHistory.length === 0 ? (
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-500">
+              Ancora nessun file di riconciliazione salvato.
+            </div>
+          ) : (
+            <div className="max-h-[520px] overflow-auto rounded-xl border border-zinc-200 bg-white">
+              <ul className="divide-y divide-zinc-100">
+                {importHistory.map((item) => {
+                  const created = formatDateTimeIt(item.created_at);
+
+                  return (
+                    <li
+                      key={item.id}
+                      className="grid gap-3 px-4 py-4 sm:grid-cols-[180px_1fr_auto] sm:items-center"
+                    >
+                      <div>
+                        <div className="font-bold text-zinc-900">
+                          {created.date}
+                        </div>
+                        <div className="mt-0.5 text-xs text-zinc-500">
+                          {created.time}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold text-zinc-900">
+                          {item.file_name || "Nome file non salvato"}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                          <span className="rounded bg-zinc-100 px-2 py-0.5 font-bold text-zinc-700">
+                            {item.file_type || "Tipo non riconosciuto"}
+                          </span>
+                          <span className="rounded bg-blue-50 px-2 py-0.5 font-bold text-blue-700">
+                            {formatReferencePeriod(
+                              item.reference_start_date,
+                              item.reference_end_date,
+                              item.reference_month
+                            )}
+                          </span>
+                          <span>{item.parsed} codici letti</span>
+                          <span>{item.found_in_db} trovate nel DB</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap justify-start gap-3 text-xs font-bold sm:justify-end">
+                        <span className="text-green-700">
+                          +{item.updated} incassate
+                        </span>
+                        <span className="text-zinc-600">
+                          {item.already_paid} gia incassate
+                        </span>
+                        <span className="text-amber-600">
+                          {item.not_found} non trovate
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </SectionCard>
       </div>
     </AppShell>
   );
