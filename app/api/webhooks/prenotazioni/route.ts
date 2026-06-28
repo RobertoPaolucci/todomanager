@@ -26,6 +26,7 @@ type ExistingBooking = {
   total_customer: number | null;
   total_supplier_cost: number | null;
   margin_total: number | null;
+  booking_created_at: string | null;
 };
 
 type ExperienceChannelPrice = {
@@ -74,6 +75,31 @@ function firstNonEmpty(...values: unknown[]) {
     if (s) return s;
   }
   return "";
+}
+
+function getIncomingEventDate(body: any) {
+  const rawDate = firstNonEmpty(
+    body.booking_created_at,
+    body.booking_created,
+    body.created_at,
+    body.created,
+    body.event_created_at,
+    body.event_date,
+    body.booked_at
+  );
+
+  if (rawDate) {
+    const parsed = new Date(rawDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+      return rawDate;
+    }
+  }
+
+  return new Date().toISOString().split("T")[0];
 }
 
 function stripSystemAlert(notes: string) {
@@ -563,13 +589,16 @@ async function findExistingBooking(params: {
   } = params;
 
   const selectFields =
-    "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id, experience_id, is_cancelled, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, margin_total";
+    "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id, experience_id, is_cancelled, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, margin_total, booking_created_at";
 
   if (bookingReference) {
     const { data, error } = await supabaseServer
       .from("bookings")
       .select(selectFields)
       .eq("booking_reference", bookingReference)
+      .order("booking_created_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
@@ -716,7 +745,13 @@ export async function POST(req: Request) {
     const rawBokunId = cleanString(body.bokun_id);
     const incomingBookingReference = cleanString(body.booking_reference);
     const status = cleanString(body.status).toUpperCase();
-    const isCancelled = status === "CANCELLED";
+    const action = cleanString(body.action).toUpperCase();
+    const isCancelled =
+      status === "CANCELLED" ||
+      status === "CANCELED" ||
+      action === "BOOKING_CANCELLED" ||
+      action === "BOOKING_ITEM_CANCELLED";
+    const incomingEventDate = getIncomingEventDate(body);
 
     if (!rawBokunId) {
       return NextResponse.json({ error: "bokun_id mancante" }, { status: 400 });
@@ -930,14 +965,22 @@ export async function POST(req: Request) {
 
     if (existing) {
       const nextWasModified = isCancelled ? Boolean(existing.was_modified) : true;
+      const shouldRefreshCreatedAt =
+        !isCancelled &&
+        (Boolean(existing.is_cancelled) || !existing.booking_created_at);
+
+      const updatePayload = {
+        ...bookingData,
+        notes: finalNotes,
+        was_modified: nextWasModified,
+        ...(shouldRefreshCreatedAt
+          ? { booking_created_at: incomingEventDate }
+          : {}),
+      };
 
       const { error: updateError } = await supabaseServer
         .from("bookings")
-        .update({
-          ...bookingData,
-          notes: finalNotes,
-          was_modified: nextWasModified,
-        })
+        .update(updatePayload)
         .eq("id", existing.id);
 
       if (updateError) {
@@ -949,7 +992,7 @@ export async function POST(req: Request) {
         .insert({
           ...bookingData,
           booking_reference: incomingBookingReference,
-          booking_created_at: new Date().toISOString().split("T")[0],
+          booking_created_at: incomingEventDate,
           notes: finalNotes,
           was_modified: false,
         });
