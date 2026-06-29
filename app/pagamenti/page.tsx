@@ -24,12 +24,21 @@ function getBookingPaidAmount(booking: any, isInternalBooking: boolean) {
   return Math.max(0, Math.min(rawPaid, costo));
 }
 
+function getBookingPeopleCount(booking: any) {
+  return (
+    Number(booking.adults || 0) +
+    Number(booking.children || 0) +
+    Number(booking.infants || 0)
+  );
+}
+
 export default async function PagamentiPage() {
   const todayObj = new Date();
   const todayStr = todayObj.toISOString().split("T")[0];
 
   const [suppliersRes, bookingsRes, internalRulesRes] = await Promise.all([
     supabaseServer.from("suppliers").select("id, name").order("name"),
+
     supabaseServer.from("bookings").select(`
       supplier_id,
       business_unit_id,
@@ -37,8 +46,12 @@ export default async function PagamentiPage() {
       booking_date,
       is_cancelled,
       supplier_payment_status,
-      supplier_amount_paid
+      supplier_amount_paid,
+      adults,
+      children,
+      infants
     `),
+
     supabaseServer
       .from("business_unit_internal_suppliers")
       .select("business_unit_id, supplier_id"),
@@ -112,7 +125,12 @@ export default async function PagamentiPage() {
       (b) => !b._is_internal_booking
     ).length;
 
+    const personeCount = activeBookings.reduce((sum, booking) => {
+      return sum + getBookingPeopleCount(booking);
+    }, 0);
+
     let supplierMode: "external" | "internal" | "mixed" = "external";
+
     if (internalBookingsCount > 0 && externalBookingsCount === 0) {
       supplierMode = "internal";
     } else if (internalBookingsCount > 0 && externalBookingsCount > 0) {
@@ -124,12 +142,12 @@ export default async function PagamentiPage() {
       totalCosto,
       totalPagato,
       daPagareOggi,
-      prenotazioniCount: activeBookings.length,
+      personeCount,
       supplierMode,
     };
   });
 
-  const activeSuppliers = supplierBalances.filter((s) => s.prenotazioniCount > 0);
+  const activeSuppliers = supplierBalances.filter((s) => s.personeCount > 0);
 
   return (
     <main className="min-h-screen bg-zinc-50 p-6">
@@ -150,12 +168,17 @@ export default async function PagamentiPage() {
                 <thead className="border-b border-zinc-200 text-[11px] font-bold uppercase text-zinc-500">
                   <tr>
                     <th className="py-3 pr-4">Fornitore</th>
-                    <th className="py-3 pr-4 text-center">Prenotazioni</th>
+                    <th className="py-3 pr-4 text-center">Persone</th>
                     <th className="py-3 pr-4 text-right">Totale Generato</th>
-                    <th className="py-3 pr-4 text-right text-green-700">Già Pagato</th>
-                    <th className="py-3 pr-4 text-right text-red-700">Da Saldare (Oggi)</th>
+                    <th className="py-3 pr-4 text-right text-green-700">
+                      Già Pagato
+                    </th>
+                    <th className="py-3 pr-4 text-right text-red-700">
+                      Da Saldare (Oggi)
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {activeSuppliers.map((supplier) => (
                     <tr
@@ -188,7 +211,7 @@ export default async function PagamentiPage() {
                           href={`/pagamenti/${supplier.id}`}
                           className="block w-full text-zinc-500"
                         >
-                          {supplier.prenotazioniCount}
+                          {supplier.personeCount}
                         </Link>
                       </td>
 
