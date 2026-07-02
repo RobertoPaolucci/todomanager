@@ -181,6 +181,74 @@ function normalizeTextForMatch(value: string | null | undefined) {
     .trim();
 }
 
+type BusinessUnitTotals = {
+  entrate: number;
+  spese: number;
+  totale: number;
+  prenotazioni: number;
+};
+
+function emptyBusinessUnitTotals(): BusinessUnitTotals {
+  return {
+    entrate: 0,
+    spese: 0,
+    totale: 0,
+    prenotazioni: 0,
+  };
+}
+
+function getBookingAmounts(row: any) {
+  const entrate = Number(row.total_to_you || 0);
+  const spese = Number(row.total_supplier_cost || 0);
+
+  return {
+    entrate,
+    spese,
+    totale: entrate - spese,
+  };
+}
+
+function addAmounts(target: BusinessUnitTotals, amounts: ReturnType<typeof getBookingAmounts>) {
+  target.entrate += amounts.entrate;
+  target.spese += amounts.spese;
+  target.totale += amounts.totale;
+  target.prenotazioni += 1;
+}
+
+function getYearMonthFromBookingDate(value: string | null | undefined) {
+  if (!value) return null;
+
+  const [year, month] = String(value).split("-").map(Number);
+
+  if (!year || !month) return null;
+
+  return { year, month };
+}
+
+function getBusinessUnitKey(
+  booking: any,
+  businessUnitNameById: Map<number, string>
+) {
+  const businessUnitName = businessUnitNameById.get(
+    Number(booking.business_unit_id)
+  );
+
+  const normalized = normalizeTextForMatch(businessUnitName);
+
+  if (normalized.includes("TOD")) return "todointheworld";
+
+  if (
+    normalized.includes("FMDQ") ||
+    normalized.includes("FATTORIA") ||
+    normalized.includes("MADONNA") ||
+    normalized.includes("QUERCE")
+  ) {
+    return "fmdq";
+  }
+
+  return "altro";
+}
+
 function extractTodoReferenceCodes(value: string | null | undefined) {
   const text = normalizeTextForMatch(value);
   const matches = text.match(/\bT\d{5,}\b/g) ?? [];
@@ -349,7 +417,7 @@ export default async function Home({ searchParams }: PageProps) {
   const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
 
   const nextMonth = selectedMonth === 12 ? 1 : selectedMonth + 1;
-  const nextYear = selectedMonth === 12 ? 1 : selectedYear;
+  const nextYear = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
 
   const nomeMese = getMonthName(selectedMonth - 1);
   const lastDayOfMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -369,6 +437,25 @@ export default async function Home({ searchParams }: PageProps) {
 
   if (error) {
     console.error("Errore caricamento prenotazioni:", error.message);
+  }
+
+  const { data: businessUnitsData, error: businessUnitsError } =
+    await supabaseServer
+      .from("business_units")
+      .select("id, name")
+      .order("id", { ascending: true });
+
+  if (businessUnitsError) {
+    console.error(
+      "Errore caricamento contabilità:",
+      businessUnitsError.message
+    );
+  }
+
+  const businessUnitNameById = new Map<number, string>();
+
+  for (const unit of businessUnitsData || []) {
+    businessUnitNameById.set(Number(unit.id), String(unit.name || ""));
   }
 
   const googleImportStatusesToShow = [
@@ -445,6 +532,11 @@ export default async function Home({ searchParams }: PageProps) {
   let meseEntrate = 0;
   let meseSpese = 0;
   let meseTotale = 0;
+
+  const meseTodointheworld = emptyBusinessUnitTotals();
+  const meseFmdq = emptyBusinessUnitTotals();
+  const meseAltro = emptyBusinessUnitTotals();
+
   const prossimePrenotazioni: any[] = [];
 
   const expPaxCounts: Record<string, number> = {};
@@ -457,15 +549,26 @@ export default async function Home({ searchParams }: PageProps) {
     expPaxCounts[expName] = (expPaxCounts[expName] || 0) + numPeople;
 
     if (b.booking_date) {
-      const bDate = new Date(b.booking_date);
+      const bookingYearMonth = getYearMonthFromBookingDate(b.booking_date);
+      const amounts = getBookingAmounts(b);
 
       if (
-        bDate.getMonth() + 1 === selectedMonth &&
-        bDate.getFullYear() === selectedYear
+        bookingYearMonth?.month === selectedMonth &&
+        bookingYearMonth?.year === selectedYear
       ) {
-        meseEntrate += Number(b.total_to_you || 0);
-        meseSpese += Number(b.total_supplier_cost || 0);
-        meseTotale += Number(b.margin_total || 0);
+        meseEntrate += amounts.entrate;
+        meseSpese += amounts.spese;
+        meseTotale += amounts.totale;
+
+        const businessUnitKey = getBusinessUnitKey(b, businessUnitNameById);
+
+        if (businessUnitKey === "todointheworld") {
+          addAmounts(meseTodointheworld, amounts);
+        } else if (businessUnitKey === "fmdq") {
+          addAmounts(meseFmdq, amounts);
+        } else {
+          addAmounts(meseAltro, amounts);
+        }
       }
 
       if (b.booking_date >= todayStr && b.booking_date <= tenDaysFromNowStr) {
@@ -481,21 +584,50 @@ export default async function Home({ searchParams }: PageProps) {
   const maxExpPax = Math.max(...bookingsByExperience.map((e) => e.count), 1);
 
   const chartData = Array.from({ length: 12 }, (_, i) => {
-    const monthMargin = allBookings
-      .filter((b) => {
-        if (!b.booking_date || b.is_cancelled) return false;
-        const d = new Date(b.booking_date);
-        return d.getFullYear() === selectedYear && d.getMonth() === i;
-      })
-      .reduce((sum, b) => sum + Number(b.margin_total || 0), 0);
+    const total = emptyBusinessUnitTotals();
+    const todointheworld = emptyBusinessUnitTotals();
+    const fmdq = emptyBusinessUnitTotals();
 
-    return { label: getShortMonthName(i), value: monthMargin, index: i + 1 };
+    for (const b of allBookings) {
+      if (!b.booking_date || b.is_cancelled) continue;
+
+      const bookingYearMonth = getYearMonthFromBookingDate(b.booking_date);
+
+      if (bookingYearMonth?.year !== selectedYear || bookingYearMonth.month !== i + 1) {
+        continue;
+      }
+
+      const amounts = getBookingAmounts(b);
+      addAmounts(total, amounts);
+
+      const businessUnitKey = getBusinessUnitKey(b, businessUnitNameById);
+
+      if (businessUnitKey === "todointheworld") {
+        addAmounts(todointheworld, amounts);
+      } else if (businessUnitKey === "fmdq") {
+        addAmounts(fmdq, amounts);
+      }
+    }
+
+    return {
+      label: getShortMonthName(i),
+      index: i + 1,
+      total: total.entrate,
+      todointheworld: todointheworld.entrate,
+      fmdq: fmdq.entrate,
+    };
   });
 
   const maxAbsChartValue = Math.max(
-    ...chartData.map((d) => Math.abs(d.value)),
+    ...chartData.flatMap((d) => [
+      Math.abs(d.total),
+      Math.abs(d.todointheworld),
+      Math.abs(d.fmdq),
+    ]),
     1
   );
+
+  const selectedMonthChartData = chartData[selectedMonth - 1];
 
   return (
     <AppShell
@@ -570,45 +702,130 @@ export default async function Home({ searchParams }: PageProps) {
                 </span>
               </div>
 
+              <div className="grid gap-3 border-t border-dashed border-zinc-200 pt-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-800">
+                    Todointheworld
+                  </div>
+                  <div
+                    className={`mt-1 text-lg font-black ${
+                      meseTodointheworld.totale >= 0
+                        ? "text-emerald-700"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {formatEuro(meseTodointheworld.totale)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-emerald-900/80">
+                    Entrate {formatEuro(meseTodointheworld.entrate)} · Spese {formatEuro(meseTodointheworld.spese)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                    FMDQ
+                  </div>
+                  <div
+                    className={`mt-1 text-lg font-black ${
+                      meseFmdq.totale >= 0 ? "text-amber-700" : "text-red-600"
+                    }`}
+                  >
+                    {formatEuro(meseFmdq.totale)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-amber-900/80">
+                    Entrate {formatEuro(meseFmdq.entrate)} · Spese {formatEuro(meseFmdq.spese)}
+                  </div>
+                </div>
+              </div>
+
+              {meseAltro.prenotazioni > 0 ? (
+                <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-800">
+                  Attenzione: {meseAltro.prenotazioni} prenotazioni del mese non hanno una contabilità riconosciuta. Sono comprese nel Totale, ma non in Todointheworld/FMDQ.
+                </div>
+              ) : null}
+
               <div className="mt-4 border-t border-dashed border-zinc-200 pt-5">
+                <div className="mb-3 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-zinc-600">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-blue-600" />
+                    Totale
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-emerald-500" />
+                    Todointheworld
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-amber-500" />
+                    FMDQ
+                  </span>
+                </div>
+
                 <div className="flex h-28 items-stretch justify-between gap-1 sm:h-32">
                   {chartData.map((d, idx) => {
-                    const heightPct =
-                      (Math.abs(d.value) / maxAbsChartValue) * 100;
                     const isCurrentMonth = d.index === selectedMonth;
+                    const bars = [
+                      {
+                        key: "total",
+                        label: "Totale",
+                        value: d.total,
+                        className: "bg-blue-600",
+                      },
+                      {
+                        key: "todointheworld",
+                        label: "Todointheworld",
+                        value: d.todointheworld,
+                        className: "bg-emerald-500",
+                      },
+                      {
+                        key: "fmdq",
+                        label: "FMDQ",
+                        value: d.fmdq,
+                        className: "bg-amber-500",
+                      },
+                    ];
 
                     return (
                       <div
                         key={idx}
                         className="flex flex-1 flex-col justify-center"
-                        title={`${d.label}: ${formatEuro(d.value)}`}
+                        title={`${d.label} · Totale ${formatEuro(d.total)} · Todointheworld ${formatEuro(d.todointheworld)} · FMDQ ${formatEuro(d.fmdq)}`}
                       >
-                        <div className="flex flex-1 items-end">
-                          {d.value > 0 && (
-                            <div
-                              className={`w-full rounded-t-sm transition-all ${
-                                isCurrentMonth
-                                  ? "bg-blue-500"
-                                  : "bg-green-500 hover:bg-green-400"
-                              }`}
-                              style={{ height: `${heightPct}%` }}
-                            />
-                          )}
+                        <div className="flex flex-1 items-end gap-0.5">
+                          {bars.map((bar) => {
+                            const heightPct =
+                              (Math.abs(bar.value) / maxAbsChartValue) * 100;
+
+                            return bar.value > 0 ? (
+                              <div
+                                key={bar.key}
+                                aria-label={`${bar.label} ${d.label}: ${formatEuro(bar.value)}`}
+                                className={`w-full rounded-t-sm transition-all ${bar.className}`}
+                                style={{ height: `${heightPct}%` }}
+                              />
+                            ) : (
+                              <div key={bar.key} className="w-full" />
+                            );
+                          })}
                         </div>
 
                         <div className="my-0.5 h-px w-full bg-zinc-300" />
 
-                        <div className="flex h-6 items-start">
-                          {d.value < 0 && (
-                            <div
-                              className={`w-full rounded-b-sm transition-all ${
-                                isCurrentMonth
-                                  ? "bg-blue-500"
-                                  : "bg-red-500 hover:bg-red-400"
-                              }`}
-                              style={{ height: `${Math.min(heightPct, 100)}%` }}
-                            />
-                          )}
+                        <div className="flex h-6 items-start gap-0.5">
+                          {bars.map((bar) => {
+                            const heightPct =
+                              (Math.abs(bar.value) / maxAbsChartValue) * 100;
+
+                            return bar.value < 0 ? (
+                              <div
+                                key={bar.key}
+                                aria-label={`${bar.label} ${d.label}: ${formatEuro(bar.value)}`}
+                                className={`w-full rounded-b-sm transition-all ${bar.className}`}
+                                style={{ height: `${Math.min(heightPct, 100)}%` }}
+                              />
+                            ) : (
+                              <div key={bar.key} className="w-full" />
+                            );
+                          })}
                         </div>
 
                         <div
@@ -626,9 +843,17 @@ export default async function Home({ searchParams }: PageProps) {
                 </div>
 
                 <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-[11px] text-zinc-500">
-                  Mese selezionato:{" "}
+                  Mese selezionato: {" "}
                   <span className="font-bold text-zinc-800">
-                    {formatEuro(chartData[selectedMonth - 1]?.value || 0)}
+                    Totale {formatEuro(selectedMonthChartData?.total || 0)}
+                  </span>
+                  {" · "}
+                  <span className="font-bold text-emerald-700">
+                    Todointheworld {formatEuro(selectedMonthChartData?.todointheworld || 0)}
+                  </span>
+                  {" · "}
+                  <span className="font-bold text-amber-700">
+                    FMDQ {formatEuro(selectedMonthChartData?.fmdq || 0)}
                   </span>
                 </div>
               </div>
