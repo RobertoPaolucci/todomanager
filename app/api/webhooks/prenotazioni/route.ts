@@ -17,7 +17,11 @@ type ExistingBooking = {
   infants: number | null;
   total_people: number | null;
   channel_id: number | null;
+  booking_source?: string | null;
   experience_id: number | null;
+  experience_name?: string | null;
+  supplier_id?: number | null;
+  business_unit_id?: number | null;
   is_cancelled: boolean | null;
   your_unit_price: number | null;
   public_unit_price: number | null;
@@ -27,6 +31,7 @@ type ExistingBooking = {
   total_supplier_cost: number | null;
   margin_total: number | null;
   booking_created_at: string | null;
+  [key: string]: any;
 };
 
 type ExperienceChannelPrice = {
@@ -40,6 +45,91 @@ type ExperienceChannelPrice = {
   supplier_adult_unit_cost: number | null;
   supplier_child_unit_cost: number | null;
 };
+
+type BookingData = Record<string, any>;
+
+const COMPARE_FIELDS = [
+  "channel_id",
+  "booking_source",
+  "experience_id",
+  "experience_name",
+  "supplier_id",
+  "business_unit_id",
+  "customer_name",
+  "customer_email",
+  "customer_phone",
+  "booking_date",
+  "booking_time",
+  "adults",
+  "children",
+  "infants",
+  "total_people",
+  "is_cancelled",
+  "your_unit_price",
+  "public_unit_price",
+  "supplier_unit_cost",
+  "total_to_you",
+  "total_customer",
+  "total_supplier_cost",
+  "margin_total",
+];
+
+const NUMBER_ZERO_FIELDS = new Set([
+  "adults",
+  "children",
+  "infants",
+  "total_people",
+  "non_paying_adults",
+  "channel_id",
+  "experience_id",
+  "supplier_id",
+  "business_unit_id",
+]);
+
+const MONEY_FIELDS = new Set([
+  "your_unit_price",
+  "public_unit_price",
+  "supplier_unit_cost",
+  "total_to_you",
+  "total_customer",
+  "total_supplier_cost",
+  "margin_total",
+  "supplier_amount_paid",
+]);
+
+const INSERTABLE_FIELDS_TO_PRESERVE = [
+  "booking_reference",
+  "booking_created_at",
+  "booking_source",
+  "channel_id",
+  "experience_id",
+  "experience_name",
+  "supplier_id",
+  "business_unit_id",
+  "customer_name",
+  "customer_email",
+  "customer_phone",
+  "booking_date",
+  "booking_time",
+  "adults",
+  "children",
+  "infants",
+  "non_paying_adults",
+  "total_people",
+  "is_cancelled",
+  "your_unit_price",
+  "public_unit_price",
+  "supplier_unit_cost",
+  "total_to_you",
+  "total_customer",
+  "total_supplier_cost",
+  "margin_total",
+  "customer_payment_status",
+  "supplier_payment_status",
+  "supplier_amount_paid",
+  "notes",
+  "was_modified",
+];
 
 function cleanString(value: unknown) {
   return String(value ?? "").trim();
@@ -294,6 +384,88 @@ function calculateBookingEconomics(params: {
     total_supplier_cost: toMoney(totalSupplierCost),
     margin_total: toMoney(totalToYou - totalSupplierCost),
   };
+}
+
+function normalizeCompareValue(field: string, value: unknown) {
+  if (field === "customer_phone") {
+    return normalizePhone(value);
+  }
+
+  if (field === "booking_time") {
+    const text = cleanString(value);
+    return text ? text.slice(0, 5) : "";
+  }
+
+  if (field === "booking_date" || field === "booking_created_at") {
+    const text = cleanString(value);
+    if (!text) return "";
+    return text.split("T")[0];
+  }
+
+  if (MONEY_FIELDS.has(field)) {
+    return String(toMoney(value, 0));
+  }
+
+  if (NUMBER_ZERO_FIELDS.has(field)) {
+    const n = Number(value ?? 0);
+    return Number.isFinite(n) ? String(n) : "0";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return cleanString(value);
+}
+
+function getChangedFields(existing: ExistingBooking, bookingData: BookingData) {
+  return COMPARE_FIELDS.filter((field) => {
+    if (!(field in bookingData)) return false;
+
+    return (
+      normalizeCompareValue(field, existing[field]) !==
+      normalizeCompareValue(field, bookingData[field])
+    );
+  });
+}
+
+function copyInsertableBookingFields(existing: ExistingBooking) {
+  const payload: Record<string, any> = {};
+
+  for (const field of INSERTABLE_FIELDS_TO_PRESERVE) {
+    if (Object.prototype.hasOwnProperty.call(existing, field)) {
+      payload[field] = existing[field];
+    }
+  }
+
+  return payload;
+}
+
+async function getLatestBookingByReference(bookingReference: string) {
+  const ref = cleanString(bookingReference);
+  if (!ref) return null;
+
+  const { data, error } = await supabaseServer
+    .from("bookings")
+    .select("*")
+    .eq("booking_reference", ref)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+
+  return (data || null) as ExistingBooking | null;
+}
+
+async function getLatestVersionForCandidate(candidate: ExistingBooking) {
+  if (!candidate?.booking_reference) return candidate;
+
+  return (await getLatestBookingByReference(candidate.booking_reference)) || candidate;
 }
 
 function scoreCandidate(params: {
@@ -588,21 +760,11 @@ async function findExistingBooking(params: {
     totalPeople,
   } = params;
 
-  const selectFields =
-    "id, notes, was_modified, booking_reference, customer_name, customer_email, customer_phone, booking_date, booking_time, adults, children, infants, total_people, channel_id, experience_id, is_cancelled, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, margin_total, booking_created_at";
+  const selectFields = "*";
 
   if (bookingReference) {
-    const { data, error } = await supabaseServer
-      .from("bookings")
-      .select(selectFields)
-      .eq("booking_reference", bookingReference)
-      .order("booking_created_at", { ascending: false, nullsFirst: false })
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) throw new Error(error.message);
-    if (data) return data as ExistingBooking;
+    const latestByReference = await getLatestBookingByReference(bookingReference);
+    if (latestByReference) return latestByReference;
   }
 
   if (!isCancelled) return null;
@@ -636,7 +798,7 @@ async function findExistingBooking(params: {
   });
 
   if (sameExperienceResult.match) {
-    return sameExperienceResult.match;
+    return await getLatestVersionForCandidate(sameExperienceResult.match);
   }
 
   const { data: sameDateCandidates, error: sameDateError } = await supabaseServer
@@ -724,7 +886,7 @@ async function findExistingBooking(params: {
   );
 
   if (sameDateResult.match) {
-    return sameDateResult.match;
+    return await getLatestVersionForCandidate(sameDateResult.match);
   }
 
   return null;
@@ -963,28 +1125,41 @@ export async function POST(req: Request) {
     const systemAlert = buildSystemAlert(alertType);
     const finalNotes = cleanNotes ? `${systemAlert}\n${cleanNotes}` : systemAlert;
 
+    let actionResult: "created" | "created_history" | "unchanged" = "created";
+    let changedFields: string[] = [];
+
     if (existing) {
-      const nextWasModified = isCancelled ? Boolean(existing.was_modified) : true;
-      const shouldRefreshCreatedAt =
-        !isCancelled &&
-        (Boolean(existing.is_cancelled) || !existing.booking_created_at);
+      changedFields = getChangedFields(existing, bookingData);
 
-      const updatePayload = {
-        ...bookingData,
-        notes: finalNotes,
-        was_modified: nextWasModified,
-        ...(shouldRefreshCreatedAt
-          ? { booking_created_at: incomingEventDate }
-          : {}),
-      };
+      if (changedFields.length === 0) {
+        actionResult = "unchanged";
+      } else {
+        const nextWasModified = isCancelled ? Boolean(existing.was_modified) : true;
+        const shouldRefreshCreatedAt =
+          !isCancelled &&
+          (Boolean(existing.is_cancelled) || !existing.booking_created_at);
 
-      const { error: updateError } = await supabaseServer
-        .from("bookings")
-        .update(updatePayload)
-        .eq("id", existing.id);
+        const insertPayload = {
+          ...copyInsertableBookingFields(existing),
+          ...bookingData,
+          booking_reference:
+            existing.booking_reference || incomingBookingReference || null,
+          booking_created_at: shouldRefreshCreatedAt
+            ? incomingEventDate
+            : existing.booking_created_at || incomingEventDate,
+          notes: finalNotes,
+          was_modified: nextWasModified,
+        };
 
-      if (updateError) {
-        throw new Error(updateError.message);
+        const { error: insertHistoryError } = await supabaseServer
+          .from("bookings")
+          .insert(insertPayload);
+
+        if (insertHistoryError) {
+          throw new Error(insertHistoryError.message);
+        }
+
+        actionResult = "created_history";
       }
     } else {
       const { error: insertError } = await supabaseServer
@@ -1000,6 +1175,8 @@ export async function POST(req: Request) {
       if (insertError) {
         throw new Error(insertError.message);
       }
+
+      actionResult = "created";
     }
 
     revalidatePath("/");
@@ -1007,10 +1184,14 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      action: actionResult,
       channel_id: channelId,
       booking_source: bookingSource,
       business_unit_id: bookingData.business_unit_id,
       matched_existing_booking: Boolean(existing),
+      created_new_history_row: actionResult === "created_history",
+      unchanged: actionResult === "unchanged",
+      changed_fields: changedFields,
       preserved_existing_reference: Boolean(existing?.booking_reference),
       applied_channel_price: Boolean(priceRule),
       totals: isCancelled

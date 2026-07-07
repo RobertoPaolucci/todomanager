@@ -94,6 +94,160 @@ function getTotalSeatsCount(booking: any) {
   );
 }
 
+type BookingWithHistory = any & {
+  _is_history_latest?: boolean;
+  _is_history_old?: boolean;
+  _has_history?: boolean;
+  _history_count?: number;
+  _history_index?: number;
+  _previous_booking?: any | null;
+  _history_latest?: any;
+  _history_versions?: any[];
+};
+
+function normalizeHistoryValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function normalizeHistoryNumber(value: unknown) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? String(n) : "0";
+}
+
+function getHistoryKey(booking: any) {
+  const reference = normalizeHistoryValue(booking.booking_reference);
+  if (reference) return reference.toUpperCase();
+  return `NO-REF-${booking.id}`;
+}
+
+function fieldChanged(booking: any, field: string) {
+  const previous = booking._previous_booking;
+  if (!previous) return false;
+
+  return normalizeHistoryValue(booking[field]) !== normalizeHistoryValue(previous[field]);
+}
+
+function anyFieldChanged(booking: any, fields: string[]) {
+  return fields.some((field) => fieldChanged(booking, field));
+}
+
+function peopleChanged(booking: any) {
+  const previous = booking._previous_booking;
+  if (!previous) return false;
+
+  return (
+    normalizeHistoryNumber(booking.adults) !== normalizeHistoryNumber(previous.adults) ||
+    normalizeHistoryNumber(booking.children) !== normalizeHistoryNumber(previous.children) ||
+    normalizeHistoryNumber(booking.infants) !== normalizeHistoryNumber(previous.infants) ||
+    normalizeHistoryNumber(booking.non_paying_adults) !== normalizeHistoryNumber(previous.non_paying_adults) ||
+    normalizeHistoryNumber(booking.total_people) !== normalizeHistoryNumber(previous.total_people)
+  );
+}
+
+function moneyChanged(booking: any, field: string) {
+  const previous = booking._previous_booking;
+  if (!previous) return false;
+
+  return Number(booking[field] || 0) !== Number(previous[field] || 0);
+}
+
+function changedClass(booking: any, changed: boolean) {
+  if (!changed) return "";
+
+  if (booking._is_history_old) {
+    return "rounded bg-yellow-100 px-1 py-0.5 font-black text-zinc-500 ring-1 ring-yellow-200";
+  }
+
+  return "rounded bg-yellow-200 px-1 py-0.5 font-black text-zinc-950 ring-1 ring-yellow-300";
+}
+
+function rowBaseClass(booking: any, isHighlighted: boolean, isCancelled: boolean) {
+  if (booking._is_history_old) {
+    return "bg-zinc-100 text-zinc-400 line-through opacity-80";
+  }
+
+  if (isHighlighted) {
+    return "bg-amber-50 ring-2 ring-inset ring-amber-200";
+  }
+
+  if (isCancelled) {
+    return "bg-zinc-50/50";
+  }
+
+  if (booking._has_history) {
+    return "bg-amber-50/30 hover:bg-amber-50/50";
+  }
+
+  return "hover:bg-zinc-50";
+}
+
+function stickyBaseClass(booking: any, isHighlighted: boolean, isCancelled: boolean) {
+  if (booking._is_history_old) return "bg-zinc-100";
+  if (isHighlighted) return "bg-amber-50";
+  if (isCancelled) return "bg-zinc-50";
+  if (booking._has_history) return "bg-amber-50/70 group-hover:bg-amber-50";
+  return "bg-white group-hover:bg-zinc-50";
+}
+
+function buildHistoryGroups(bookings: any[]) {
+  const groups = new Map<string, any[]>();
+
+  bookings.forEach((booking) => {
+    const key = getHistoryKey(booking);
+    const list = groups.get(key) || [];
+    list.push(booking);
+    groups.set(key, list);
+  });
+
+  return Array.from(groups.values()).map((group) => {
+    const versions = [...group].sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+    const latest = versions[0];
+
+    const preparedVersions = versions.map((booking, index) => ({
+      ...booking,
+      _is_history_latest: index === 0,
+      _is_history_old: index > 0,
+      _has_history: versions.length > 1,
+      _history_count: versions.length,
+      _history_index: index,
+      _previous_booking: versions[index + 1] || null,
+      _history_latest: latest,
+      _history_versions: versions,
+    }));
+
+    return {
+      latest,
+      versions: preparedVersions,
+    };
+  });
+}
+
+function bookingMatchesSearch(booking: any, term: string) {
+  const bookingChannelName = getChannelName(booking);
+  const businessUnitLabel = getBusinessUnitLabel(booking._business_unit_code);
+  const businessUnitName = booking._business_unit_name || "";
+
+  return (
+    (booking.customer_name || "").toLowerCase().includes(term) ||
+    (booking.booking_reference || "").toLowerCase().includes(term) ||
+    (booking.experience_name || "").toLowerCase().includes(term) ||
+    (bookingChannelName || "").toLowerCase().includes(term) ||
+    (booking.customer_phone || "").toLowerCase().includes(term) ||
+    (booking.customer_email || "").toLowerCase().includes(term) ||
+    businessUnitLabel.toLowerCase().includes(term) ||
+    businessUnitName.toLowerCase().includes(term)
+  );
+}
+
+function historyGroupHasAlert(group: { latest: any; versions: any[] }) {
+  return group.versions.some(
+    (booking) =>
+      booking.notes &&
+      (booking.notes.includes("🔴") || booking.notes.includes("🟡") || booking.notes.includes("🟢"))
+  );
+}
+
 export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const q = String(params.q || "").trim();
@@ -176,7 +330,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     businessUnits.map((bu) => [String(bu.id), bu])
   );
 
-  let allBookings = bookings.map((booking) => {
+  const enrichedBookings = bookings.map((booking) => {
     const businessUnit = businessUnitMap.get(String(booking.business_unit_id));
     const isInternalSupplier = internalRuleSet.has(
       `${booking.business_unit_id}:${booking.supplier_id}`
@@ -190,18 +344,24 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     };
   });
 
-  allBookings = allBookings.filter((b) => {
-    if (String(b.id) === highlightId) return true;
+  let historyGroups = buildHistoryGroups(enrichedBookings);
+
+  historyGroups = historyGroups.filter((group) => {
+    const latest = group.latest;
+
+    if (group.versions.some((booking) => String(booking.id) === highlightId)) {
+      return true;
+    }
 
     if (exactDateSet.size > 0) {
-      if (!b.booking_date || !exactDateSet.has(b.booking_date)) {
+      if (!latest.booking_date || !exactDateSet.has(latest.booking_date)) {
         return false;
       }
     }
 
-    if (b.booking_date) {
-      if (fromDate && b.booking_date < fromDate) return false;
-      if (toDate && b.booking_date > toDate) return false;
+    if (latest.booking_date) {
+      if (fromDate && latest.booking_date < fromDate) return false;
+      if (toDate && latest.booking_date > toDate) return false;
 
       const shouldHidePastByDefault =
         !fromDate &&
@@ -210,35 +370,26 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
         !showPast &&
         !q;
 
-      if (shouldHidePastByDefault && b.booking_date < todayStr) {
+      if (shouldHidePastByDefault && latest.booking_date < todayStr) {
         return false;
       }
     } else {
       if (exactDateSet.size > 0) return false;
     }
 
-    if (businessUnitFilter && b._business_unit_code !== businessUnitFilter) {
+    if (businessUnitFilter && latest._business_unit_code !== businessUnitFilter) {
       return false;
     }
 
-    if (venueFilter === "fmdq" && !isFmdqVenueBooking(b)) {
+    if (venueFilter === "fmdq" && !isFmdqVenueBooking(latest)) {
       return false;
     }
-
-    const bookingChannelName = getChannelName(b);
-    const businessUnitLabel = getBusinessUnitLabel(b._business_unit_code);
-    const businessUnitName = b._business_unit_name || "";
 
     if (q) {
       const term = q.toLowerCase();
-      const match =
-        (b.customer_name || "").toLowerCase().includes(term) ||
-        (b.booking_reference || "").toLowerCase().includes(term) ||
-        (b.experience_name || "").toLowerCase().includes(term) ||
-        (bookingChannelName || "").toLowerCase().includes(term) ||
-        (b.customer_phone || "").toLowerCase().includes(term) ||
-        businessUnitLabel.toLowerCase().includes(term) ||
-        businessUnitName.toLowerCase().includes(term);
+      const match = group.versions.some((booking) =>
+        bookingMatchesSearch(booking, term)
+      );
 
       if (!match) return false;
     }
@@ -246,17 +397,15 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     return true;
   });
 
-  allBookings.sort((a, b) => {
-    const hasAlertA =
-      a.notes &&
-      (a.notes.includes("🔴") || a.notes.includes("🟡") || a.notes.includes("🟢"));
-
-    const hasAlertB =
-      b.notes &&
-      (b.notes.includes("🔴") || b.notes.includes("🟡") || b.notes.includes("🟢"));
+  historyGroups.sort((groupA, groupB) => {
+    const hasAlertA = historyGroupHasAlert(groupA);
+    const hasAlertB = historyGroupHasAlert(groupB);
 
     if (hasAlertA && !hasAlertB) return -1;
     if (!hasAlertA && hasAlertB) return 1;
+
+    const a = groupA.latest;
+    const b = groupB.latest;
 
     let valA: any;
     let valB: any;
@@ -276,10 +425,19 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
     if (valA < valB) return dir === "asc" ? -1 : 1;
     if (valA > valB) return dir === "asc" ? 1 : -1;
-    return 0;
+
+    return Number(b.id || 0) - Number(a.id || 0);
   });
 
-  const totalVisiblePeople = allBookings.reduce(
+  const allBookings = historyGroups.flatMap((group) => group.versions);
+  const currentVisibleBookings = allBookings.filter(
+    (booking) => booking._is_history_latest
+  );
+  const historyVisibleRows = allBookings.filter(
+    (booking) => booking._is_history_old
+  );
+
+  const totalVisiblePeople = currentVisibleBookings.reduce(
     (sum, booking) => sum + getTotalSeatsCount(booking),
     0
   );
@@ -341,7 +499,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
               <div>
                 <p className="text-sm text-zinc-500">Prenotazioni visibili</p>
                 <p className="text-xl font-black text-zinc-900">
-                  {allBookings.length}
+                  {currentVisibleBookings.length}
                 </p>
               </div>
               <div>
@@ -591,7 +749,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
         </SectionCard>
 
         <SectionCard
-          title={`Elenco Prenotazioni (${allBookings.length} prenotazioni · ${totalVisiblePeople} persone)`}
+          title={`Elenco Prenotazioni (${currentVisibleBookings.length} attuali · ${historyVisibleRows.length} storico · ${totalVisiblePeople} persone)`}
         >
           <>
             <form
@@ -609,7 +767,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                   Prenotazioni visibili
                 </div>
                 <div className="mt-1 text-xl font-black text-zinc-900">
-                  {allBookings.length}
+                  {currentVisibleBookings.length}
                 </div>
               </div>
 
@@ -633,12 +791,33 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
             <div className="space-y-3 md:hidden">
               {allBookings.map((booking) => {
                 const isCancelled = booking.is_cancelled === true;
+                const isOldHistory = booking._is_history_old === true;
+                const isSelectable = !isCancelled && !isOldHistory;
 
                 return (
-                  <div key={booking.id} className="space-y-2">
+                  <div
+                    key={booking.id}
+                    className={`space-y-2 ${
+                      isOldHistory ? "rounded-2xl bg-zinc-100 p-2 text-zinc-400 line-through opacity-80" : ""
+                    }`}
+                  >
+                    {booking._has_history && (
+                      <div
+                        className={`rounded-xl border px-3 py-2 text-xs font-black uppercase tracking-wide ${
+                          isOldHistory
+                            ? "border-zinc-200 bg-zinc-100 text-zinc-500"
+                            : "border-amber-200 bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {isOldHistory
+                          ? `Versione precedente ${booking._history_index + 1}/${booking._history_count}`
+                          : `Ultima versione · storico ${booking._history_count}`}
+                      </div>
+                    )}
+
                     <label
                       className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
-                        isCancelled
+                        !isSelectable
                           ? "border-zinc-200 bg-zinc-100 text-zinc-400"
                           : "border-zinc-200 bg-white text-zinc-700"
                       }`}
@@ -648,11 +827,13 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         name="ids"
                         value={booking.id}
                         form="summaryForm"
-                        disabled={isCancelled}
+                        disabled={!isSelectable}
                         className="h-5 w-5 rounded border-zinc-300"
                       />
                       <span className="text-sm font-medium">
-                        {isCancelled
+                        {isOldHistory
+                          ? "Versione storica"
+                          : isCancelled
                           ? "Prenotazione annullata"
                           : "Seleziona per riepilogo"}
                       </span>
@@ -674,6 +855,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 </div>
               )}
             </div>
+
 
             <div className="hidden overflow-x-auto rounded-2xl md:block">
               <table className="min-w-[1520px] text-left text-sm xl:min-w-full">
@@ -729,24 +911,27 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 <tbody>
                   {allBookings.map((booking) => {
                     const isCancelled = booking.is_cancelled === true;
+                    const isOldHistory = booking._is_history_old === true;
                     const isHighlighted = String(booking.id) === highlightId;
-                    const isModifiedPermanent = booking.was_modified === true;
+                    const isModifiedPermanent =
+                      booking.was_modified === true ||
+                      (booking._has_history === true && !isOldHistory);
                     const bookingChannelName = getChannelName(booking);
                     const businessUnitCode = booking._business_unit_code;
                     const isInternalSupplier =
                       booking._is_internal_supplier === true;
 
-                    const rowClass = isHighlighted
-                      ? "bg-amber-50 ring-2 ring-inset ring-amber-200"
-                      : isCancelled
-                      ? "bg-zinc-50/50"
-                      : "hover:bg-zinc-50";
+                    const rowClass = rowBaseClass(
+                      booking,
+                      isHighlighted,
+                      isCancelled
+                    );
 
-                    const stickyCellClass = isHighlighted
-                      ? "bg-amber-50"
-                      : isCancelled
-                      ? "bg-zinc-50"
-                      : "bg-white group-hover:bg-zinc-50";
+                    const stickyCellClass = stickyBaseClass(
+                      booking,
+                      isHighlighted,
+                      isCancelled
+                    );
 
                     const customerStatus = booking.customer_payment_status;
                     let customerBadgeClass = "bg-red-100 text-red-700";
@@ -822,7 +1007,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     let dateColorClass = "text-zinc-900";
                     let isToday = false;
                     let isTomorrow = false;
-                    if (isCancelled) {
+                    if (isOldHistory) {
+                      dateColorClass = "text-zinc-500";
+                    } else if (isCancelled) {
                       dateColorClass = "text-zinc-500 line-through";
                     } else if (booking.booking_date === todayStr) {
                       dateColorClass = "text-green-600";
@@ -838,6 +1025,50 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         booking.notes.includes("🟡") ||
                         booking.notes.includes("🟢"));
 
+                    const dateChanged = fieldChanged(booking, "booking_date");
+                    const timeChanged = fieldChanged(booking, "booking_time");
+                    const customerChanged = anyFieldChanged(booking, [
+                      "customer_name",
+                      "customer_email",
+                      "customer_phone",
+                    ]);
+                    const referenceChanged = fieldChanged(
+                      booking,
+                      "booking_reference"
+                    );
+                    const channelChanged = anyFieldChanged(booking, [
+                      "booking_source",
+                      "channel_id",
+                    ]);
+                    const experienceChanged = anyFieldChanged(booking, [
+                      "experience_name",
+                      "experience_id",
+                      "supplier_id",
+                    ]);
+                    const totalCustomerChanged = moneyChanged(
+                      booking,
+                      "total_customer"
+                    );
+                    const customerPaymentChanged = anyFieldChanged(booking, [
+                      "customer_payment_status",
+                    ]);
+                    const supplierPaymentChanged = anyFieldChanged(booking, [
+                      "supplier_payment_status",
+                      "supplier_amount_paid",
+                      "total_supplier_cost",
+                    ]);
+                    const statusChanged = anyFieldChanged(booking, [
+                      "is_cancelled",
+                      "status",
+                      "notes",
+                    ]);
+                    const createdChanged = fieldChanged(
+                      booking,
+                      "booking_created_at"
+                    );
+
+                    const canSelect = !isCancelled && !isOldHistory;
+
                     return (
                       <tr
                         key={booking.id}
@@ -849,9 +1080,11 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             name="ids"
                             value={booking.id}
                             form="summaryForm"
-                            disabled={isCancelled}
+                            disabled={!canSelect}
                             title={
-                              isCancelled
+                              isOldHistory
+                                ? "Versione storica non selezionabile"
+                                : isCancelled
                                 ? "Prenotazione annullata"
                                 : "Seleziona per riepilogo"
                             }
@@ -861,7 +1094,12 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
                         <td className="whitespace-nowrap py-4 pr-4">
                           <div className="flex items-center gap-2">
-                            <div className={`font-bold ${dateColorClass}`}>
+                            <div
+                              className={`font-bold ${dateColorClass} ${changedClass(
+                                booking,
+                                dateChanged
+                              )}`}
+                            >
                               {formatDate(booking.booking_date)}
                               {isToday && (
                                 <span className="ml-1 text-[9px] font-black uppercase">
@@ -878,7 +1116,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             {booking.booking_time && (
                               <div
                                 className={`rounded px-1.5 py-0.5 text-[11px] font-bold ${
-                                  isCancelled
+                                  timeChanged
+                                    ? changedClass(booking, true)
+                                    : isOldHistory || isCancelled
                                     ? "bg-zinc-200 text-zinc-400"
                                     : "bg-blue-50 text-blue-700"
                                 }`}
@@ -888,7 +1128,23 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             )}
                           </div>
 
-                          {isModifiedPermanent && !isCancelled && (
+                          {booking._has_history && (
+                            <div className="mt-1">
+                              <span
+                                className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                  isOldHistory
+                                    ? "border-zinc-300 bg-zinc-100 text-zinc-500"
+                                    : "border-amber-300 bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {isOldHistory
+                                  ? `Storico ${booking._history_index + 1}/${booking._history_count}`
+                                  : `Ultima versione · ${booking._history_count}`}
+                              </span>
+                            </div>
+                          )}
+
+                          {isModifiedPermanent && !isCancelled && !booking._has_history && (
                             <div className="mt-1">
                               <span className="inline-flex rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
                                 Modificata
@@ -896,7 +1152,12 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             </div>
                           )}
 
-                          <div className="mt-1 text-[10px] font-medium text-zinc-400">
+                          <div
+                            className={`mt-1 text-[10px] font-medium text-zinc-400 ${changedClass(
+                              booking,
+                              createdChanged
+                            )}`}
+                          >
                             Ins: {formatDate(booking.booking_created_at)}
                           </div>
                         </td>
@@ -904,21 +1165,32 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         <td className="py-4 pr-4">
                           <div
                             className={`font-medium ${
-                              isCancelled
-                                ? "text-zinc-500 line-through"
+                              isOldHistory || isCancelled
+                                ? "text-zinc-500"
                                 : "text-zinc-900"
-                            }`}
+                            } ${changedClass(booking, customerChanged)}`}
                           >
                             {booking.customer_name}
                           </div>
-                          <div className="mt-0.5 text-[10px] font-mono text-zinc-500">
+                          <div
+                            className={`mt-0.5 text-[10px] font-mono text-zinc-500 ${changedClass(
+                              booking,
+                              referenceChanged
+                            )}`}
+                          >
                             {booking.booking_reference || "-"}
                           </div>
                         </td>
 
                         <td className="py-4 pr-4">
                           <div className="mb-1 flex flex-wrap items-center gap-2">
-                            <span className="inline-block rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600">
+                            <span
+                              className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-bold ${
+                                channelChanged
+                                  ? changedClass(booking, true)
+                                  : "border-zinc-200 bg-zinc-100 text-zinc-600"
+                              }`}
+                            >
                               {bookingChannelName || "-"}
                             </span>
 
@@ -931,11 +1203,21 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             </span>
                           </div>
 
-                          <div className="max-w-[150px] truncate text-xs font-medium text-zinc-700">
+                          <div
+                            className={`max-w-[150px] truncate text-xs font-medium text-zinc-700 ${changedClass(
+                              booking,
+                              experienceChanged
+                            )}`}
+                          >
                             {booking.experience_name}
                           </div>
 
-                          <div className="mt-1 text-[10px] font-medium text-zinc-500">
+                          <div
+                            className={`mt-1 text-[10px] font-medium text-zinc-500 ${changedClass(
+                              booking,
+                              peopleChanged(booking)
+                            )}`}
+                          >
                             {payingPax} paganti
                             {nonPayingAdults > 0 ? ` + ${nonPayingAdults} guide` : ""}
                             {" = "}
@@ -944,7 +1226,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         </td>
 
                         <td className="py-4 pr-4">
-                          {hasAlert ? (
+                          {hasAlert && !isOldHistory ? (
                             <form action={clearAlert}>
                               <input type="hidden" name="id" value={booking.id} />
                               <button
@@ -956,7 +1238,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                                     : booking.notes.includes("🟡")
                                     ? "text-amber-600 hover:bg-amber-50"
                                     : "text-green-600 hover:bg-green-50"
-                                }`}
+                                } ${changedClass(booking, statusChanged)}`}
                               >
                                 {booking.notes}
                                 <span className="mt-1 block text-[9px] font-medium text-zinc-400 underline group-hover:text-zinc-600">
@@ -965,14 +1247,23 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                               </button>
                             </form>
                           ) : (
-                            <div className="max-w-[130px] whitespace-normal text-[11px] text-zinc-400">
-                              {booking.notes || "-"}
+                            <div
+                              className={`max-w-[130px] whitespace-normal text-[11px] text-zinc-400 ${changedClass(
+                                booking,
+                                statusChanged
+                              )}`}
+                            >
+                              {booking.notes || (isOldHistory ? "Versione storica" : "-")}
                             </div>
                           )}
                         </td>
 
                         <td className="py-4 pr-4">
-                          <div className="font-bold text-zinc-900">
+                          <div
+                            className={`font-bold ${
+                              isOldHistory ? "text-zinc-500" : "text-zinc-900"
+                            } ${changedClass(booking, totalCustomerChanged)}`}
+                          >
                             {formatEuro(Number(booking.total_customer || 0))}
                           </div>
                         </td>
@@ -980,75 +1271,81 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         <td className="py-4 pr-4">
                           <span
                             className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
-                              isCancelled
+                              isOldHistory || isCancelled
                                 ? "bg-zinc-200 text-zinc-400"
                                 : customerBadgeClass
-                            }`}
+                            } ${changedClass(booking, customerPaymentChanged)}`}
                           >
-                            {isCancelled ? "-" : customerBadgeText}
+                            {isOldHistory ? "Storico" : isCancelled ? "-" : customerBadgeText}
                           </span>
                         </td>
 
                         <td className="py-4 pr-4">
                           <span
                             className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase ${
-                              isCancelled
+                              isOldHistory || isCancelled
                                 ? "bg-zinc-200 text-zinc-400"
                                 : supplierBadgeClass
-                            }`}
+                            } ${changedClass(booking, supplierPaymentChanged)}`}
                           >
-                            {isCancelled ? "-" : supplierBadgeText}
+                            {isOldHistory ? "Storico" : isCancelled ? "-" : supplierBadgeText}
                           </span>
                         </td>
 
                         <td
                           className={`sticky right-0 z-10 py-4 pl-4 pr-4 text-right shadow-[-10px_0_16px_-14px_rgba(0,0,0,0.45)] transition-colors ${stickyCellClass}`}
                         >
-                          <div className="flex items-center justify-end gap-2">
-                            <Link
-                              href={`/prenotazioni/${booking.id}/modifica?returnTo=/prenotazioni`}
-                              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[11px] font-medium text-zinc-700 shadow-sm hover:bg-zinc-100"
-                            >
-                              Modifica
-                            </Link>
-
-                            {!isCancelled && (
-                              <a
-                                href={waUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`rounded-lg border px-3 py-2 text-[11px] font-bold shadow-sm transition ${
-                                  cleanPhone
-                                    ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
-                                    : "border-zinc-200 bg-zinc-50 text-zinc-400 hover:bg-zinc-100"
-                                }`}
+                          {isOldHistory ? (
+                            <span className="inline-flex rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-[11px] font-bold text-zinc-500">
+                              Storico
+                            </span>
+                          ) : (
+                            <div className="flex items-center justify-end gap-2">
+                              <Link
+                                href={`/prenotazioni/${booking.id}/modifica?returnTo=/prenotazioni`}
+                                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[11px] font-medium text-zinc-700 shadow-sm hover:bg-zinc-100"
                               >
-                                WA
-                              </a>
-                            )}
+                                Modifica
+                              </Link>
 
-                            {isCancelled ? (
-                              <form action={restoreBooking} className="inline-block">
-                                <input type="hidden" name="id" value={booking.id} />
-                                <button
-                                  type="submit"
-                                  className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-[11px] font-bold text-green-700 shadow-sm hover:bg-green-100"
+                              {!isCancelled && (
+                                <a
+                                  href={waUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`rounded-lg border px-3 py-2 text-[11px] font-bold shadow-sm transition ${
+                                    cleanPhone
+                                      ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
+                                      : "border-zinc-200 bg-zinc-50 text-zinc-400 hover:bg-zinc-100"
+                                  }`}
                                 >
-                                  Ripristina
-                                </button>
-                              </form>
-                            ) : (
-                              <form action={cancelBooking} className="inline-block">
-                                <input type="hidden" name="id" value={booking.id} />
-                                <button
-                                  type="submit"
-                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 shadow-sm hover:bg-red-100"
-                                >
-                                  Cancella
-                                </button>
-                              </form>
-                            )}
-                          </div>
+                                  WA
+                                </a>
+                              )}
+
+                              {isCancelled ? (
+                                <form action={restoreBooking} className="inline-block">
+                                  <input type="hidden" name="id" value={booking.id} />
+                                  <button
+                                    type="submit"
+                                    className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-[11px] font-bold text-green-700 shadow-sm hover:bg-green-100"
+                                  >
+                                    Ripristina
+                                  </button>
+                                </form>
+                              ) : (
+                                <form action={cancelBooking} className="inline-block">
+                                  <input type="hidden" name="id" value={booking.id} />
+                                  <button
+                                    type="submit"
+                                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 shadow-sm hover:bg-red-100"
+                                  >
+                                    Cancella
+                                  </button>
+                                </form>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1067,6 +1364,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                 </tbody>
               </table>
             </div>
+
 
             <div className="mt-4">
               <SummarySelectionToolbar formId="summaryForm" />
