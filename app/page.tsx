@@ -85,6 +85,23 @@ function getShortMonthName(monthIndex: number) {
   return new Intl.DateTimeFormat("it-IT", { month: "short" }).format(date);
 }
 
+function formatPercent(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "-";
+
+  return new Intl.NumberFormat("it-IT", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+    signDisplay: "exceptZero",
+  }).format(value) + "%";
+}
+
+function toLocalDateString(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(
+    2,
+    "0"
+  )}`;
+}
+
 function googleImportStatusLabel(status: string | null) {
   switch (status) {
     case "pending":
@@ -439,6 +456,20 @@ export default async function Home({ searchParams }: PageProps) {
     console.error("Errore caricamento prenotazioni:", error.message);
   }
 
+  const { data: historicalBookingsData, error: historicalBookingsError } =
+    await supabaseServer
+      .from("historical_bookings")
+      .select("booking_date, total_guests")
+      .eq("historical_year", 2025)
+      .order("booking_date", { ascending: true });
+
+  if (historicalBookingsError) {
+    console.error(
+      "Errore caricamento storico 2025:",
+      historicalBookingsError.message
+    );
+  }
+
   const { data: businessUnitsData, error: businessUnitsError } =
     await supabaseServer
       .from("business_units")
@@ -486,6 +517,177 @@ export default async function Home({ searchParams }: PageProps) {
   }
 
   const allBookings = bookings || [];
+  const historicalBookings2025 = historicalBookingsData || [];
+
+  const monthlyPresence2025 = Array.from({ length: 12 }, () => 0);
+  const monthlyBookings2025 = Array.from({ length: 12 }, () => 0);
+  const monthlyPresence2026 = Array.from({ length: 12 }, () => 0);
+  const monthlyBookings2026 = Array.from({ length: 12 }, () => 0);
+
+  for (const row of historicalBookings2025) {
+    if (!row.booking_date) continue;
+
+    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
+
+    if (yearMonth?.year !== 2025) continue;
+
+    monthlyPresence2025[yearMonth.month - 1] += Number(
+      row.total_guests || 0
+    );
+    monthlyBookings2025[yearMonth.month - 1] += 1;
+  }
+
+  for (const row of allBookings) {
+    if (!row.booking_date || row.is_cancelled) continue;
+
+    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
+
+    if (yearMonth?.year !== 2026) continue;
+
+    monthlyPresence2026[yearMonth.month - 1] += Number(
+      row.total_people || 0
+    );
+    monthlyBookings2026[yearMonth.month - 1] += 1;
+  }
+
+  const selectedComparisonIndex = selectedMonth - 1;
+  const selectedPresence2025 =
+    monthlyPresence2025[selectedComparisonIndex] || 0;
+  const selectedPresence2026 =
+    monthlyPresence2026[selectedComparisonIndex] || 0;
+  const selectedBookings2025 =
+    monthlyBookings2025[selectedComparisonIndex] || 0;
+  const selectedBookings2026 =
+    monthlyBookings2026[selectedComparisonIndex] || 0;
+
+  const selectedPresenceDifference =
+    selectedPresence2026 - selectedPresence2025;
+  const selectedBookingsDifference =
+    selectedBookings2026 - selectedBookings2025;
+
+  const selectedPresencePercent =
+    selectedPresence2025 > 0
+      ? (selectedPresenceDifference / selectedPresence2025) * 100
+      : null;
+
+  const selectedBookingsPercent =
+    selectedBookings2025 > 0
+      ? (selectedBookingsDifference / selectedBookings2025) * 100
+      : null;
+
+  const todayRomeParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Rome",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(today)
+    .split("-")
+    .map(Number);
+
+  const currentRomeYear = todayRomeParts[0];
+  const currentRomeMonth = todayRomeParts[1];
+  const currentRomeDay = todayRomeParts[2];
+
+  const selectedMonthIsCurrent =
+    selectedYear === currentRomeYear && selectedMonth === currentRomeMonth;
+
+  const comparisonCutoffDay = selectedMonthIsCurrent
+    ? currentRomeDay
+    : new Date(selectedYear, selectedMonth, 0).getDate();
+
+  const comparisonCutoff2025 = toLocalDateString(
+    2025,
+    selectedMonth,
+    Math.min(
+      comparisonCutoffDay,
+      new Date(2025, selectedMonth, 0).getDate()
+    )
+  );
+
+  const comparisonCutoff2026 = toLocalDateString(
+    2026,
+    selectedMonth,
+    Math.min(
+      comparisonCutoffDay,
+      new Date(2026, selectedMonth, 0).getDate()
+    )
+  );
+
+  let monthToDatePresence2025 = 0;
+  let monthToDateBookings2025 = 0;
+  let monthToDatePresence2026 = 0;
+  let monthToDateBookings2026 = 0;
+
+  for (const row of historicalBookings2025) {
+    if (!row.booking_date) continue;
+
+    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
+
+    if (
+      yearMonth?.year === 2025 &&
+      yearMonth.month === selectedMonth &&
+      row.booking_date <= comparisonCutoff2025
+    ) {
+      monthToDatePresence2025 += Number(row.total_guests || 0);
+      monthToDateBookings2025 += 1;
+    }
+  }
+
+  for (const row of allBookings) {
+    if (!row.booking_date || row.is_cancelled) continue;
+
+    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
+
+    if (
+      yearMonth?.year === 2026 &&
+      yearMonth.month === selectedMonth &&
+      row.booking_date <= comparisonCutoff2026
+    ) {
+      monthToDatePresence2026 += Number(row.total_people || 0);
+      monthToDateBookings2026 += 1;
+    }
+  }
+
+  const monthToDatePresenceDifference =
+    monthToDatePresence2026 - monthToDatePresence2025;
+  const monthToDateBookingsDifference =
+    monthToDateBookings2026 - monthToDateBookings2025;
+
+  const monthToDatePresencePercent =
+    monthToDatePresence2025 > 0
+      ? (monthToDatePresenceDifference / monthToDatePresence2025) * 100
+      : null;
+
+  const monthToDateBookingsPercent =
+    monthToDateBookings2025 > 0
+      ? (monthToDateBookingsDifference / monthToDateBookings2025) * 100
+      : null;
+
+  const annualPresence2025 = monthlyPresence2025.reduce(
+    (sum, value) => sum + value,
+    0
+  );
+  const annualPresence2026 = monthlyPresence2026.reduce(
+    (sum, value) => sum + value,
+    0
+  );
+
+  const comparisonChartData = Array.from({ length: 12 }, (_, index) => ({
+    label: getShortMonthName(index),
+    month: index + 1,
+    presence2025: monthlyPresence2025[index],
+    presence2026: monthlyPresence2026[index],
+  }));
+
+  const comparisonMaxPresence = Math.max(
+    ...comparisonChartData.flatMap((row) => [
+      row.presence2025,
+      row.presence2026,
+    ]),
+    1
+  );
+
   const bookingsForGoogleCalendarMatch =
     allBookings as DashboardBookingForMatch[];
 
@@ -859,6 +1061,262 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
             </div>
           </div>
+
+          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-md">
+            <div className="bg-zinc-800 px-4 py-3 text-center text-sm font-semibold text-white sm:text-base">
+              Presenze 2025 vs 2026
+            </div>
+
+            <div className="space-y-5 p-4 sm:p-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-700">
+                    {nomeMese} 2025 · mese intero
+                  </div>
+                  <div className="mt-1 text-3xl font-black text-slate-900">
+                    {selectedPresence2025}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-700">
+                    {selectedBookings2025} prenotazioni
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-orange-800">
+                    {nomeMese} 2026 · mese intero
+                  </div>
+                  <div className="mt-1 text-3xl font-black text-orange-700">
+                    {selectedPresence2026}
+                  </div>
+                  <div className="mt-1 text-xs text-orange-900/80">
+                    {selectedBookings2026} prenotazioni
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div
+                  className={`rounded-2xl border p-4 ${
+                    selectedPresenceDifference >= 0
+                      ? "border-emerald-100 bg-emerald-50"
+                      : "border-red-100 bg-red-50"
+                  }`}
+                >
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-600">
+                    Differenza presenze
+                  </div>
+                  <div
+                    className={`mt-1 text-2xl font-black ${
+                      selectedPresenceDifference >= 0
+                        ? "text-emerald-700"
+                        : "text-red-700"
+                    }`}
+                  >
+                    {selectedPresenceDifference >= 0 ? "+" : ""}
+                    {selectedPresenceDifference}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-zinc-600">
+                    {formatPercent(selectedPresencePercent)}
+                  </div>
+                </div>
+
+                <div
+                  className={`rounded-2xl border p-4 ${
+                    selectedBookingsDifference >= 0
+                      ? "border-emerald-100 bg-emerald-50"
+                      : "border-red-100 bg-red-50"
+                  }`}
+                >
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-600">
+                    Differenza prenotazioni
+                  </div>
+                  <div
+                    className={`mt-1 text-2xl font-black ${
+                      selectedBookingsDifference >= 0
+                        ? "text-emerald-700"
+                        : "text-red-700"
+                    }`}
+                  >
+                    {selectedBookingsDifference >= 0 ? "+" : ""}
+                    {selectedBookingsDifference}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-zinc-600">
+                    {formatPercent(selectedBookingsPercent)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-zinc-900">
+                      Mese alla data di visualizzazione
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      Dal 1° al {comparisonCutoffDay} {nomeMese}, confronto allo stesso giorno
+                    </div>
+                  </div>
+
+                  <div className="rounded-full bg-white px-3 py-1 text-[11px] font-bold text-zinc-700 ring-1 ring-zinc-200">
+                    fino al {String(comparisonCutoffDay).padStart(2, "0")}/
+                    {String(selectedMonth).padStart(2, "0")}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                      2025 alla stessa data
+                    </div>
+                    <div className="mt-1 text-xl font-black text-slate-900">
+                      {monthToDatePresence2025} presenze
+                    </div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      {monthToDateBookings2025} prenotazioni
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-orange-200 bg-white p-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-orange-700">
+                      2026 alla stessa data
+                    </div>
+                    <div className="mt-1 text-xl font-black text-orange-700">
+                      {monthToDatePresence2026} presenze
+                    </div>
+                    <div className="mt-1 text-xs text-orange-700">
+                      {monthToDateBookings2026} prenotazioni
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div
+                    className={`rounded-xl px-3 py-3 ${
+                      monthToDatePresenceDifference >= 0
+                        ? "bg-emerald-50 text-emerald-800"
+                        : "bg-red-50 text-red-800"
+                    }`}
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-wide">
+                      Differenza presenze
+                    </div>
+                    <div className="mt-1 text-lg font-black">
+                      {monthToDatePresenceDifference >= 0 ? "+" : ""}
+                      {monthToDatePresenceDifference} ·{" "}
+                      {formatPercent(monthToDatePresencePercent)}
+                    </div>
+                  </div>
+
+                  <div
+                    className={`rounded-xl px-3 py-3 ${
+                      monthToDateBookingsDifference >= 0
+                        ? "bg-emerald-50 text-emerald-800"
+                        : "bg-red-50 text-red-800"
+                    }`}
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-wide">
+                      Differenza prenotazioni
+                    </div>
+                    <div className="mt-1 text-lg font-black">
+                      {monthToDateBookingsDifference >= 0 ? "+" : ""}
+                      {monthToDateBookingsDifference} ·{" "}
+                      {formatPercent(monthToDateBookingsPercent)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-dashed border-zinc-200 pt-5">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-zinc-900">
+                      Grafico annuale delle presenze
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      Confronto mensile tra storico 2025 e prenotazioni 2026
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-[11px] font-semibold text-zinc-600">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-3 w-3 rounded-sm bg-slate-500" />
+                      2025
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-3 w-3 rounded-sm bg-orange-500" />
+                      2026
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex h-56 items-end justify-between gap-1 border-b border-zinc-200 px-1 sm:h-64 sm:gap-2">
+                  {comparisonChartData.map((row) => {
+                    const height2025 =
+                      (row.presence2025 / comparisonMaxPresence) * 100;
+                    const height2026 =
+                      (row.presence2026 / comparisonMaxPresence) * 100;
+                    const isSelected = row.month === selectedMonth;
+
+                    return (
+                      <div
+                        key={row.month}
+                        className="flex h-full min-w-0 flex-1 flex-col justify-end"
+                        title={`${row.label} · 2025: ${row.presence2025} presenze · 2026: ${row.presence2026} presenze`}
+                      >
+                        <div className="flex flex-1 items-end justify-center gap-0.5 sm:gap-1">
+                          <div
+                            className="w-1/2 rounded-t bg-slate-500 transition-all"
+                            style={{
+                              height: `${height2025}%`,
+                              minHeight: row.presence2025 > 0 ? "3px" : "0",
+                            }}
+                          />
+                          <div
+                            className="w-1/2 rounded-t bg-orange-500 transition-all"
+                            style={{
+                              height: `${height2026}%`,
+                              minHeight: row.presence2026 > 0 ? "3px" : "0",
+                            }}
+                          />
+                        </div>
+
+                        <div
+                          className={`mt-2 truncate text-center text-[9px] uppercase sm:text-[10px] ${
+                            isSelected
+                              ? "font-black text-orange-700"
+                              : "text-zinc-500"
+                          }`}
+                        >
+                          {row.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-slate-100 px-3 py-3 text-sm text-slate-900">
+                    Totale 2025:{" "}
+                    <span className="font-black">{annualPresence2025}</span>{" "}
+                    presenze
+                  </div>
+
+                  <div className="rounded-xl bg-orange-50 px-3 py-3 text-sm text-orange-900">
+                    Totale 2026:{" "}
+                    <span className="font-black">{annualPresence2026}</span>{" "}
+                    presenze
+                  </div>
+                </div>
+
+                {historicalBookingsError ? (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+                    Lo storico 2025 non è stato caricato:{" "}
+                    {historicalBookingsError.message}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-4 sm:space-y-6">
@@ -966,7 +1424,7 @@ export default async function Home({ searchParams }: PageProps) {
                               href={row.gcal_html_link}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 shadow-sm transition hover:bg-blue-100"
+                              className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-blue-100"
                             >
                               Apri evento GCal
                             </a>
@@ -1006,7 +1464,7 @@ export default async function Home({ searchParams }: PageProps) {
                         <div>
                           <div
                             className={`text-xs font-black uppercase tracking-wide ${
-                              isToday ? "text-blue-700" : "text-zinc-900"
+                              isToday ? "text-slate-900" : "text-zinc-900"
                             }`}
                           >
                             {isToday ? "OGGI" : formatDate(booking.booking_date)}
@@ -1051,7 +1509,7 @@ export default async function Home({ searchParams }: PageProps) {
                         </span>
 
                         {booking.booking_source ? (
-                          <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-tight text-blue-700">
+                          <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-tight text-slate-900">
                             {booking.booking_source}
                           </span>
                         ) : null}
@@ -1095,7 +1553,7 @@ export default async function Home({ searchParams }: PageProps) {
                           <td className="py-3 pr-1 align-top">
                             <div
                               className={`text-xs font-bold ${
-                                isToday ? "text-blue-700" : "text-zinc-900"
+                                isToday ? "text-slate-900" : "text-zinc-900"
                               }`}
                             >
                               {isToday
@@ -1130,7 +1588,7 @@ export default async function Home({ searchParams }: PageProps) {
                                 </span>
 
                                 {booking.booking_source && (
-                                  <span className="inline-block shrink-0 rounded border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-tight text-blue-700">
+                                  <span className="inline-block shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-tight text-slate-900">
                                     {booking.booking_source}
                                   </span>
                                 )}
