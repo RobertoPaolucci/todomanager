@@ -456,16 +456,28 @@ export default async function Home({ searchParams }: PageProps) {
     console.error("Errore caricamento prenotazioni:", error.message);
   }
 
-  const { data: historicalBookingsData, error: historicalBookingsError } =
-    await supabaseServer
+  const [
+    { data: historicalBookings2025Data, error: historicalBookings2025Error },
+    { data: historicalBookings2026Data, error: historicalBookings2026Error },
+  ] = await Promise.all([
+    supabaseServer
       .from("historical_bookings")
-      .select("booking_date, total_guests")
+      .select("booking_date, total_guests, historical_year")
       .eq("historical_year", 2025)
-      .order("booking_date", { ascending: true });
+      .order("booking_date", { ascending: true }),
+    supabaseServer
+      .from("historical_bookings")
+      .select("booking_date, total_guests, historical_year")
+      .eq("historical_year", 2026)
+      .order("booking_date", { ascending: true }),
+  ]);
+
+  const historicalBookingsError =
+    historicalBookings2025Error || historicalBookings2026Error;
 
   if (historicalBookingsError) {
     console.error(
-      "Errore caricamento storico 2025:",
+      "Errore caricamento storico Google Calendar:",
       historicalBookingsError.message
     );
   }
@@ -517,7 +529,26 @@ export default async function Home({ searchParams }: PageProps) {
   }
 
   const allBookings = bookings || [];
-  const historicalBookings2025 = historicalBookingsData || [];
+
+  const latestBookingByKey = new Map<string, any>();
+
+  for (const booking of allBookings) {
+    const reference = String(booking.booking_reference || "")
+      .trim()
+      .toUpperCase();
+
+    const key = reference ? `ref:${reference}` : `id:${booking.id}`;
+    const current = latestBookingByKey.get(key);
+
+    if (!current || Number(booking.id) > Number(current.id)) {
+      latestBookingByKey.set(key, booking);
+    }
+  }
+
+  const activeBookings = Array.from(latestBookingByKey.values());
+
+  const historicalBookings2025 = historicalBookings2025Data || [];
+  const historicalBookings2026 = historicalBookings2026Data || [];
 
   const monthlyPresence2025 = Array.from({ length: 12 }, () => 0);
   const monthlyBookings2025 = Array.from({ length: 12 }, () => 0);
@@ -537,15 +568,15 @@ export default async function Home({ searchParams }: PageProps) {
     monthlyBookings2025[yearMonth.month - 1] += 1;
   }
 
-  for (const row of allBookings) {
-    if (!row.booking_date || row.is_cancelled) continue;
+  for (const row of historicalBookings2026) {
+    if (!row.booking_date) continue;
 
     const yearMonth = getYearMonthFromBookingDate(row.booking_date);
 
     if (yearMonth?.year !== 2026) continue;
 
     monthlyPresence2026[yearMonth.month - 1] += Number(
-      row.total_people || 0
+      row.total_guests || 0
     );
     monthlyBookings2026[yearMonth.month - 1] += 1;
   }
@@ -634,8 +665,8 @@ export default async function Home({ searchParams }: PageProps) {
     }
   }
 
-  for (const row of allBookings) {
-    if (!row.booking_date || row.is_cancelled) continue;
+  for (const row of historicalBookings2026) {
+    if (!row.booking_date) continue;
 
     const yearMonth = getYearMonthFromBookingDate(row.booking_date);
 
@@ -644,7 +675,7 @@ export default async function Home({ searchParams }: PageProps) {
       yearMonth.month === selectedMonth &&
       row.booking_date <= comparisonCutoff2026
     ) {
-      monthToDatePresence2026 += Number(row.total_people || 0);
+      monthToDatePresence2026 += Number(row.total_guests || 0);
       monthToDateBookings2026 += 1;
     }
   }
@@ -689,7 +720,7 @@ export default async function Home({ searchParams }: PageProps) {
   );
 
   const bookingsForGoogleCalendarMatch =
-    allBookings as DashboardBookingForMatch[];
+    activeBookings as DashboardBookingForMatch[];
 
   const bookingsByDateForGoogleCalendarMatch = new Map<
     string,
@@ -743,7 +774,7 @@ export default async function Home({ searchParams }: PageProps) {
 
   const expPaxCounts: Record<string, number> = {};
 
-  allBookings.forEach((b) => {
+  activeBookings.forEach((b) => {
     if (b.is_cancelled) return;
 
     const expName = b.experience_name || "Sconosciuta";
@@ -790,7 +821,7 @@ export default async function Home({ searchParams }: PageProps) {
     const todointheworld = emptyBusinessUnitTotals();
     const fmdq = emptyBusinessUnitTotals();
 
-    for (const b of allBookings) {
+    for (const b of activeBookings) {
       if (!b.booking_date || b.is_cancelled) continue;
 
       const bookingYearMonth = getYearMonthFromBookingDate(b.booking_date);
@@ -1233,7 +1264,7 @@ export default async function Home({ searchParams }: PageProps) {
                       Grafico annuale delle presenze
                     </div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      Confronto mensile tra storico 2025 e prenotazioni 2026
+                      Confronto mensile tra esportazioni Google Calendar 2025 e 2026
                     </div>
                   </div>
 
@@ -1310,7 +1341,7 @@ export default async function Home({ searchParams }: PageProps) {
 
                 {historicalBookingsError ? (
                   <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
-                    Lo storico 2025 non è stato caricato:{" "}
+                    Lo storico Google Calendar non è stato caricato:{" "}
                     {historicalBookingsError.message}
                   </div>
                 ) : null}
