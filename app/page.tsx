@@ -506,7 +506,8 @@ export default async function Home({ searchParams }: PageProps) {
     "rolled_back",
     "needs_review",
     "possible_duplicate",
-      ];
+    "gcal_cancelled",
+  ];
 
   const { data: googleCalendarImportData, error: googleCalendarImportError } =
     await supabaseServer
@@ -516,10 +517,8 @@ export default async function Home({ searchParams }: PageProps) {
       )
       .eq("import_origin", "make")
       .in("import_status", googleImportStatusesToShow)
-      .order("booking_date", { ascending: true })
-      .order("booking_time", { ascending: true })
-      .order("id", { ascending: true })
-      .limit(30);
+      .order("id", { ascending: false })
+      .limit(200);
 
   if (googleCalendarImportError) {
     console.error(
