@@ -749,7 +749,6 @@ function GoogleCalendarCard({
         <FieldLine label="Esperienza" value={experienceName} />
         <FieldLine label="Canale" value={channelName} />
         <FieldLine label="Persone" value={peopleLabel(row)} strong />
-        <FieldLine label="Rif. / ID" value={row.booking_reference || "—"} />
         <FieldLine
           label="Rif. collegamento"
           value={
@@ -896,7 +895,6 @@ function TodoBookingCard({
         <FieldLine label="Esperienza" value={booking.experience_name || "—"} />
         <FieldLine label="Canale" value={booking.booking_source || "—"} />
         <FieldLine label="Persone" value={peopleLabel(booking)} strong />
-        <FieldLine label="Rif. / ID" value={booking.booking_reference || "—"} />
         <FieldLine
           label="Rif. collegamento"
           value={
