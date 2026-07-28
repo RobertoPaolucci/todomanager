@@ -623,19 +623,29 @@ function FieldLine({
   label,
   value,
   strong = false,
+  plain = false,
 }: {
   label: string;
   value: string;
   strong?: boolean;
+  plain?: boolean;
 }) {
   return (
     <div className="grid grid-cols-[125px_minmax(0,1fr)] gap-3 text-sm">
-      <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+      <div
+        className={`text-[11px] uppercase tracking-wide text-zinc-500 ${
+          plain ? "font-normal" : "font-bold"
+        }`}
+      >
         {label}
       </div>
       <div
         className={`min-w-0 break-words ${
-          strong ? "font-black text-zinc-950" : "font-semibold text-zinc-800"
+          strong
+            ? "font-black text-zinc-950"
+            : plain
+            ? "font-normal text-zinc-700"
+            : "font-semibold text-zinc-800"
         }`}
       >
         {value || "—"}
@@ -680,7 +690,6 @@ function GoogleCalendarCard({
   channelName: string;
 }) {
   const title = String(row.notes || row.original_title || "").trim();
-  const isCancelledByGoogle = row.computedStatus === "gcal_cancelled";
   const noteTone =
     row.computedStatus === "gcal_cancelled"
       ? "red"
@@ -699,22 +708,20 @@ function GoogleCalendarCard({
         "google"
       )}`}
     >
-      <div className="mb-4 flex flex-wrap items-start gap-2">
-        <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-black text-white">
+      <div className="mb-4 text-sm font-black leading-tight text-zinc-950">
+        <span className="mr-2 inline-flex rounded-full bg-zinc-900 px-2.5 py-1 align-middle text-xs font-black text-white">
           {normalizeTime(row.booking_time) || "—"}
         </span>
 
-        <div className="min-w-0 flex-1 text-sm font-black text-zinc-950">
-          {title || "Senza titolo"}
-        </div>
-
         <span
-          className={`rounded-full px-2.5 py-1 text-xs font-black ring-1 ${statusClass(
+          className={`mr-2 inline-flex rounded-full px-2.5 py-1 align-middle text-xs font-black ring-1 ${statusClass(
             row.computedStatus
           )}`}
         >
           {statusLabel(row.computedStatus)}
         </span>
+
+        <span className="align-middle">{title || "Senza titolo"}</span>
       </div>
 
       <div className="space-y-2">
@@ -725,12 +732,14 @@ function GoogleCalendarCard({
         />
         <FieldLine label="Stato" value={statusLabel(row.computedStatus)} />
         <FieldLine
-          label="Data evento GCal"
-          value={formatDateTimeIt(row.gcal_updated_at)}
-        />
-        <FieldLine
           label="Data esperienza"
           value={formatDateShortIt(row.booking_date)}
+          strong
+        />
+        <FieldLine
+          label="Data evento GCal"
+          value={formatDateTimeIt(row.gcal_updated_at)}
+          plain
         />
         <FieldLine
           label="Ora esperienza"
@@ -754,17 +763,6 @@ function GoogleCalendarCard({
       </div>
 
       <div className="mt-4 space-y-3">
-        {row.gcal_html_link ? (
-          <a
-            href={row.gcal_html_link}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 underline-offset-4 hover:underline"
-          >
-            Apri evento Google Calendar
-          </a>
-        ) : null}
-
         {row.matchReason && row.matchedBooking ? (
           <NotesBox tone="amber">
             Collegamento rilevato:{" "}
@@ -773,13 +771,7 @@ function GoogleCalendarCard({
           </NotesBox>
         ) : null}
 
-        {isCancelledByGoogle ? (
-          <NotesBox tone="red">
-            Evento cancellato da Google Calendar. La prenotazione Todo Manager
-            collegata non viene cancellata automaticamente: controllala e decidi
-            manualmente.
-          </NotesBox>
-        ) : row.computedStatus === "possible_duplicate" ? (
+        {row.computedStatus === "possible_duplicate" ? (
           <NotesBox tone="amber">
             Possibile doppione. Se hai verificato che non è un doppione, usa
             “Importa comunque”.
