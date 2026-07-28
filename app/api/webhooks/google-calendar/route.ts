@@ -457,19 +457,51 @@ function extractAnastasiyaPranzoCustomer(title: string) {
   );
 }
 
+function extractAirbnbBookingData(title: string) {
+  const text = cleanSpaces(title);
+  const match = text.match(/\bairbnb\s+([A-Z0-9]{6,20})\b(?:\s+(.+))?$/i);
+
+  if (!match) {
+    return {
+      bookingReference: null,
+      customerName: null,
+    };
+  }
+
+  const bookingReference = String(match[1] || "").toUpperCase();
+  const customerName = cleanSpaces(match[2] || "") || null;
+
+  return {
+    bookingReference,
+    customerName,
+  };
+}
+
 function extractCustomerName(title: string, channelLabel: string) {
-  if (normalizeChannelKey(channelLabel) === "curioseety") {
+  const channelKey = normalizeChannelKey(channelLabel);
+
+  if (channelKey === "curioseety") {
     return extractCurioseetyCustomer(title);
   }
 
-  if (normalizeChannelKey(channelLabel) === "anastasiya") {
+  if (channelKey === "anastasiya") {
     return extractAnastasiyaPranzoCustomer(title);
+  }
+
+  if (channelKey === "airbnb") {
+    return extractAirbnbBookingData(title).customerName;
   }
 
   return null;
 }
 
 function extractBookingReference(title: string, gcalUid: string) {
+  const airbnbData = extractAirbnbBookingData(title);
+
+  if (airbnbData.bookingReference) {
+    return airbnbData.bookingReference;
+  }
+
   const patterns = [
     /\bTOD[-\s]?[A-Z0-9]+\b/i,
     /\bVIA-[A-Z0-9]+\b/i,
