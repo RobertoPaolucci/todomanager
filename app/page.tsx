@@ -739,19 +739,34 @@ export default async function Home({ searchParams }: PageProps) {
   const googleCalendarImportsRaw =
     (googleCalendarImportData || []) as GoogleCalendarImportRow[];
 
-  const googleCalendarImports = googleCalendarImportsRaw.filter((row) => {
-    if (!row.booking_date) return true;
+  const googleCalendarImports = googleCalendarImportsRaw
+    .filter((row) => {
+      if (!row.booking_date) return true;
 
-    const bookingsForDate =
-      bookingsByDateForGoogleCalendarMatch.get(row.booking_date) ?? [];
-    const referenceCodeMap = buildReferenceCodeMap(bookingsForDate);
+      const bookingsForDate =
+        bookingsByDateForGoogleCalendarMatch.get(row.booking_date) ?? [];
+      const referenceCodeMap = buildReferenceCodeMap(bookingsForDate);
 
-    return !isGoogleCalendarRowAlreadyManaged(
-      row,
-      bookingsForDate,
-      referenceCodeMap
-    );
-  });
+      return !isGoogleCalendarRowAlreadyManaged(
+        row,
+        bookingsForDate,
+        referenceCodeMap
+      );
+    })
+    .sort((a, b) => {
+      const dateA = `${a.booking_date || "0000-00-00"}T${
+        a.booking_time || "00:00:00"
+      }`;
+      const dateB = `${b.booking_date || "0000-00-00"}T${
+        b.booking_time || "00:00:00"
+      }`;
+
+      const dateComparison = dateB.localeCompare(dateA);
+
+      if (dateComparison !== 0) return dateComparison;
+
+      return Number(b.id) - Number(a.id);
+    });
 
   const urgentGoogleCalendarImports = googleCalendarImports.filter(
     (row) =>
@@ -1389,7 +1404,7 @@ export default async function Home({ searchParams }: PageProps) {
                     return (
                       <div
                         key={row.id}
-                        className={`rounded-2xl border p-3 ${
+                        className={`rounded-xl border px-2.5 py-2 ${
                           row.import_status === "needs_review" ||
                           row.import_status === "possible_duplicate" ||
                           row.import_status === "gcal_cancelled"
@@ -1397,68 +1412,38 @@ export default async function Home({ searchParams }: PageProps) {
                             : "border-zinc-200 bg-white"
                         }`}
                       >
-                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-bold leading-tight text-zinc-900">
                           <span
-                            className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${googleImportStatusClass(
+                            className={`mr-2 inline-flex rounded-full px-2 py-0.5 align-middle text-[9px] font-bold ${googleImportStatusClass(
                               row.import_status
                             )}`}
                           >
                             {googleImportStatusLabel(row.import_status)}
                           </span>
+                          <span className="align-middle">{title}</span>
                         </div>
 
-                        <div className="text-sm font-bold text-zinc-900">
-                          {title}
+                        <div className="mt-1.5 text-xs font-bold leading-tight text-zinc-900">
+                          Esperienza: {formatExperienceDateTime(row)}
                         </div>
 
-                        <div className="mt-2 rounded-xl bg-white/70 p-2 text-xs text-zinc-700 ring-1 ring-zinc-100">
-                          <div>
-                            <span className="font-bold text-zinc-900">
-                              Evento GCal:
-                            </span>{" "}
-                            {formatDateTimeRome(row.gcal_updated_at)}
-                          </div>
-
-                          <div className="mt-1">
-                            <span className="font-bold text-zinc-900">
-                              Esperienza:
-                            </span>{" "}
-                            {formatExperienceDateTime(row)}
-                          </div>
+                        <div className="mt-0.5 text-[11px] leading-tight text-zinc-500">
+                          Evento GCal: {formatDateTimeRome(row.gcal_updated_at)}
                         </div>
 
-                        <div className="mt-2 text-xs text-zinc-500">
+                        <div className="mt-1.5 text-[11px] leading-tight text-zinc-500">
                           {googleImportPeopleLabel(row)}
                           {row.booking_source ? ` · ${row.booking_source}` : ""}
                           {row.customer_name ? ` · ${row.customer_name}` : ""}
                         </div>
 
-                        {row.import_status === "gcal_cancelled" ? (
-                          <div className="mt-2 rounded-xl bg-red-100 p-2 text-xs font-bold text-red-900">
-                            Evento cancellato da Google Calendar. Controlla la
-                            prenotazione collegata prima di eliminarla o
-                            modificarla.
-                          </div>
-                        ) : null}
-
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-2">
                           <Link
                             href={importDateHref}
-                            className="inline-flex rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-bold text-zinc-800 shadow-sm transition hover:bg-zinc-100"
+                            className="inline-flex rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-zinc-800 shadow-sm transition hover:bg-zinc-100"
                           >
                             Apri import del giorno
                           </Link>
-
-                          {row.gcal_html_link ? (
-                            <a
-                              href={row.gcal_html_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-blue-100"
-                            >
-                              Apri evento GCal
-                            </a>
-                          ) : null}
                         </div>
                       </div>
                     );
