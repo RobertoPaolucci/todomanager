@@ -48,6 +48,12 @@ type ExperienceChannelPrice = {
 
 type BookingData = Record<string, any>;
 
+const BOKUN_ID_ALIASES: Record<string, string> = {
+  // Il prodotto Viator/Bókun 115190 corrisponde all'esperienza
+  // registrata in Todo Manager con bokun_id 956472.
+  "115190": "956472",
+};
+
 const COMPARE_FIELDS = [
   "channel_id",
   "booking_source",
@@ -905,6 +911,8 @@ export async function POST(req: Request) {
     console.log("WEBHOOK PRENOTAZIONE BODY:", JSON.stringify(body, null, 2));
 
     const rawBokunId = cleanString(body.bokun_id);
+    const resolvedBokunId = BOKUN_ID_ALIASES[rawBokunId] ?? rawBokunId;
+
     const incomingBookingReference = cleanString(body.booking_reference);
     const status = cleanString(body.status).toUpperCase();
     const action = cleanString(body.action).toUpperCase();
@@ -924,6 +932,13 @@ export async function POST(req: Request) {
         { error: "booking_reference mancante" },
         { status: 400 }
       );
+    }
+
+    if (resolvedBokunId !== rawBokunId) {
+      console.log("BOKUN ID ALIAS APPLICATO", {
+        ricevuto: rawBokunId,
+        usato_per_todo_manager: resolvedBokunId,
+      });
     }
 
     const resolvedChannel = resolveChannel(body, incomingBookingReference);
@@ -948,12 +963,22 @@ export async function POST(req: Request) {
       .select(
         "id, name, supplier_id, is_group_pricing, supplier_unit_cost, business_unit_id"
       )
-      .eq("bokun_id", rawBokunId)
+      .eq("bokun_id", resolvedBokunId)
       .single();
 
     if (experienceError || !experience) {
+      console.error("ESPERIENZA NON TROVATA", {
+        bokun_id_ricevuto: rawBokunId,
+        bokun_id_risolto: resolvedBokunId,
+        errore_supabase: experienceError?.message || null,
+      });
+
       return NextResponse.json(
-        { error: "Esperienza non trovata" },
+        {
+          error: "Esperienza non trovata",
+          bokun_id_ricevuto: rawBokunId,
+          bokun_id_risolto: resolvedBokunId,
+        },
         { status: 404 }
       );
     }
@@ -998,7 +1023,8 @@ export async function POST(req: Request) {
           {
             incoming: {
               booking_reference: incomingBookingReference,
-              bokun_id: rawBokunId,
+              bokun_id_ricevuto: rawBokunId,
+              bokun_id_risolto: resolvedBokunId,
               resolved_experience_id: experience.id,
               booking_date: incomingBookingDate,
               booking_time: incomingBookingTime,
@@ -1185,6 +1211,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       action: actionResult,
+      bokun_id_ricevuto: rawBokunId,
+      bokun_id_risolto: resolvedBokunId,
       channel_id: channelId,
       booking_source: bookingSource,
       business_unit_id: bookingData.business_unit_id,
