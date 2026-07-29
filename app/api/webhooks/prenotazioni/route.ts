@@ -49,9 +49,10 @@ type ExperienceChannelPrice = {
 type BookingData = Record<string, any>;
 
 const BOKUN_ID_ALIASES: Record<string, string> = {
-  // Il prodotto Viator/Bókun 115190 corrisponde all'esperienza
-  // registrata in Todo Manager con bokun_id 956472.
+  // Il prodotto Viator/Bókun può arrivare con uno dei due identificativi
+  // seguenti, ma in Todo Manager corrisponde all'esperienza bokun_id 956472.
   "115190": "956472",
+  "1151900": "956472",
 };
 
 const COMPARE_FIELDS = [
