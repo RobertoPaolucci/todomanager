@@ -17,6 +17,7 @@ import {
 type PageProps = {
   searchParams: Promise<{
     date?: string | string[];
+    excludeHorseback?: string | string[];
   }>;
 };
 
@@ -83,6 +84,11 @@ type ComparisonRow = {
 function getParam(value?: string | string[]) {
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
+}
+
+function isEnabledParam(value?: string | string[]) {
+  const normalized = getParam(value).trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
 function todayRome() {
@@ -311,12 +317,27 @@ function canReset(status: string) {
   ].includes(status);
 }
 
-function importPageHref(date: string) {
-  return `/import/google-calendar?date=${encodeURIComponent(date)}`;
+function importPageHref(date: string, excludeHorseback: boolean) {
+  const params = new URLSearchParams();
+
+  if (date) {
+    params.set("date", date);
+  }
+
+  if (excludeHorseback) {
+    params.set("excludeHorseback", "1");
+  }
+
+  const query = params.toString();
+  return `/import/google-calendar${query ? `?${query}` : ""}`;
 }
 
-function bookingEditHref(id: number, selectedDate: string) {
-  const returnTo = importPageHref(selectedDate);
+function bookingEditHref(
+  id: number,
+  selectedDate: string,
+  excludeHorseback: boolean
+) {
+  const returnTo = importPageHref(selectedDate, excludeHorseback);
   return `/prenotazioni/${id}/modifica?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
@@ -428,6 +449,17 @@ function normalizeTextForMatch(value: string | null | undefined) {
     .replace(/[^A-Z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const HORSEBACK_RIDING_EXPERIENCE_ID = 8;
+
+function isHorsebackRidingExperience(
+  experienceId: number | null | undefined,
+  experienceName: string | null | undefined
+) {
+  if (experienceId === HORSEBACK_RIDING_EXPERIENCE_ID) return true;
+
+  return normalizeTextForMatch(experienceName) === "HORSEBACK RIDING";
 }
 
 function extractTodoReferenceCodes(value: string | null | undefined) {
@@ -680,6 +712,16 @@ function NotesBox({
   );
 }
 
+function ExcludeHorsebackActionField({
+  excludeHorseback,
+}: {
+  excludeHorseback: boolean;
+}) {
+  return excludeHorseback ? (
+    <input type="hidden" name="exclude_horseback" value="true" />
+  ) : null;
+}
+
 function GoogleCalendarCard({
   row,
   experienceName,
@@ -808,6 +850,7 @@ function EmptyGoogleCard() {
 function TodoBookingCard({
   booking,
   selectedDate,
+  excludeHorseback,
   importedFromGoogleCalendar,
   linkedAsAlreadyImported,
   linkedAsGoogleCancelled,
@@ -815,6 +858,7 @@ function TodoBookingCard({
 }: {
   booking: BookingRow;
   selectedDate: string;
+  excludeHorseback: boolean;
   importedFromGoogleCalendar: boolean;
   linkedAsAlreadyImported: boolean;
   linkedAsGoogleCancelled: boolean;
@@ -938,7 +982,7 @@ function TodoBookingCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link
-          href={bookingEditHref(booking.id, selectedDate)}
+          href={bookingEditHref(booking.id, selectedDate, excludeHorseback)}
           className="rounded-xl bg-zinc-900 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-zinc-800"
         >
           Modifica
@@ -949,6 +993,7 @@ function TodoBookingCard({
             <form action={restoreBookingFromImport} className="inline-block">
               <input type="hidden" name="id" value={booking.id} />
               <input type="hidden" name="return_date" value={selectedDate} />
+              <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
               <button
                 type="submit"
                 className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-black text-green-700 shadow-sm hover:bg-green-100"
@@ -960,6 +1005,7 @@ function TodoBookingCard({
             <form action={deleteBookingFromImport} className="inline-block">
               <input type="hidden" name="id" value={booking.id} />
               <input type="hidden" name="return_date" value={selectedDate} />
+              <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
               <button
                 type="submit"
                 className="rounded-xl border border-red-300 bg-red-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-red-700"
@@ -1013,10 +1059,12 @@ function RowActions({
   googleRow,
   todoBooking,
   selectedDate,
+  excludeHorseback,
 }: {
   googleRow?: ComputedStagingRow;
   todoBooking?: BookingRow;
   selectedDate: string;
+  excludeHorseback: boolean;
 }) {
   const status = googleRow?.computedStatus;
   const hasGoogleRow = Boolean(googleRow);
@@ -1067,6 +1115,7 @@ function RowActions({
         <>
           <form action={importSelectedGoogleCalendarRows}>
             <input type="hidden" name="return_date" value={selectedDate} />
+            <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
             <input type="hidden" name="row_ids" value={googleRow!.id} />
             <button
               type="submit"
@@ -1079,6 +1128,7 @@ function RowActions({
 
           <form action={importSelectedGoogleCalendarRows}>
             <input type="hidden" name="return_date" value={selectedDate} />
+            <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
             <input type="hidden" name="row_ids" value={googleRow!.id} />
             <input type="hidden" name="force_import" value="true" />
             <button
@@ -1092,6 +1142,7 @@ function RowActions({
 
           <form action={ignoreSelectedGoogleCalendarRows}>
             <input type="hidden" name="return_date" value={selectedDate} />
+            <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
             <input type="hidden" name="row_ids" value={googleRow!.id} />
             <button
               type="submit"
@@ -1104,6 +1155,7 @@ function RowActions({
 
           <form action={resetSelectedGoogleCalendarRows}>
             <input type="hidden" name="return_date" value={selectedDate} />
+            <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
             <input type="hidden" name="row_ids" value={googleRow!.id} />
             <button
               type="submit"
@@ -1122,7 +1174,7 @@ function RowActions({
 
       {canModifyBooking ? (
         <Link
-          href={bookingEditHref(todoBooking!.id, selectedDate)}
+          href={bookingEditHref(todoBooking!.id, selectedDate, excludeHorseback)}
           className="w-full rounded-xl bg-zinc-900 px-3 py-3 text-center text-xs font-black text-white shadow-sm hover:bg-zinc-800"
         >
           Modifica prenotazione
@@ -1141,6 +1193,7 @@ function RowActions({
         <form action={restoreBookingFromImport}>
           <input type="hidden" name="id" value={todoBooking!.id} />
           <input type="hidden" name="return_date" value={selectedDate} />
+          <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
           <button
             type="submit"
             className="w-full rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-xs font-black text-green-700 shadow-sm hover:bg-green-100"
@@ -1172,6 +1225,7 @@ function RowActions({
         <form action={deleteBookingFromImport}>
           <input type="hidden" name="id" value={todoBooking!.id} />
           <input type="hidden" name="return_date" value={selectedDate} />
+          <ExcludeHorsebackActionField excludeHorseback={excludeHorseback} />
           <button
             type="submit"
             className="w-full rounded-xl border border-red-300 bg-red-600 px-3 py-3 text-xs font-black text-white shadow-sm hover:bg-red-700"
@@ -1187,9 +1241,11 @@ function RowActions({
 function TodoStickySummaryTable({
   bookings,
   selectedDate,
+  excludeHorseback,
 }: {
   bookings: BookingRow[];
   selectedDate: string;
+  excludeHorseback: boolean;
 }) {
   const sortedBookings = [...bookings].sort((a, b) => {
     const experienceA = normalizeTextForMatch(a.experience_name || "");
@@ -1414,7 +1470,7 @@ function TodoStickySummaryTable({
                       <td className="px-2 py-2 align-top">
                         <div className="flex flex-wrap gap-2">
                           <Link
-                            href={bookingEditHref(booking.id, selectedDate)}
+                            href={bookingEditHref(booking.id, selectedDate, excludeHorseback)}
                             className="rounded-lg bg-zinc-900 px-2 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-zinc-800"
                           >
                             Modifica
@@ -1434,6 +1490,9 @@ function TodoStickySummaryTable({
                                 type="hidden"
                                 name="return_date"
                                 value={selectedDate}
+                              />
+                              <ExcludeHorsebackActionField
+                                excludeHorseback={excludeHorseback}
                               />
                               <button
                                 type="submit"
@@ -1462,6 +1521,7 @@ export default async function GoogleCalendarImportPage({
 }: PageProps) {
   const params = await searchParams;
   const selectedDate = getParam(params.date) || todayRome();
+  const excludeHorseback = isEnabledParam(params.excludeHorseback);
 
   const { data: stagingData, error: stagingError } = await supabaseServer
     .from("google_calendar_import_staging")
@@ -1472,7 +1532,7 @@ export default async function GoogleCalendarImportPage({
     .order("booking_time", { ascending: true })
     .order("id", { ascending: true });
 
-  const stagingRows = (stagingData ?? []) as StagingRow[];
+  const stagingRowsRaw = (stagingData ?? []) as StagingRow[];
 
   const { data: bookingsData } = await supabaseServer
     .from("bookings")
@@ -1483,20 +1543,12 @@ export default async function GoogleCalendarImportPage({
     .order("booking_time", { ascending: true })
     .order("id", { ascending: true });
 
-  const existingBookings = (bookingsData ?? []) as BookingRow[];
+  const existingBookingsRaw = (bookingsData ?? []) as BookingRow[];
 
   const experienceIds = Array.from(
     new Set(
-      stagingRows
+      [...stagingRowsRaw, ...existingBookingsRaw]
         .map((row) => row.experience_id)
-        .filter((id): id is number => typeof id === "number")
-    )
-  );
-
-  const channelIds = Array.from(
-    new Set(
-      stagingRows
-        .map((row) => row.channel_id)
         .filter((id): id is number => typeof id === "number")
     )
   );
@@ -1509,6 +1561,42 @@ export default async function GoogleCalendarImportPage({
           .in("id", experienceIds)
       : { data: [] };
 
+  const experiences = (experiencesData ?? []) as ExperienceRow[];
+  const experienceMap = new Map(experiences.map((item) => [item.id, item.name]));
+
+  const stagingRows = excludeHorseback
+    ? stagingRowsRaw.filter(
+        (row) =>
+          !isHorsebackRidingExperience(
+            row.experience_id,
+            row.experience_id !== null
+              ? experienceMap.get(row.experience_id)
+              : null
+          )
+      )
+    : stagingRowsRaw;
+
+  const existingBookings = excludeHorseback
+    ? existingBookingsRaw.filter(
+        (booking) =>
+          !isHorsebackRidingExperience(
+            booking.experience_id,
+            booking.experience_name ||
+              (booking.experience_id !== null
+                ? experienceMap.get(booking.experience_id)
+                : null)
+          )
+      )
+    : existingBookingsRaw;
+
+  const channelIds = Array.from(
+    new Set(
+      stagingRows
+        .map((row) => row.channel_id)
+        .filter((id): id is number => typeof id === "number")
+    )
+  );
+
   const { data: channelsData } =
     channelIds.length > 0
       ? await supabaseServer
@@ -1517,10 +1605,7 @@ export default async function GoogleCalendarImportPage({
           .in("id", channelIds)
       : { data: [] };
 
-  const experiences = (experiencesData ?? []) as ExperienceRow[];
   const channels = (channelsData ?? []) as ChannelRow[];
-
-  const experienceMap = new Map(experiences.map((item) => [item.id, item.name]));
   const channelMap = new Map(channels.map((item) => [item.id, item.name]));
 
   const existingReferenceMap = new Map(
@@ -1740,6 +1825,10 @@ export default async function GoogleCalendarImportPage({
               />
             </div>
 
+            {excludeHorseback ? (
+              <input type="hidden" name="excludeHorseback" value="1" />
+            ) : null}
+
             <button
               type="submit"
               className="rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white"
@@ -1747,6 +1836,47 @@ export default async function GoogleCalendarImportPage({
               Mostra giorno
             </button>
           </form>
+
+          <div
+            className={`mt-4 flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between ${
+              excludeHorseback
+                ? "border-amber-200 bg-amber-50"
+                : "border-zinc-200 bg-zinc-50"
+            }`}
+          >
+            <div>
+              <div
+                className={`text-sm font-black ${
+                  excludeHorseback ? "text-amber-900" : "text-zinc-900"
+                }`}
+              >
+                {excludeHorseback
+                  ? "Filtro attivo: Horseback Riding esclusa"
+                  : "Horseback Riding inclusa"}
+              </div>
+              <div
+                className={`mt-1 text-xs ${
+                  excludeHorseback ? "text-amber-800" : "text-zinc-600"
+                }`}
+              >
+                Il filtro agisce sia sugli eventi Google Calendar sia sulle
+                prenotazioni Todo Manager del giorno.
+              </div>
+            </div>
+
+            <Link
+              href={importPageHref(selectedDate, !excludeHorseback)}
+              className={`shrink-0 rounded-xl px-4 py-3 text-center text-sm font-black shadow-sm ${
+                excludeHorseback
+                  ? "bg-amber-600 text-white hover:bg-amber-700"
+                  : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+              }`}
+            >
+              {excludeHorseback
+                ? "Mostra anche Horseback Riding"
+                : "Escludi Horseback Riding"}
+            </Link>
+          </div>
         </SectionCard>
 
         <SectionCard title={`Confronto del giorno - ${formatDateIt(selectedDate)}`}>
@@ -1769,6 +1899,7 @@ export default async function GoogleCalendarImportPage({
           <TodoStickySummaryTable
             bookings={existingBookings}
             selectedDate={selectedDate}
+            excludeHorseback={excludeHorseback}
           />
 
           <div className="h-[70px]" />
@@ -1864,6 +1995,7 @@ export default async function GoogleCalendarImportPage({
                           googleRow={googleRow}
                           todoBooking={todoBooking}
                           selectedDate={selectedDate}
+                          excludeHorseback={excludeHorseback}
                         />
                       </div>
 
@@ -1876,6 +2008,7 @@ export default async function GoogleCalendarImportPage({
                           <TodoBookingCard
                             booking={todoBooking}
                             selectedDate={selectedDate}
+                            excludeHorseback={excludeHorseback}
                             importedFromGoogleCalendar={
                               importedFromGoogleCalendar
                             }

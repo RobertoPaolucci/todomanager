@@ -53,15 +53,35 @@ function getReturnDate(formData: FormData) {
   return String(formData.get("return_date") ?? "").trim();
 }
 
+function getExcludeHorseback(formData: FormData) {
+  const value = String(formData.get("exclude_horseback") ?? "")
+    .trim()
+    .toLowerCase();
+
+  return value === "1" || value === "true" || value === "yes";
+}
+
 function shouldForceImport(formData: FormData) {
   return String(formData.get("force_import") ?? "").trim() === "true";
 }
 
-function redirectBack(date: string) {
+function redirectBack(date: string, excludeHorseback: boolean) {
   revalidatePath("/import/google-calendar");
   revalidatePath("/prenotazioni");
   revalidatePath("/");
-  redirect(`/import/google-calendar${date ? `?date=${date}` : ""}`);
+
+  const params = new URLSearchParams();
+
+  if (date) {
+    params.set("date", date);
+  }
+
+  if (excludeHorseback) {
+    params.set("excludeHorseback", "1");
+  }
+
+  const query = params.toString();
+  redirect(`/import/google-calendar${query ? `?${query}` : ""}`);
 }
 
 function normalizeTime(value: string | null | undefined) {
@@ -164,10 +184,11 @@ async function getPrice(experienceId: number, channelId: number) {
 export async function importSelectedGoogleCalendarRows(formData: FormData) {
   const selectedIds = getSelectedIds(formData);
   const returnDate = getReturnDate(formData);
+  const excludeHorseback = getExcludeHorseback(formData);
   const forceImport = shouldForceImport(formData);
 
   if (selectedIds.length === 0) {
-    redirectBack(returnDate);
+    redirectBack(returnDate, excludeHorseback);
   }
 
   const { data: rowsData } = await supabaseServer
@@ -298,12 +319,13 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     await markRow(row.id, "imported", insertedBooking.id);
   }
 
-  redirectBack(returnDate);
+  redirectBack(returnDate, excludeHorseback);
 }
 
 export async function ignoreSelectedGoogleCalendarRows(formData: FormData) {
   const selectedIds = getSelectedIds(formData);
   const returnDate = getReturnDate(formData);
+  const excludeHorseback = getExcludeHorseback(formData);
 
   if (selectedIds.length > 0) {
     await supabaseServer
@@ -323,12 +345,13 @@ export async function ignoreSelectedGoogleCalendarRows(formData: FormData) {
       ]);
   }
 
-  redirectBack(returnDate);
+  redirectBack(returnDate, excludeHorseback);
 }
 
 export async function resetSelectedGoogleCalendarRows(formData: FormData) {
   const selectedIds = getSelectedIds(formData);
   const returnDate = getReturnDate(formData);
+  const excludeHorseback = getExcludeHorseback(formData);
 
   if (selectedIds.length > 0) {
     await supabaseServer
@@ -348,15 +371,16 @@ export async function resetSelectedGoogleCalendarRows(formData: FormData) {
       ]);
   }
 
-  redirectBack(returnDate);
+  redirectBack(returnDate, excludeHorseback);
 }
 
 export async function restoreBookingFromImport(formData: FormData) {
   const bookingId = Number(formData.get("id"));
   const returnDate = getReturnDate(formData);
+  const excludeHorseback = getExcludeHorseback(formData);
 
   if (!Number.isFinite(bookingId) || bookingId <= 0) {
-    redirectBack(returnDate);
+    redirectBack(returnDate, excludeHorseback);
   }
 
   await supabaseServer
@@ -366,15 +390,16 @@ export async function restoreBookingFromImport(formData: FormData) {
     })
     .eq("id", bookingId);
 
-  redirectBack(returnDate);
+  redirectBack(returnDate, excludeHorseback);
 }
 
 export async function deleteBookingFromImport(formData: FormData) {
   const bookingId = Number(formData.get("id"));
   const returnDate = getReturnDate(formData);
+  const excludeHorseback = getExcludeHorseback(formData);
 
   if (!Number.isFinite(bookingId) || bookingId <= 0) {
-    redirectBack(returnDate);
+    redirectBack(returnDate, excludeHorseback);
   }
 
   await supabaseServer
@@ -383,5 +408,5 @@ export async function deleteBookingFromImport(formData: FormData) {
     .eq("id", bookingId)
     .eq("is_cancelled", true);
 
-  redirectBack(returnDate);
+  redirectBack(returnDate, excludeHorseback);
 }

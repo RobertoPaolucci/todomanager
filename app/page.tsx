@@ -1381,7 +1381,7 @@ export default async function Home({ searchParams }: PageProps) {
                   </div>
 
                   <Link
-                    href="/import/google-calendar"
+                    href="/import/google-calendar?excludeHorseback=1"
                     className="shrink-0 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-amber-700"
                   >
                     Apri
@@ -1398,8 +1398,8 @@ export default async function Home({ searchParams }: PageProps) {
                   {googleCalendarImports.slice(0, 8).map((row) => {
                     const title = row.notes || row.original_title || "Senza titolo";
                     const importDateHref = row.booking_date
-                      ? `/import/google-calendar?date=${row.booking_date}`
-                      : "/import/google-calendar";
+                      ? `/import/google-calendar?date=${row.booking_date}&excludeHorseback=1`
+                      : "/import/google-calendar?excludeHorseback=1";
 
                     return (
                       <div
@@ -1451,7 +1451,7 @@ export default async function Home({ searchParams }: PageProps) {
 
                   {googleCalendarImports.length > 8 ? (
                     <Link
-                      href="/import/google-calendar"
+                      href="/import/google-calendar?excludeHorseback=1"
                       className="block rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-center text-xs font-bold text-zinc-700 transition hover:bg-zinc-100"
                     >
                       Vedi tutte le altre {googleCalendarImports.length - 8}
