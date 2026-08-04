@@ -562,7 +562,21 @@ async function getExistingStagingRowByBookingReference(
   return data;
 }
 
-function nextStatusForExisting(existingStatus?: string | null) {
+function isIncomingUpdateOlder(
+  existingUpdatedAt?: string | null,
+  incomingUpdatedAt?: string | null
+) {
+  const existingIso = parseDateToIso(existingUpdatedAt);
+  const incomingIso = parseDateToIso(incomingUpdatedAt);
+
+  if (!existingIso || !incomingIso) return false;
+
+  return new Date(incomingIso).getTime() < new Date(existingIso).getTime();
+}
+
+function nextStatusForExisting(existing?: any) {
+  const existingStatus = existing?.import_status;
+
   if (!existingStatus) return "pending";
 
   if (existingStatus === "imported") {
@@ -571,18 +585,21 @@ function nextStatusForExisting(existingStatus?: string | null) {
 
   if (existingStatus === "ignored") return "ignored";
   if (existingStatus === "already_exists") return "already_exists";
-  if (existingStatus === "gcal_cancelled") return "gcal_cancelled";
+
+  if (existingStatus === "gcal_cancelled") {
+    return existing?.imported_booking_id ? "needs_review" : "pending";
+  }
 
   return "pending";
 }
 
 function buildCancellationNotes(title: string, existing: any) {
-  const previousNotes = cleanSpaces(
-    existing?.notes || existing?.original_title || title
-  );
+  const sourceTitle = cleanSpaces(
+    title || existing?.original_title || existing?.notes || ""
+  ).replace(/^🔴\s*Evento cancellato da Google Calendar\s*/i, "");
 
-  return previousNotes
-    ? `🔴 Evento cancellato da Google Calendar\n${previousNotes}`
+  return sourceTitle
+    ? `🔴 Evento cancellato da Google Calendar\n${sourceTitle}`
     : "🔴 Evento cancellato da Google Calendar";
 }
 
@@ -608,163 +625,72 @@ async function markGoogleCalendarEventCancelled(params: {
   gcalUpdatedAt: string;
   gcalHtmlLink: string;
 }) {
+  if (!params.existing?.id) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      action: "skipped_untracked_cancellation",
+      reason:
+        "Cancellazione ignorata perché l'evento non era già presente nello staging con lo stesso gcal_uid.",
+      gcal_uid: params.gcalUid,
+      gcal_updated_at: params.gcalUpdatedAt,
+    });
+  }
+
+  if (
+    isIncomingUpdateOlder(
+      params.existing.gcal_updated_at,
+      params.gcalUpdatedAt
+    )
+  ) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      action: "skipped_stale_cancellation",
+      reason:
+        "Cancellazione ignorata perché più vecchia dell'ultimo aggiornamento già registrato.",
+      gcal_uid: params.gcalUid,
+      gcal_updated_at: params.gcalUpdatedAt,
+    });
+  }
+
   const hasValidExperienceDate =
     params.start.isValid && !params.start.isAllDay && params.start.bookingDate;
 
   const finalBookingDate = hasValidExperienceDate
     ? params.start.bookingDate
-    : cleanSpaces(params.existing?.booking_date || "");
+    : cleanSpaces(params.existing.booking_date || "");
 
   const finalBookingTime = hasValidExperienceDate
     ? params.start.bookingTime || null
-    : params.existing?.booking_time || null;
+    : params.existing.booking_time || null;
 
-  if (params.existing?.id) {
-    const { error } = await params.supabase
-      .from("google_calendar_import_staging")
-      .update({
-        gcal_uid: params.gcalUid,
-        import_status: "gcal_cancelled",
-        import_origin: "make",
-        booking_date: finalBookingDate || params.existing.booking_date,
-        booking_time: finalBookingTime,
-        notes: buildCancellationNotes(params.title, params.existing),
-        original_title:
-          params.title ||
-          params.existing.original_title ||
-          "Evento cancellato da Google Calendar",
-        gcal_updated_at: params.gcalUpdatedAt,
-        gcal_html_link: params.gcalHtmlLink,
-      })
-      .eq("id", params.existing.id);
+  const finalTitle =
+    cleanSpaces(params.title) ||
+    cleanSpaces(params.existing.original_title) ||
+    "Evento cancellato da Google Calendar";
 
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 }
-      );
-    }
-
-    revalidatePath("/import/google-calendar");
-    revalidatePath("/prenotazioni");
-    revalidatePath("/");
-
-    return NextResponse.json({
-      ok: true,
-      action: "marked_gcal_cancelled",
+  const { error } = await params.supabase
+    .from("google_calendar_import_staging")
+    .update({
+      gcal_uid: params.gcalUid,
       import_status: "gcal_cancelled",
       import_origin: "make",
-      gcal_uid: params.gcalUid,
       booking_date: finalBookingDate || params.existing.booking_date,
       booking_time: finalBookingTime,
-      imported_booking_id: params.existing.imported_booking_id ?? null,
-    });
-  }
-
-  if (!hasValidExperienceDate) {
-    return NextResponse.json({
-      ok: true,
-      skipped: true,
-      action: "skipped_cancelled_without_start",
-      reason:
-        "Evento cancellato senza data esperienza valida. Nessuna scheda fittizia creata.",
-      gcal_uid: params.gcalUid,
-      import_status: "gcal_cancelled",
-      import_origin: "make",
+      notes: buildCancellationNotes(finalTitle, params.existing),
+      original_title: finalTitle,
       gcal_updated_at: params.gcalUpdatedAt,
-    });
-  }
+      gcal_html_link:
+        params.gcalHtmlLink || params.existing.gcal_html_link || "",
+    })
+    .eq("id", params.existing.id);
 
-  const channels = await getChannels(params.supabase);
-  const channelLabel = params.title
-    ? detectChannelLabel(params.title)
-    : "Google Calendar";
-  const channelId = params.title
-    ? await findChannelId({ channels, label: channelLabel })
-    : null;
-
-  const people = params.title ? parsePeople(params.title) : null;
-  const experienceId = params.title ? detectExperienceId(params.title) : null;
-  const customerName = params.title
-    ? extractCustomerName(params.title, channelLabel)
-    : null;
-
-  const fallbackTitle =
-    params.title || `Evento Google Calendar cancellato ${params.gcalUid}`;
-
-  const bookingReference = extractBookingReference(fallbackTitle, params.gcalUid);
-
-  const existingByReference = await getExistingStagingRowByBookingReference(
-    params.supabase,
-    bookingReference
-  );
-
-  if (existingByReference?.id) {
-    const { error } = await params.supabase
-      .from("google_calendar_import_staging")
-      .update({
-        gcal_uid: params.gcalUid,
-        booking_date: params.start.bookingDate,
-        booking_time: params.start.bookingTime || null,
-        booking_reference: bookingReference,
-        customer_name: customerName,
-        adults: people?.adults ?? 0,
-        children: people?.children ?? 0,
-        infants: people?.infants ?? 0,
-        experience_id: experienceId,
-        channel_id: channelId,
-        booking_source: channelId ? channelLabel : "Google Calendar",
-        notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
-        original_title: fallbackTitle,
-        import_status: "gcal_cancelled",
-        imported_booking_id: existingByReference.imported_booking_id ?? null,
-        import_origin: "make",
-        gcal_updated_at: params.gcalUpdatedAt,
-        gcal_html_link: params.gcalHtmlLink,
-      })
-      .eq("id", existingByReference.id);
-
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 }
-      );
-    }
-  } else {
-    const { error } = await params.supabase
-      .from("google_calendar_import_staging")
-      .upsert(
-        {
-          gcal_uid: params.gcalUid,
-          booking_date: params.start.bookingDate,
-          booking_time: params.start.bookingTime || null,
-          booking_reference: bookingReference,
-          customer_name: customerName,
-          adults: people?.adults ?? 0,
-          children: people?.children ?? 0,
-          infants: people?.infants ?? 0,
-          experience_id: experienceId,
-          channel_id: channelId,
-          booking_source: channelId ? channelLabel : "Google Calendar",
-          notes: `🔴 Evento cancellato da Google Calendar\n${fallbackTitle}`,
-          original_title: fallbackTitle,
-          import_status: "gcal_cancelled",
-          imported_booking_id: null,
-          import_origin: "make",
-          gcal_updated_at: params.gcalUpdatedAt,
-          gcal_html_link: params.gcalHtmlLink,
-        },
-        {
-          onConflict: "gcal_uid",
-        }
-      );
-
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 }
-      );
-    }
+  if (error) {
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: 500 }
+    );
   }
 
   revalidatePath("/import/google-calendar");
@@ -773,13 +699,13 @@ async function markGoogleCalendarEventCancelled(params: {
 
   return NextResponse.json({
     ok: true,
-    action: "upserted_gcal_cancelled_notice",
+    action: "marked_gcal_cancelled",
     import_status: "gcal_cancelled",
     import_origin: "make",
     gcal_uid: params.gcalUid,
-    booking_date: params.start.bookingDate,
-    booking_time: params.start.bookingTime || null,
-    gcal_updated_at: params.gcalUpdatedAt,
+    booking_date: finalBookingDate || params.existing.booking_date,
+    booking_time: finalBookingTime,
+    imported_booking_id: params.existing.imported_booking_id ?? null,
   });
 }
 
@@ -838,6 +764,21 @@ export async function POST(request: NextRequest) {
         start,
         gcalUpdatedAt,
         gcalHtmlLink,
+      });
+    }
+
+    if (
+      existingByGcalUid?.id &&
+      isIncomingUpdateOlder(existingByGcalUid.gcal_updated_at, gcalUpdatedAt)
+    ) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        action: "skipped_stale_update",
+        reason:
+          "Aggiornamento ignorato perché più vecchio dell'ultimo evento già registrato.",
+        gcal_uid: gcalUid,
+        gcal_updated_at: gcalUpdatedAt,
       });
     }
 
@@ -906,7 +847,23 @@ export async function POST(request: NextRequest) {
         );
 
     const existing = existingByGcalUid || existingByBookingReference;
-    const importStatus = nextStatusForExisting(existing?.import_status);
+
+    if (
+      existing?.id &&
+      isIncomingUpdateOlder(existing.gcal_updated_at, gcalUpdatedAt)
+    ) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        action: "skipped_stale_update",
+        reason:
+          "Aggiornamento ignorato perché più vecchio dell'ultimo evento già registrato.",
+        gcal_uid: gcalUid,
+        gcal_updated_at: gcalUpdatedAt,
+      });
+    }
+
+    const importStatus = nextStatusForExisting(existing);
 
     const rowPayload = {
       gcal_uid: gcalUid,
