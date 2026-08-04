@@ -137,17 +137,49 @@ function googleImportPeopleLabel(row: {
   adults: number | null;
   children: number | null;
   infants: number | null;
+  booking_source?: string | null;
+  notes?: string | null;
+  original_title?: string | null;
 }) {
   const adults = Number(row.adults || 0);
   const children = Number(row.children || 0);
   const infants = Number(row.infants || 0);
-  const total = adults + children + infants;
 
+  const sourceText = [
+    row.booking_source,
+    row.notes,
+    row.original_title,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const isItalyOnABudget =
+    /italy\s+on\s+a\s+budget/i.test(sourceText) ||
+    /italy\s+budget\s+tour/i.test(sourceText);
+
+  const guideMatch = isItalyOnABudget
+    ? sourceText.match(
+        /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
+      )
+    : null;
+
+  const nonPayingAdults = guideMatch
+    ? Math.max(1, Number(guideMatch[1] || 1))
+    : 0;
+
+  const total = adults + children + infants + nonPayingAdults;
   const parts = [`${total} pax`];
 
   if (adults > 0) parts.push(`${adults} adulti`);
   if (children > 0) parts.push(`${children} bambini`);
   if (infants > 0) parts.push(`${infants} infanti`);
+  if (nonPayingAdults > 0) {
+    parts.push(
+      nonPayingAdults === 1
+        ? "1 guida"
+        : `${nonPayingAdults} guide`
+    );
+  }
 
   return parts.join(" · ");
 }

@@ -272,6 +272,18 @@ function parsePeople(title: string) {
   };
 }
 
+function extractNonPayingAdults(title: string) {
+  const text = cleanSpaces(title);
+  const match = text.match(
+    /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
+  );
+
+  if (!match) return 0;
+
+  const parsed = Number(match[1] || 1);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
 function detectExperienceId(title: string) {
   const text = normalize(title);
 
@@ -490,6 +502,10 @@ function extractCustomerName(title: string, channelLabel: string) {
 
   if (channelKey === "airbnb") {
     return extractAirbnbBookingData(title).customerName;
+  }
+
+  if (channelKey === "italyonabudgettours") {
+    return "Italy";
   }
 
   return null;
@@ -838,6 +854,7 @@ export async function POST(request: NextRequest) {
 
     const customerName = extractCustomerName(title, channelLabel);
     const bookingReference = extractBookingReference(title, gcalUid);
+    const nonPayingAdults = extractNonPayingAdults(title);
 
     const existingByBookingReference = existingByGcalUid?.id
       ? null
@@ -930,6 +947,7 @@ export async function POST(request: NextRequest) {
       channel: channelLabel,
       customer_name: customerName,
       booking_reference: bookingReference,
+      non_paying_adults: nonPayingAdults,
       gcal_updated_at: gcalUpdatedAt,
       gcal_html_link: gcalHtmlLink,
     });

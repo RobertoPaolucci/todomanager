@@ -98,6 +98,40 @@ function cleanNote(row: StagingRow) {
   return String(row.notes || row.original_title || "").trim();
 }
 
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isItalyOnABudgetRow(row: StagingRow) {
+  const text = normalizeText(
+    [row.booking_source, row.notes, row.original_title].filter(Boolean).join(" ")
+  );
+
+  return (
+    text.includes("italy on a budget") ||
+    text.includes("italy budget tour")
+  );
+}
+
+function getNonPayingAdults(row: StagingRow) {
+  if (!isItalyOnABudgetRow(row)) return 0;
+
+  const text = String(row.notes || row.original_title || "");
+  const match = text.match(
+    /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
+  );
+
+  if (!match) return 0;
+
+  const parsed = Number(match[1] || 1);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
 async function markRow(
   rowId: number,
   importStatus: string,
@@ -245,9 +279,13 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     const adults = Number(row.adults ?? 0);
     const children = Number(row.children ?? 0);
     const infants = Number(row.infants ?? 0);
+    const nonPayingAdults = getNonPayingAdults(row);
 
     const payingPax = Math.max(adults + children, 1);
-    const totalPeople = Math.max(adults + children + infants, 1);
+    const totalPeople = Math.max(
+      adults + children + infants + nonPayingAdults,
+      1
+    );
 
     const yourUnitPrice = toNumber(price.your_unit_price);
     const publicUnitPrice = toNumber(price.public_unit_price);
@@ -268,8 +306,9 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const marginTotal = totalToYou - totalSupplierCost;
 
-    const customerName =
-      String(row.customer_name ?? "").trim() || "Da verificare";
+    const customerName = isItalyOnABudgetRow(row)
+      ? "Italy"
+      : String(row.customer_name ?? "").trim() || "Da verificare";
 
     const notes = cleanNote(row);
 
@@ -306,7 +345,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         infants,
         was_modified: false,
         business_unit_id: FMDQ_BUSINESS_UNIT_ID,
-        non_paying_adults: 0,
+        non_paying_adults: nonPayingAdults,
       })
       .select("id")
       .single();
