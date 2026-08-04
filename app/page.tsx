@@ -153,7 +153,7 @@ function googleImportPeopleLabel(row: {
 }
 
 type PageProps = {
-  searchParams: Promise<{ m?: string; y?: string }>;
+  searchParams: Promise<{ m?: string; y?: string; allGcal?: string }>;
 };
 
 type GoogleCalendarImportRow = {
@@ -429,6 +429,7 @@ export default async function Home({ searchParams }: PageProps) {
 
   const selectedMonth = params.m ? Number(params.m) : today.getMonth() + 1;
   const selectedYear = params.y ? Number(params.y) : today.getFullYear();
+  const showAllGoogleCalendarImports = params.allGcal === "1";
 
   const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
   const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
@@ -875,6 +876,13 @@ export default async function Home({ searchParams }: PageProps) {
   );
 
   const selectedMonthChartData = chartData[selectedMonth - 1];
+
+  const visibleGoogleCalendarImports = showAllGoogleCalendarImports
+    ? googleCalendarImports
+    : googleCalendarImports.slice(0, 8);
+
+  const showAllGoogleCalendarHref = `/?m=${selectedMonth}&y=${selectedYear}&allGcal=1#google-calendar-imports`;
+  const showFirstGoogleCalendarHref = `/?m=${selectedMonth}&y=${selectedYear}#google-calendar-imports`;
 
   return (
     <AppShell
@@ -1365,6 +1373,7 @@ export default async function Home({ searchParams }: PageProps) {
         </div>
 
         <div className="space-y-4 sm:space-y-6">
+          <div id="google-calendar-imports">
           <SectionCard title="📥 Nuove da Google Calendar">
             <div className="space-y-3">
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
@@ -1395,7 +1404,7 @@ export default async function Home({ searchParams }: PageProps) {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {googleCalendarImports.slice(0, 8).map((row) => {
+                  {visibleGoogleCalendarImports.map((row) => {
                     const title = row.notes || row.original_title || "Senza titolo";
                     const importDateHref = row.booking_date
                       ? `/import/google-calendar?date=${row.booking_date}&excludeHorseback=1`
@@ -1451,16 +1460,23 @@ export default async function Home({ searchParams }: PageProps) {
 
                   {googleCalendarImports.length > 8 ? (
                     <Link
-                      href="/import/google-calendar?excludeHorseback=1"
+                      href={
+                        showAllGoogleCalendarImports
+                          ? showFirstGoogleCalendarHref
+                          : showAllGoogleCalendarHref
+                      }
                       className="block rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-center text-xs font-bold text-zinc-700 transition hover:bg-zinc-100"
                     >
-                      Vedi tutte le altre {googleCalendarImports.length - 8}
+                      {showAllGoogleCalendarImports
+                        ? "Mostra solo le prime 8"
+                        : `Vedi tutte le altre ${googleCalendarImports.length - 8}`}
                     </Link>
                   ) : null}
                 </div>
               )}
             </div>
           </SectionCard>
+          </div>
 
           <NotificationCenter />
 
