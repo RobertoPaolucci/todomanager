@@ -98,38 +98,63 @@ function cleanNote(row: StagingRow) {
   return String(row.notes || row.original_title || "").trim();
 }
 
-function normalizeText(value: string | null | undefined) {
-  return String(value ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function rowSourceText(row: StagingRow) {
+  return [row.booking_source, row.notes, row.original_title]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function isItalyOnABudgetRow(row: StagingRow) {
-  const text = normalizeText(
-    [row.booking_source, row.notes, row.original_title].filter(Boolean).join(" ")
-  );
-
-  return (
-    text.includes("italy on a budget") ||
-    text.includes("italy budget tour")
-  );
+  const text = rowSourceText(row);
+  return /italy\s+on\s+a\s+budget/i.test(text) || /italy\s+budget\s+tour/i.test(text);
 }
 
-function getNonPayingAdults(row: StagingRow) {
-  if (!isItalyOnABudgetRow(row)) return 0;
+function getTuscanEscapeTotal(row: StagingRow) {
+  const text = String(row.notes || row.original_title || "").trim();
+  const match = text.match(/^\s*(\d+)\s+pranzo\s+tuscan\s+escape\b/i);
 
-  const text = String(row.notes || row.original_title || "");
-  const match = text.match(
-    /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
-  );
+  if (!match) return null;
 
-  if (!match) return 0;
+  const total = Number(match[1] || 0);
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
 
-  const parsed = Number(match[1] || 1);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+function isTuscanEscapeGuideRow(row: StagingRow) {
+  return getTuscanEscapeTotal(row) !== null;
+}
+
+function getImportPeople(row: StagingRow) {
+  let adults = Number(row.adults ?? 0);
+  let children = Number(row.children ?? 0);
+  let infants = Number(row.infants ?? 0);
+  let nonPayingAdults = 0;
+
+  if (isItalyOnABudgetRow(row)) {
+    const text = String(row.notes || row.original_title || "");
+    const guideMatch = text.match(
+      /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
+    );
+
+    if (guideMatch) {
+      nonPayingAdults = Math.max(1, Number(guideMatch[1] || 1));
+    }
+  }
+
+  const tuscanEscapeTotal = getTuscanEscapeTotal(row);
+
+  if (tuscanEscapeTotal !== null) {
+    adults = Math.max(tuscanEscapeTotal - 1, 0);
+    children = 0;
+    infants = 0;
+    nonPayingAdults = 1;
+  }
+
+  return {
+    adults,
+    children,
+    infants,
+    nonPayingAdults,
+  };
 }
 
 async function markRow(
@@ -158,6 +183,7 @@ async function findExistingByReference(bookingReference: string) {
 
 async function findPossibleDuplicate(row: StagingRow) {
   const rowTime = normalizeTime(row.booking_time);
+  const people = getImportPeople(row);
 
   const { data } = await supabaseServer
     .from("bookings")
@@ -167,9 +193,9 @@ async function findPossibleDuplicate(row: StagingRow) {
     .eq("booking_date", row.booking_date)
     .eq("experience_id", row.experience_id)
     .eq("channel_id", row.channel_id)
-    .eq("adults", Number(row.adults ?? 0))
-    .eq("children", Number(row.children ?? 0))
-    .eq("infants", Number(row.infants ?? 0));
+    .eq("adults", people.adults)
+    .eq("children", people.children)
+    .eq("infants", people.infants);
 
   const possibleDuplicate = (data ?? []).find(
     (booking) => normalizeTime(booking.booking_time) === rowTime
@@ -276,10 +302,12 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       continue;
     }
 
-    const adults = Number(row.adults ?? 0);
-    const children = Number(row.children ?? 0);
-    const infants = Number(row.infants ?? 0);
-    const nonPayingAdults = getNonPayingAdults(row);
+    const {
+      adults,
+      children,
+      infants,
+      nonPayingAdults,
+    } = getImportPeople(row);
 
     const payingPax = Math.max(adults + children, 1);
     const totalPeople = Math.max(
@@ -308,6 +336,8 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const customerName = isItalyOnABudgetRow(row)
       ? "Italy"
+      : isTuscanEscapeGuideRow(row)
+      ? "Tuscan"
       : String(row.customer_name ?? "").trim() || "Da verificare";
 
     const notes = cleanNote(row);

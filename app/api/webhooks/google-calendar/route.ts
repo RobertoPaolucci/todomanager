@@ -237,6 +237,22 @@ function parseStart(payload: WebhookPayload): ParsedStart {
 function parsePeople(title: string) {
   const text = cleanSpaces(title);
 
+  // Regola Tuscan Escape:
+  // "9 Pranzo tuscan escape" significa 8 clienti paganti + 1 guida.
+  const tuscanEscapeMatch = text.match(
+    /^\s*(\d+)\s+pranzo\s+tuscan\s+escape\b/i
+  );
+
+  if (tuscanEscapeMatch) {
+    const totalPresent = Math.max(0, Number(tuscanEscapeMatch[1] || 0));
+
+    return {
+      adults: Math.max(totalPresent - 1, 0),
+      children: 0,
+      infants: 0,
+    };
+  }
+
   const match = text.match(
     /^\s*(\d+)(?:\s*\+\s*(\d+)(?:\s*(bambin[aoie]*|child|children|neonat[oi]?|infant[is]?|guida|guide|driver|autista))?)?/i
   );
@@ -274,6 +290,11 @@ function parsePeople(title: string) {
 
 function extractNonPayingAdults(title: string) {
   const text = cleanSpaces(title);
+
+  if (/^\s*\d+\s+pranzo\s+tuscan\s+escape\b/i.test(text)) {
+    return 1;
+  }
+
   const match = text.match(
     /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
   );
@@ -506,6 +527,10 @@ function extractCustomerName(title: string, channelLabel: string) {
 
   if (channelKey === "italyonabudgettours") {
     return "Italy";
+  }
+
+  if (channelKey === "tuscanescape") {
+    return "Tuscan";
   }
 
   return null;

@@ -141,9 +141,10 @@ function googleImportPeopleLabel(row: {
   notes?: string | null;
   original_title?: string | null;
 }) {
-  const adults = Number(row.adults || 0);
-  const children = Number(row.children || 0);
-  const infants = Number(row.infants || 0);
+  let adults = Number(row.adults || 0);
+  let children = Number(row.children || 0);
+  let infants = Number(row.infants || 0);
+  let nonPayingAdults = 0;
 
   const sourceText = [
     row.booking_source,
@@ -157,15 +158,28 @@ function googleImportPeopleLabel(row: {
     /italy\s+on\s+a\s+budget/i.test(sourceText) ||
     /italy\s+budget\s+tour/i.test(sourceText);
 
-  const guideMatch = isItalyOnABudget
-    ? sourceText.match(
-        /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
-      )
-    : null;
+  if (isItalyOnABudget) {
+    const guideMatch = sourceText.match(
+      /\+\s*(?:(\d+)\s*)?(?:guida|guide|driver|autista)\b/i
+    );
 
-  const nonPayingAdults = guideMatch
-    ? Math.max(1, Number(guideMatch[1] || 1))
-    : 0;
+    if (guideMatch) {
+      nonPayingAdults = Math.max(1, Number(guideMatch[1] || 1));
+    }
+  }
+
+  const tuscanTitle = String(row.notes || row.original_title || "").trim();
+  const tuscanMatch = tuscanTitle.match(
+    /^\s*(\d+)\s+pranzo\s+tuscan\s+escape\b/i
+  );
+
+  if (tuscanMatch) {
+    const totalPresent = Math.max(0, Number(tuscanMatch[1] || 0));
+    adults = Math.max(totalPresent - 1, 0);
+    children = 0;
+    infants = 0;
+    nonPayingAdults = 1;
+  }
 
   const total = adults + children + infants + nonPayingAdults;
   const parts = [`${total} pax`];
@@ -182,6 +196,22 @@ function googleImportPeopleLabel(row: {
   }
 
   return parts.join(" · ");
+}
+
+function googleImportCustomerLabel(row: GoogleCalendarImportRow) {
+  const sourceText = [row.booking_source, row.notes, row.original_title]
+    .filter(Boolean)
+    .join(" ");
+
+  if (/italy\s+on\s+a\s+budget/i.test(sourceText) || /italy\s+budget\s+tour/i.test(sourceText)) {
+    return "Italy";
+  }
+
+  if (/^\s*\d+\s+pranzo\s+tuscan\s+escape\b/i.test(String(row.notes || row.original_title || ""))) {
+    return "Tuscan";
+  }
+
+  return row.customer_name || "";
 }
 
 type PageProps = {
@@ -1475,7 +1505,9 @@ export default async function Home({ searchParams }: PageProps) {
                         <div className="mt-1.5 text-[11px] leading-tight text-zinc-500">
                           {googleImportPeopleLabel(row)}
                           {row.booking_source ? ` · ${row.booking_source}` : ""}
-                          {row.customer_name ? ` · ${row.customer_name}` : ""}
+                          {googleImportCustomerLabel(row)
+                            ? ` · ${googleImportCustomerLabel(row)}`
+                            : ""}
                         </div>
 
                         <div className="mt-2">
