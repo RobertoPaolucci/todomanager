@@ -20,10 +20,19 @@ function normalizeChannelType(value: FormDataEntryValue | null) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeCheckbox(value: FormDataEntryValue | null) {
+  return value === "on" || value === "true" || value === "1";
+}
+
 export async function createChannel(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
+  const company_name = normalizeText(formData.get("company_name"));
   const type = normalizeChannelType(formData.get("type"));
   const notes = normalizeText(formData.get("notes"));
+
+  const fattura_mensile_fmdq = normalizeCheckbox(
+    formData.get("fattura_mensile_fmdq")
+  );
 
   if (!name) {
     throw new Error("Il nome del canale è obbligatorio");
@@ -35,8 +44,10 @@ export async function createChannel(formData: FormData) {
 
   const { error } = await supabaseServer.from("channels").insert({
     name,
+    company_name,
     type,
     notes,
+    fattura_mensile_fmdq,
   });
 
   if (error) {
@@ -45,14 +56,21 @@ export async function createChannel(formData: FormData) {
 
   revalidatePath("/canali");
   revalidatePath("/canali/nuovo");
+  revalidatePath("/fatturazione-fmdq");
+
   redirect("/canali");
 }
 
 export async function updateChannel(formData: FormData) {
   const id = Number(formData.get("id") || 0);
   const name = String(formData.get("name") || "").trim();
+  const company_name = normalizeText(formData.get("company_name"));
   const type = normalizeChannelType(formData.get("type"));
   const notes = normalizeText(formData.get("notes"));
+
+  const fattura_mensile_fmdq = normalizeCheckbox(
+    formData.get("fattura_mensile_fmdq")
+  );
 
   if (!id || !name) {
     throw new Error("Dati mancanti");
@@ -64,7 +82,13 @@ export async function updateChannel(formData: FormData) {
 
   const { error } = await supabaseServer
     .from("channels")
-    .update({ name, type, notes })
+    .update({
+      name,
+      company_name,
+      type,
+      notes,
+      fattura_mensile_fmdq,
+    })
     .eq("id", id);
 
   if (error) {
@@ -72,6 +96,9 @@ export async function updateChannel(formData: FormData) {
   }
 
   revalidatePath("/canali");
+  revalidatePath(`/canali/${id}/modifica`);
+  revalidatePath("/fatturazione-fmdq");
+
   redirect("/canali");
 }
 
@@ -92,4 +119,5 @@ export async function deleteChannel(formData: FormData) {
   }
 
   revalidatePath("/canali");
+  revalidatePath("/fatturazione-fmdq");
 }
