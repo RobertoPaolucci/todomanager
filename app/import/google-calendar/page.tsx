@@ -348,7 +348,14 @@ function buildPossibleDuplicateKey(row: {
   adults: number | null;
   children: number | null;
   infants: number | null;
+  customer_name?: string | null;
 }) {
+  const customerKey = customerMatchKey(row.customer_name);
+
+  // Se il nome manca o è generico, non basta la coincidenza degli altri
+  // campi per dichiarare un possibile doppione.
+  if (!customerKey) return null;
+
   return [
     normalizeTime(row.booking_time),
     row.experience_id ?? "",
@@ -356,6 +363,7 @@ function buildPossibleDuplicateKey(row: {
     Number(row.adults ?? 0),
     Number(row.children ?? 0),
     Number(row.infants ?? 0),
+    customerKey,
   ].join("|");
 }
 
@@ -377,9 +385,23 @@ function getBestProbableMatch(
 ) {
   if (!candidates || candidates.length === 0) return undefined;
 
+  const rowCustomerKey = customerMatchKey(row.customer_name);
+  if (!rowCustomerKey) return undefined;
+
+  // Una "probabile corrispondenza" deve appartenere allo stesso cliente.
+  // In questo modo due gruppi distinti dello stesso canale, alla stessa ora,
+  // non vengono collegati tra loro.
+  const sameCustomerCandidates = candidates.filter(
+    (booking) =>
+      booking.is_cancelled !== true &&
+      customerMatchKey(booking.customer_name) === rowCustomerKey
+  );
+
+  if (sameCustomerCandidates.length === 0) return undefined;
+
   const rowPeople = totalPeopleNumber(row);
 
-  const sorted = [...candidates].sort((a, b) => {
+  const sorted = [...sameCustomerCandidates].sort((a, b) => {
     const diffA = Math.abs(totalPeopleNumber(a) - rowPeople);
     const diffB = Math.abs(totalPeopleNumber(b) - rowPeople);
 
@@ -449,6 +471,19 @@ function normalizeTextForMatch(value: string | null | undefined) {
     .replace(/[^A-Z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const GENERIC_CUSTOMER_NAMES = new Set([
+  "ITALY",
+  "TUSCAN",
+  "DA VERIFICARE",
+  "SENZA NOME",
+]);
+
+function customerMatchKey(value: string | null | undefined) {
+  const key = normalizeTextForMatch(value);
+  if (!key || GENERIC_CUSTOMER_NAMES.has(key)) return "";
+  return key;
 }
 
 const HORSEBACK_RIDING_EXPERIENCE_ID = 8;
@@ -1625,7 +1660,10 @@ export default async function GoogleCalendarImportPage({
   for (const booking of existingBookings) {
     if (booking.is_cancelled) continue;
 
-    duplicateKeyMap.set(buildPossibleDuplicateKey(booking), booking);
+    const duplicateKey = buildPossibleDuplicateKey(booking);
+    if (duplicateKey) {
+      duplicateKeyMap.set(duplicateKey, booking);
+    }
 
     const probableKey = buildProbableMatchKey(booking);
     const existingList = probableMatchMap.get(probableKey) ?? [];
@@ -1638,7 +1676,10 @@ export default async function GoogleCalendarImportPage({
     const existingByImportedId = row.imported_booking_id
       ? existingIdMap.get(row.imported_booking_id)
       : undefined;
-    const possibleDuplicate = duplicateKeyMap.get(buildPossibleDuplicateKey(row));
+    const rowDuplicateKey = buildPossibleDuplicateKey(row);
+    const possibleDuplicate = rowDuplicateKey
+      ? duplicateKeyMap.get(rowDuplicateKey)
+      : undefined;
 
     const referenceMatchFromGoogleTitle = getBestReferenceMatchFromGoogleTitle(
       row,
@@ -1659,6 +1700,23 @@ export default async function GoogleCalendarImportPage({
     let matchedBooking: BookingRow | undefined;
     let matchReason = "";
 
+    const canReevaluateMatching = [
+      "pending",
+      "rolled_back",
+      "possible_duplicate",
+      "probable_match",
+    ].includes(row.import_status);
+
+    // I vecchi stati possible_duplicate/probable_match vengono ricalcolati
+    // con le regole nuove. Se non c'è più una corrispondenza reale tornano
+    // ad essere una nuova riga importabile.
+    if (
+      row.import_status === "possible_duplicate" ||
+      row.import_status === "probable_match"
+    ) {
+      computedStatus = "pending";
+    }
+
     if (row.import_status === "gcal_cancelled") {
       computedStatus = "gcal_cancelled";
       matchedBooking = existingByImportedId;
@@ -1666,41 +1724,45 @@ export default async function GoogleCalendarImportPage({
         ? "evento cancellato da Google Calendar"
         : "";
     } else if (
-      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      canReevaluateMatching &&
       existingByReference
     ) {
       computedStatus = "already_exists";
       matchedBooking = existingByReference;
       matchReason = "stesso riferimento";
     } else if (
-      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      canReevaluateMatching &&
       referenceMatchFromGoogleTitle
     ) {
       computedStatus = "already_exists";
       matchedBooking = referenceMatchFromGoogleTitle;
       matchReason = "stesso riferimento trovato nel titolo Google Calendar";
     } else if (
-      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      canReevaluateMatching &&
       possibleDuplicate
     ) {
       computedStatus = "possible_duplicate";
       matchedBooking = possibleDuplicate;
       matchReason = "stessa data, ora, esperienza, canale e persone";
     } else if (
-      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      canReevaluateMatching &&
       probableMatch
     ) {
       computedStatus = "probable_match";
       matchedBooking = probableMatch;
       matchReason = "stessa ora, esperienza e canale, ma persone diverse";
     } else if (
-      (row.import_status === "pending" || row.import_status === "rolled_back") &&
+      canReevaluateMatching &&
       probableNameMatch
     ) {
       computedStatus = "probable_match";
       matchedBooking = probableNameMatch;
       matchReason = "nome cliente trovato nel titolo Google Calendar";
-    } else if (existingByImportedId) {
+    } else if (
+      existingByImportedId &&
+      row.import_status !== "possible_duplicate" &&
+      row.import_status !== "probable_match"
+    ) {
       matchedBooking = existingByImportedId;
       matchReason = "già importata";
     }

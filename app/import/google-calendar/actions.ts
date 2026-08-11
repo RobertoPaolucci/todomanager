@@ -123,6 +123,35 @@ function isTuscanEscapeGuideRow(row: StagingRow) {
   return getTuscanEscapeTotal(row) !== null;
 }
 
+function normalizeCustomerForMatch(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const GENERIC_CUSTOMER_NAMES = new Set([
+  "ITALY",
+  "TUSCAN",
+  "DA VERIFICARE",
+  "SENZA NOME",
+]);
+
+function customerMatchKey(value: string | null | undefined) {
+  const key = normalizeCustomerForMatch(value);
+  if (!key || GENERIC_CUSTOMER_NAMES.has(key)) return "";
+  return key;
+}
+
+function getResolvedCustomerName(row: StagingRow) {
+  if (isItalyOnABudgetRow(row)) return "Italy";
+  if (isTuscanEscapeGuideRow(row)) return "Tuscan";
+  return String(row.customer_name ?? "").trim() || "Da verificare";
+}
+
 function getImportPeople(row: StagingRow) {
   let adults = Number(row.adults ?? 0);
   let children = Number(row.children ?? 0);
@@ -184,11 +213,16 @@ async function findExistingByReference(bookingReference: string) {
 async function findPossibleDuplicate(row: StagingRow) {
   const rowTime = normalizeTime(row.booking_time);
   const people = getImportPeople(row);
+  const rowCustomerKey = customerMatchKey(getResolvedCustomerName(row));
+
+  // Senza un nome cliente affidabile non dichiariamo un doppione
+  // solo perché data, ora, esperienza, canale e persone coincidono.
+  if (!rowCustomerKey) return null;
 
   const { data } = await supabaseServer
     .from("bookings")
     .select(
-      "id, booking_time, experience_id, channel_id, adults, children, infants"
+      "id, booking_time, experience_id, channel_id, adults, children, infants, customer_name, is_cancelled"
     )
     .eq("booking_date", row.booking_date)
     .eq("experience_id", row.experience_id)
@@ -198,7 +232,10 @@ async function findPossibleDuplicate(row: StagingRow) {
     .eq("infants", people.infants);
 
   const possibleDuplicate = (data ?? []).find(
-    (booking) => normalizeTime(booking.booking_time) === rowTime
+    (booking) =>
+      booking.is_cancelled !== true &&
+      normalizeTime(booking.booking_time) === rowTime &&
+      customerMatchKey(booking.customer_name) === rowCustomerKey
   );
 
   return possibleDuplicate ?? null;
@@ -268,12 +305,21 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     const canProcessNormally =
       row.import_status === "pending" || row.import_status === "rolled_back";
 
+    // Serve per rivalutare i vecchi "possible_duplicate" creati con la
+    // precedente regola che non confrontava il nome cliente.
+    const canReevaluatePossibleDuplicate =
+      row.import_status === "possible_duplicate";
+
     const canProcessWithForce =
       canProcessNormally ||
-      row.import_status === "possible_duplicate" ||
+      canReevaluatePossibleDuplicate ||
       row.import_status === "probable_match";
 
-    if (forceImport ? !canProcessWithForce : !canProcessNormally) {
+    if (
+      forceImport
+        ? !canProcessWithForce
+        : !(canProcessNormally || canReevaluatePossibleDuplicate)
+    ) {
       continue;
     }
 
@@ -334,11 +380,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const marginTotal = totalToYou - totalSupplierCost;
 
-    const customerName = isItalyOnABudgetRow(row)
-      ? "Italy"
-      : isTuscanEscapeGuideRow(row)
-      ? "Tuscan"
-      : String(row.customer_name ?? "").trim() || "Da verificare";
+    const customerName = getResolvedCustomerName(row);
 
     const notes = cleanNote(row);
 
