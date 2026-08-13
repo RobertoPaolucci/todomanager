@@ -485,6 +485,32 @@ function isGoogleCalendarRowAlreadyManaged(
 }
 
 
+async function loadAllDashboardBookings() {
+  const pageSize = 1000;
+  const rows: any[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabaseServer
+      .from("bookings")
+      .select("*")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      return { data: rows, error };
+    }
+
+    const page = data || [];
+    rows.push(...page);
+
+    if (page.length < pageSize) {
+      break;
+    }
+  }
+
+  return { data: rows, error: null };
+}
+
 export default async function Home({ searchParams }: PageProps) {
   const params = await searchParams;
   const today = new Date();
@@ -510,10 +536,7 @@ export default async function Home({ searchParams }: PageProps) {
   const { bookingsByChannel } = await getDashboardStats();
   const maxChannelCount = Math.max(...bookingsByChannel.map((c) => c.count), 1);
 
-  const { data: bookings, error } = await supabaseServer
-    .from("bookings")
-    .select("*")
-    .order("booking_date", { ascending: true });
+  const { data: bookings, error } = await loadAllDashboardBookings();
 
   if (error) {
     console.error("Errore caricamento prenotazioni:", error.message);

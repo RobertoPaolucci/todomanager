@@ -615,6 +615,38 @@ function isIncomingUpdateOlder(
   return new Date(incomingIso).getTime() < new Date(existingIso).getTime();
 }
 
+function normalizeComparableTime(value: string | null | undefined) {
+  return String(value ?? "").slice(0, 5);
+}
+
+function hasRelevantBookingChanges(
+  existing: any,
+  incoming: {
+    bookingDate: string;
+    bookingTime: string | null;
+    bookingReference: string;
+    adults: number;
+    children: number;
+    infants: number;
+    experienceId: number;
+    channelId: number;
+  }
+) {
+  return (
+    cleanSpaces(existing?.booking_date || "") !==
+      cleanSpaces(incoming.bookingDate || "") ||
+    normalizeComparableTime(existing?.booking_time) !==
+      normalizeComparableTime(incoming.bookingTime) ||
+    cleanSpaces(existing?.booking_reference || "").toUpperCase() !==
+      cleanSpaces(incoming.bookingReference || "").toUpperCase() ||
+    Number(existing?.adults ?? 0) !== Number(incoming.adults ?? 0) ||
+    Number(existing?.children ?? 0) !== Number(incoming.children ?? 0) ||
+    Number(existing?.infants ?? 0) !== Number(incoming.infants ?? 0) ||
+    Number(existing?.experience_id ?? 0) !== Number(incoming.experienceId ?? 0) ||
+    Number(existing?.channel_id ?? 0) !== Number(incoming.channelId ?? 0)
+  );
+}
+
 function nextStatusForExisting(existing?: any) {
   const existingStatus = existing?.import_status;
 
@@ -625,6 +657,7 @@ function nextStatusForExisting(existing?: any) {
   }
 
   if (existingStatus === "ignored") return "ignored";
+  if (existingStatus === "needs_review") return "needs_review";
   if (existingStatus === "already_exists") return "already_exists";
 
   if (existingStatus === "gcal_cancelled") {
@@ -905,7 +938,28 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const importStatus = nextStatusForExisting(existing);
+    let importStatus = nextStatusForExisting(existing);
+
+    // Se l'evento era già collegato a una prenotazione Todo Manager e Google
+    // cambia data, ora, partecipanti, esperienza, canale o riferimento,
+    // non deve restare "Già presente": va portato a "Da verificare".
+    if (
+      existing?.id &&
+      existing.import_status === "already_exists" &&
+      existing.imported_booking_id &&
+      hasRelevantBookingChanges(existing, {
+        bookingDate: start.bookingDate,
+        bookingTime: start.bookingTime,
+        bookingReference,
+        adults: people.adults,
+        children: people.children,
+        infants: people.infants,
+        experienceId,
+        channelId,
+      })
+    ) {
+      importStatus = "needs_review";
+    }
 
     const rowPayload = {
       gcal_uid: gcalUid,

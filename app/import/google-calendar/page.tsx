@@ -1580,6 +1580,30 @@ export default async function GoogleCalendarImportPage({
 
   const existingBookingsRaw = (bookingsData ?? []) as BookingRow[];
 
+  // Una prenotazione già collegata può essere stata spostata su Google Calendar
+  // a un altro giorno. In quel caso non è presente nella query del giorno
+  // selezionato, ma imported_booking_id continua a indicare la prenotazione
+  // Todo Manager corretta.
+  const linkedBookingIds = Array.from(
+    new Set(
+      stagingRowsRaw
+        .map((row) => row.imported_booking_id)
+        .filter((id): id is number => typeof id === "number" && id > 0)
+    )
+  );
+
+  const { data: linkedBookingsData } =
+    linkedBookingIds.length > 0
+      ? await supabaseServer
+          .from("bookings")
+          .select(
+            "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id, is_cancelled"
+          )
+          .in("id", linkedBookingIds)
+      : { data: [] };
+
+  const linkedBookingsRaw = (linkedBookingsData ?? []) as BookingRow[];
+
   const experienceIds = Array.from(
     new Set(
       [...stagingRowsRaw, ...existingBookingsRaw]
@@ -1650,7 +1674,10 @@ export default async function GoogleCalendarImportPage({
   );
 
   const existingIdMap = new Map(
-    existingBookings.map((booking) => [booking.id, booking])
+    [...existingBookings, ...linkedBookingsRaw].map((booking) => [
+      booking.id,
+      booking,
+    ])
   );
 
   const duplicateKeyMap = new Map<string, BookingRow>();
