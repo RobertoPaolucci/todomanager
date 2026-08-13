@@ -248,6 +248,32 @@ function historyGroupHasAlert(group: { latest: any; versions: any[] }) {
   );
 }
 
+async function loadAllBookings() {
+  const pageSize = 1000;
+  const rows: any[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabaseServer
+      .from("bookings")
+      .select("*, suppliers(id, name, phone), channels(name)")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      return { data: rows, error };
+    }
+
+    const page = data || [];
+    rows.push(...page);
+
+    if (page.length < pageSize) {
+      break;
+    }
+  }
+
+  return { data: rows, error: null };
+}
+
 export default async function PrenotazioniPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const q = String(params.q || "").trim();
@@ -288,9 +314,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
     .split("T")[0];
 
   const [bookingsRes, internalRulesRes, businessUnitsRes] = await Promise.all([
-    supabaseServer
-      .from("bookings")
-      .select("*, suppliers(id, name, phone), channels(name)"),
+    loadAllBookings(),
     supabaseServer
       .from("business_unit_internal_suppliers")
       .select("business_unit_id, supplier_id"),
