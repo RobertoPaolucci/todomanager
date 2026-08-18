@@ -16,6 +16,11 @@ const links = [
   { href: "/canali", label: "Canali", mobileLabel: "Canali" },
   { href: "/clienti", label: "Clienti", mobileLabel: "Clienti" },
   { href: "/fornitori", label: "Fornitori", mobileLabel: "Fornit." },
+  {
+    href: "/disponibilita-cavalli",
+    label: "Disponibilità cavalli",
+    mobileLabel: "Cavalli",
+  },
   { href: "/pagamenti", label: "Pagamenti", mobileLabel: "Pagam." },
   { href: "/report", label: "📊 Report e Analisi", mobileLabel: "📊 Report" },
 ];
@@ -36,6 +41,7 @@ export default function Sidebar() {
           <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-zinc-500 lg:text-sm lg:normal-case lg:tracking-normal">
             ToDo Manager
           </p>
+
           <h1 className="text-2xl font-bold text-zinc-900 lg:text-2xl">
             Gestionale
           </h1>
@@ -70,7 +76,9 @@ export default function Sidebar() {
       >
         {links.map((link) => {
           const isActive =
-            link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+            link.href === "/"
+              ? pathname === "/"
+              : pathname.startsWith(link.href);
 
           return (
             <Link
@@ -83,8 +91,13 @@ export default function Sidebar() {
                   : "bg-zinc-50 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 lg:bg-transparent"
               }`}
             >
-              <span className="lg:hidden">{link.mobileLabel ?? link.label}</span>
-              <span className="hidden lg:inline">{link.label}</span>
+              <span className="lg:hidden">
+                {link.mobileLabel ?? link.label}
+              </span>
+
+              <span className="hidden lg:inline">
+                {link.label}
+              </span>
             </Link>
           );
         })}
@@ -96,6 +109,7 @@ export default function Sidebar() {
           className="flex w-full items-center justify-between rounded-xl px-4 py-3 font-bold text-red-600 transition hover:bg-red-50"
         >
           <span>Esci</span>
+
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
