@@ -4,6 +4,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import NotificationCenter from "@/components/NotificationCenter";
+import CognanelloAvailabilityNotifications from "@/components/CognanelloAvailabilityNotifications";
 import { getDashboardStats } from "@/lib/dashboard";
 import { supabaseServer } from "@/lib/supabase-server";
 
@@ -1566,6 +1567,8 @@ export default async function Home({ searchParams }: PageProps) {
           </div>
 
           <NotificationCenter />
+
+          <CognanelloAvailabilityNotifications />
 
           <SectionCard title="Agenda (Prossimi 10 giorni)">
             <>
