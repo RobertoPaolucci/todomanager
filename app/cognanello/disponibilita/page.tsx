@@ -63,6 +63,11 @@ function formatSelectedDate(dateString: string) {
   }).format(new Date(year, month - 1, day));
 }
 
+function formatWhatsappDate(dateString: string) {
+  const [year, month, day] = dateString.split("-");
+  return `${day}/${month}/${year}`;
+}
+
 function formatTime(value: string | null) {
   if (!value) return "—";
 
@@ -264,15 +269,10 @@ export default function CognanelloDisponibilitaPage() {
           : "RIAPERTURA";
 
       const message = [
-        "COGNANELLO – HORSEBACK RIDING",
-        "",
-        formatSelectedDate(selectedDate),
+        formatWhatsappDate(selectedDate),
         `${actionLabel} ${periodLabel}`,
-        "",
         `Persone già prenotate: ${selectedPeople}`,
         `Prenotazioni: ${selectedBookings.length}`,
-        "",
-        "Richiesta registrata in TodoManager.",
       ].join("\n");
 
       const whatsappUrl =
@@ -451,15 +451,16 @@ export default function CognanelloDisponibilitaPage() {
                       {day}
                     </div>
 
-                    {/* NUMERO PERSONE SENZA ICONA */}
                     <div
-  className={[
-    "mt-1 text-center text-base font-extrabold",
-    people > 0 ? "text-red-600" : "text-green-700",
-  ].join(" ")}
->
-  {people}
-</div>
+                      className={[
+                        "mt-1 text-center text-base font-extrabold",
+                        people > 0
+                          ? "text-red-600"
+                          : "text-green-700",
+                      ].join(" ")}
+                    >
+                      {people}
+                    </div>
 
                     {partial && (
                       <div className="mt-1 text-center text-[9px] font-extrabold leading-tight text-zinc-800">
@@ -592,7 +593,6 @@ export default function CognanelloDisponibilitaPage() {
             </div>
           ) : (
             <div className="mt-4">
-              {/* INTESTAZIONE */}
               <div className="grid grid-cols-[55px_minmax(105px,1.3fr)_85px_minmax(100px,1fr)_48px] gap-2 border-b border-zinc-200 px-2 pb-2 text-[11px] font-bold uppercase text-zinc-500">
                 <div>Pers.</div>
                 <div>Prenotazione</div>
@@ -601,7 +601,6 @@ export default function CognanelloDisponibilitaPage() {
                 <div className="text-right">Ora</div>
               </div>
 
-              {/* RIGHE PRENOTAZIONI */}
               <div className="divide-y divide-zinc-200">
                 {selectedBookings.map((booking) => (
                   <div
