@@ -350,6 +350,12 @@ export default async function CognanelloPage({
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <Link
+  href="/cognanello/disponibilita"
+  className="inline-flex items-center justify-center rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-extrabold text-white shadow-sm"
+>
+  🐴 Disponibilità cavalli
+</Link>
               <span className="inline-flex items-center rounded-full bg-white px-3 py-1 text-sm font-semibold text-zinc-700 shadow-sm">
                 Prenotazioni: {totalBookings}
               </span>
