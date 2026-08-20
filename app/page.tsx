@@ -976,8 +976,8 @@ export default async function Home({ searchParams }: PageProps) {
       subtitle="Panoramica economica e operativa del gestionale"
     >
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px] lg:gap-6">
-        <div className="space-y-4 sm:space-y-6">
-          <div className="mx-auto flex w-full max-w-md items-center justify-between rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm">
+        <div className="contents md:block md:space-y-6">
+          <div className="order-3 mx-auto flex w-full max-w-md items-center justify-between rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm md:order-none">
             <Link
               href={`/?m=${prevMonth}&y=${prevYear}`}
               className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-zinc-100"
@@ -1006,7 +1006,7 @@ export default async function Home({ searchParams }: PageProps) {
             </Link>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-md">
+          <div className="order-3 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-md md:order-none">
             <div className="bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white sm:text-base">
               Bilancio mensile
             </div>
@@ -1201,7 +1201,7 @@ export default async function Home({ searchParams }: PageProps) {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-md">
+          <div className="order-3 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-md md:order-none">
             <div className="bg-zinc-800 px-4 py-3 text-center text-sm font-semibold text-white sm:text-base">
               Presenze 2025 vs 2026
             </div>
@@ -1458,8 +1458,8 @@ export default async function Home({ searchParams }: PageProps) {
           </div>
         </div>
 
-        <div className="space-y-4 sm:space-y-6">
-          <div id="google-calendar-imports">
+        <div className="contents md:block md:space-y-6">
+          <div id="google-calendar-imports" className="order-1 md:order-none">
           <SectionCard title="📥 Nuove da Google Calendar">
             <div className="space-y-3">
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
@@ -1566,10 +1566,15 @@ export default async function Home({ searchParams }: PageProps) {
           </SectionCard>
           </div>
 
-          <NotificationCenter />
+          <div className="order-2 md:order-none">
+            <NotificationCenter />
+          </div>
 
-          <CognanelloAvailabilityNotifications />
+          <div className="order-4 md:order-none">
+            <CognanelloAvailabilityNotifications />
+          </div>
 
+          <div className="order-4 md:order-none">
           <SectionCard title="Agenda (Prossimi 10 giorni)">
             <>
               <div className="space-y-3 md:hidden">
@@ -1750,7 +1755,9 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
             </>
           </SectionCard>
+          </div>
 
+          <div className="order-4 md:order-none">
           <SectionCard title="Prenotazioni per canale (Storico)">
             <div className="space-y-4 pt-1">
               {bookingsByChannel.map((item) => (
@@ -1775,7 +1782,9 @@ export default async function Home({ searchParams }: PageProps) {
               ))}
             </div>
           </SectionCard>
+          </div>
 
+          <div className="order-4 md:order-none">
           <SectionCard title="Esperienze più vendute (Pax Totali)">
             <div className="space-y-4 pt-1">
               {bookingsByExperience.map((item) => (
@@ -1798,6 +1807,7 @@ export default async function Home({ searchParams }: PageProps) {
               ))}
             </div>
           </SectionCard>
+          </div>
         </div>
       </div>
     </AppShell>
