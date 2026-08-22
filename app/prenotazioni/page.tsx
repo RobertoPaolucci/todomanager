@@ -5,6 +5,7 @@ import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import MobileBookingCard from "@/components/MobileBookingCard";
 import SummarySelectionToolbar from "@/components/SummarySelectionToolbar";
+import BookingDateRangeFilter from "@/components/BookingDateRangeFilter";
 import { supabaseServer } from "@/lib/supabase-server";
 import { cancelBooking, restoreBooking, clearAlert } from "./actions";
 
@@ -670,45 +671,16 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
 
             <div className="border-t border-zinc-100 pt-4">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-                <form method="GET" className="grid gap-3 sm:grid-cols-3 xl:flex">
-                  <input type="hidden" name="q" value={q} />
-                  <input type="hidden" name="sort" value={sort} />
-                  <input type="hidden" name="dir" value={dir} />
-                  {showPast && <input type="hidden" name="past" value="true" />}
-                  {businessUnitFilter && <input type="hidden" name="bu" value={businessUnitFilter} />}
-                  {venueFilter && <input type="hidden" name="venue" value={venueFilter} />}
-
-                  <div>
-                    <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
-                      Dal
-                    </label>
-                    <input
-                      type="date"
-                      name="from"
-                      defaultValue={fromDate}
-                      className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-[16px] outline-none focus:border-zinc-500 sm:text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-[11px] font-bold uppercase text-zinc-400">
-                      Al
-                    </label>
-                    <input
-                      type="date"
-                      name="to"
-                      defaultValue={toDate}
-                      className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-[16px] outline-none focus:border-zinc-500 sm:text-sm"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-zinc-900 px-4 py-2.5 text-base font-bold text-white transition hover:bg-zinc-700 sm:text-sm"
-                  >
-                    Applica Date
-                  </button>
-                </form>
+                <BookingDateRangeFilter
+                  fromDate={fromDate}
+                  toDate={toDate}
+                  q={q}
+                  sort={sort}
+                  dir={dir}
+                  showPast={showPast}
+                  businessUnitFilter={businessUnitFilter}
+                  venueFilter={venueFilter}
+                />
 
                 <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <Link
