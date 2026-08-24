@@ -104,39 +104,7 @@ const MONEY_FIELDS = new Set([
   "supplier_amount_paid",
 ]);
 
-const INSERTABLE_FIELDS_TO_PRESERVE = [
-  "booking_reference",
-  "booking_created_at",
-  "booking_source",
-  "channel_id",
-  "experience_id",
-  "experience_name",
-  "supplier_id",
-  "business_unit_id",
-  "customer_name",
-  "customer_email",
-  "customer_phone",
-  "booking_date",
-  "booking_time",
-  "adults",
-  "children",
-  "infants",
-  "non_paying_adults",
-  "total_people",
-  "is_cancelled",
-  "your_unit_price",
-  "public_unit_price",
-  "supplier_unit_cost",
-  "total_to_you",
-  "total_customer",
-  "total_supplier_cost",
-  "margin_total",
-  "customer_payment_status",
-  "supplier_payment_status",
-  "supplier_amount_paid",
-  "notes",
-  "was_modified",
-];
+
 
 function cleanString(value: unknown) {
   return String(value ?? "").trim();
@@ -438,18 +406,6 @@ function getChangedFields(existing: ExistingBooking, bookingData: BookingData) {
       normalizeCompareValue(field, bookingData[field])
     );
   });
-}
-
-function copyInsertableBookingFields(existing: ExistingBooking) {
-  const payload: Record<string, any> = {};
-
-  for (const field of INSERTABLE_FIELDS_TO_PRESERVE) {
-    if (Object.prototype.hasOwnProperty.call(existing, field)) {
-      payload[field] = existing[field];
-    }
-  }
-
-  return payload;
 }
 
 async function getLatestBookingByReference(bookingReference: string) {
@@ -914,7 +870,13 @@ export async function POST(req: Request) {
     const rawBokunId = cleanString(body.bokun_id);
     const resolvedBokunId = BOKUN_ID_ALIASES[rawBokunId] ?? rawBokunId;
 
-    const incomingBookingReference = cleanString(body.booking_reference);
+    const incomingBookingReference = firstNonEmpty(
+      body.externalBookingReference,
+      body.external_booking_reference,
+      body.booking_reference,
+      body.productConfirmationCode,
+      body.product_confirmation_code
+    );
     const status = cleanString(body.status).toUpperCase();
     const action = cleanString(body.action).toUpperCase();
     const isCancelled =
@@ -1152,7 +1114,7 @@ export async function POST(req: Request) {
     const systemAlert = buildSystemAlert(alertType);
     const finalNotes = cleanNotes ? `${systemAlert}\n${cleanNotes}` : systemAlert;
 
-    let actionResult: "created" | "created_history" | "unchanged" = "created";
+    let actionResult: "created" | "updated" | "unchanged" = "created";
     let changedFields: string[] = [];
 
     if (existing) {
@@ -1166,8 +1128,7 @@ export async function POST(req: Request) {
           !isCancelled &&
           (Boolean(existing.is_cancelled) || !existing.booking_created_at);
 
-        const insertPayload = {
-          ...copyInsertableBookingFields(existing),
+        const updatePayload = {
           ...bookingData,
           booking_reference:
             existing.booking_reference || incomingBookingReference || null,
@@ -1178,15 +1139,16 @@ export async function POST(req: Request) {
           was_modified: nextWasModified,
         };
 
-        const { error: insertHistoryError } = await supabaseServer
+        const { error: updateError } = await supabaseServer
           .from("bookings")
-          .insert(insertPayload);
+          .update(updatePayload)
+          .eq("id", existing.id);
 
-        if (insertHistoryError) {
-          throw new Error(insertHistoryError.message);
+        if (updateError) {
+          throw new Error(updateError.message);
         }
 
-        actionResult = "created_history";
+        actionResult = "updated";
       }
     } else {
       const { error: insertError } = await supabaseServer
@@ -1218,7 +1180,8 @@ export async function POST(req: Request) {
       booking_source: bookingSource,
       business_unit_id: bookingData.business_unit_id,
       matched_existing_booking: Boolean(existing),
-      created_new_history_row: actionResult === "created_history",
+      updated_existing_booking: actionResult === "updated",
+      created_new_history_row: false,
       unchanged: actionResult === "unchanged",
       changed_fields: changedFields,
       preserved_existing_reference: Boolean(existing?.booking_reference),
