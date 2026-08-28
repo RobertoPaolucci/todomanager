@@ -52,3 +52,20 @@ Al termine di ogni lavoro indicare chiaramente:
 2. cosa è stato cambiato;
 3. il risultato dei controlli eseguiti, specificando quando `npm run build` non è stato eseguito secondo il flusso di sviluppo;
 4. eventuali problemi o aspetti da verificare manualmente.
+
+## Fine lavoro
+
+- Quando l'utente scrive esattamente `fine lavoro`, considerare la frase come autorizzazione esplicita a completare autonomamente la chiusura del lavoro corrente, senza chiedere ulteriori conferme.
+- Eseguire `git status` e controllare le modifiche presenti.
+- Esaminare `git diff` per verificare che le modifiche siano coerenti con il lavoro appena svolto.
+- Non includere mai nel commit file o modifiche estranee al lavoro corrente.
+- Eseguire ESLint mirato sui file modificati, quando applicabile.
+- Se ESLint segnala esclusivamente problemi preesistenti e non introdotti dal lavoro corrente, segnalarli senza modificare codice estraneo per correggerli.
+- Eseguire sempre `npm run build`.
+- Se build o TypeScript falliscono a causa delle modifiche appena fatte, correggere autonomamente il problema e ripetere i controlli.
+- Se la build finale non passa, non eseguire commit o push e spiegare il problema all'utente.
+- Se tutti i controlli sono corretti, eseguire `git add` esclusivamente sui file relativi al lavoro corrente.
+- Creare autonomamente un messaggio di commit breve e descrittivo, preferibilmente in formato Conventional Commits (`fix:`, `feat:`, `chore:` e simili).
+- Eseguire il commit e quindi `git push` sul branch corrente.
+- La frase esatta `fine lavoro` costituisce già autorizzazione esplicita per `git add`, `git commit` e `git push`.
+- Al termine mostrare soltanto un riepilogo breve contenente: file modificati, controlli eseguiti, risultato della build, messaggio e hash del commit, risultato del push.
