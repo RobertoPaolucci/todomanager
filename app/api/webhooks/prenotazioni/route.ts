@@ -699,8 +699,8 @@ function tryFindUniqueCandidate(params: {
 }
 
 async function findExistingBooking(params: {
-  bookingReference: string;
-  isCancelled: boolean;
+  bookingReferences: string[];
+  allowHeuristicMatch: boolean;
   experienceId: number;
   bookingDate: string;
   bookingTime: string;
@@ -711,8 +711,8 @@ async function findExistingBooking(params: {
   totalPeople: number | null;
 }) {
   const {
-    bookingReference,
-    isCancelled,
+    bookingReferences,
+    allowHeuristicMatch,
     experienceId,
     bookingDate,
     bookingTime,
@@ -725,12 +725,18 @@ async function findExistingBooking(params: {
 
   const selectFields = "*";
 
-  if (bookingReference) {
+  for (const bookingReference of bookingReferences) {
     const latestByReference = await getLatestBookingByReference(bookingReference);
-    if (latestByReference) return latestByReference;
+    if (latestByReference) {
+      return {
+        booking: latestByReference,
+        matchedReference: bookingReference,
+        usedHeuristicMatch: false,
+      };
+    }
   }
 
-  if (!isCancelled) return null;
+  if (!allowHeuristicMatch) return null;
   if (!bookingDate) return null;
 
   const { data: sameExperienceCandidates, error: sameExperienceError } =
@@ -761,7 +767,11 @@ async function findExistingBooking(params: {
   });
 
   if (sameExperienceResult.match) {
-    return await getLatestVersionForCandidate(sameExperienceResult.match);
+    return {
+      booking: await getLatestVersionForCandidate(sameExperienceResult.match),
+      matchedReference: null,
+      usedHeuristicMatch: true,
+    };
   }
 
   const { data: sameDateCandidates, error: sameDateError } = await supabaseServer
@@ -794,7 +804,7 @@ async function findExistingBooking(params: {
     JSON.stringify(
       {
         incoming: {
-          bookingReference,
+          bookingReferences,
           experienceId,
           bookingDate,
           bookingTime,
@@ -849,7 +859,11 @@ async function findExistingBooking(params: {
   );
 
   if (sameDateResult.match) {
-    return await getLatestVersionForCandidate(sameDateResult.match);
+    return {
+      booking: await getLatestVersionForCandidate(sameDateResult.match),
+      matchedReference: null,
+      usedHeuristicMatch: true,
+    };
   }
 
   return null;
@@ -870,21 +884,44 @@ export async function POST(req: Request) {
     const rawBokunId = cleanString(body.bokun_id);
     const resolvedBokunId = BOKUN_ID_ALIASES[rawBokunId] ?? rawBokunId;
 
-    const incomingBookingReference = firstNonEmpty(
-      body.externalBookingReference,
-      body.external_booking_reference,
-      body.booking_reference,
-      body.productConfirmationCode,
-      body.product_confirmation_code
+    const incomingBookingReferences = Array.from(
+      new Set(
+        [
+          body.externalBookingReference,
+          body.external_booking_reference,
+          body.booking_reference,
+          body.productConfirmationCode,
+          body.product_confirmation_code,
+        ]
+          .map(cleanString)
+          .filter(Boolean)
+      )
     );
+    const incomingBookingReference = incomingBookingReferences[0] || "";
     const status = cleanString(body.status).toUpperCase();
     const action = cleanString(body.action).toUpperCase();
     const isCancelled =
       status === "CANCELLED" ||
       status === "CANCELED" ||
+      action === "CANCELLED" ||
+      action === "CANCELED" ||
       action === "BOOKING_CANCELLED" ||
       action === "BOOKING_ITEM_CANCELLED";
+    const isModified =
+      action === "MODIFIED" || action === "BOOKING_MODIFIED";
+    const eventType = isCancelled
+      ? "CANCELLED"
+      : isModified
+        ? "MODIFIED"
+        : "CONFIRMED";
     const incomingEventDate = getIncomingEventDate(body);
+
+    console.log("WEBHOOK EVENT DETECTED", {
+      event_type: eventType,
+      status,
+      action,
+      candidate_references: incomingBookingReferences,
+    });
 
     if (!rawBokunId) {
       return NextResponse.json({ error: "bokun_id mancante" }, { status: 400 });
@@ -966,9 +1003,9 @@ export async function POST(req: Request) {
     const incomingTotalPeople =
       (adultsFromBody ?? 0) + (childrenFromBody ?? 0) + (infantsFromBody ?? 0);
 
-    const existing = await findExistingBooking({
-      bookingReference: incomingBookingReference,
-      isCancelled,
+    const existingMatch = await findExistingBooking({
+      bookingReferences: incomingBookingReferences,
+      allowHeuristicMatch: isModified || isCancelled,
       experienceId: experience.id,
       bookingDate: incomingBookingDate,
       bookingTime: incomingBookingTime,
@@ -978,14 +1015,25 @@ export async function POST(req: Request) {
       customerPhone: incomingCustomerPhone,
       totalPeople: incomingTotalPeople > 0 ? incomingTotalPeople : null,
     });
+    const existing = existingMatch?.booking || null;
 
-    if (isCancelled && !existing) {
+    console.log("WEBHOOK BOOKING MATCH", {
+      event_type: eventType,
+      candidate_references: incomingBookingReferences,
+      matched_booking_id: existing?.id || null,
+      matched_reference: existingMatch?.matchedReference || null,
+      used_heuristic_match: existingMatch?.usedHeuristicMatch || false,
+    });
+
+    if ((isModified || isCancelled) && !existing) {
       console.log(
-        "CANCEL NOT FOUND",
+        "WEBHOOK EVENT SKIPPED: ORIGINAL BOOKING NOT FOUND",
         JSON.stringify(
           {
+            event_type: eventType,
+            final_operation: "SKIP",
             incoming: {
-              booking_reference: incomingBookingReference,
+              booking_references: incomingBookingReferences,
               bokun_id_ricevuto: rawBokunId,
               bokun_id_risolto: resolvedBokunId,
               resolved_experience_id: experience.id,
@@ -1010,7 +1058,7 @@ export async function POST(req: Request) {
         success: false,
         skipped: true,
         reason:
-          "Cancellazione ricevuta ma prenotazione esistente non trovata. Nessun dato aggiornato per evitare abbinamenti sbagliati.",
+          `${eventType} ricevuto ma prenotazione esistente non trovata. Nessun dato aggiornato per evitare duplicati o abbinamenti sbagliati.`,
       });
     }
 
@@ -1167,6 +1215,22 @@ export async function POST(req: Request) {
 
       actionResult = "created";
     }
+
+    const finalOperation = isCancelled
+      ? "CANCEL"
+      : existing
+        ? "UPDATE"
+        : "INSERT";
+
+    console.log("WEBHOOK FINAL OPERATION", {
+      event_type: eventType,
+      final_operation: finalOperation,
+      action_result: actionResult,
+      candidate_references: incomingBookingReferences,
+      matched_reference: existingMatch?.matchedReference || null,
+      used_heuristic_match: existingMatch?.usedHeuristicMatch || false,
+      booking_id: existing?.id || null,
+    });
 
     revalidatePath("/");
     revalidatePath("/prenotazioni");
