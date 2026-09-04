@@ -2,6 +2,9 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import InvoiceReportButton, {
+  type InvoiceReportRow,
+} from "@/components/InvoiceReportButton";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
 import { saveFmdqInvoice } from "./actions";
@@ -21,6 +24,17 @@ type ChannelGroup = {
   totalAdults: number;
   totalChildren: number;
   totalPeople: number;
+};
+
+type InvoiceReportBooking = {
+  experience_id?: number | string | null;
+  experience_name?: string | null;
+  adults?: number | string | null;
+  children?: number | string | null;
+  _adult_unit_cost?: number | null;
+  _child_unit_cost?: number | null;
+  _adult_amount?: number | null;
+  _child_amount?: number | null;
 };
 
 function formatEuro(value: number) {
@@ -252,6 +266,81 @@ function optionalNumber(
   }
 
   return numberValue;
+}
+
+function getInvoiceReportRows(
+  bookings: InvoiceReportBooking[]
+): InvoiceReportRow[] {
+  const rows = new Map<
+    string,
+    InvoiceReportRow & {
+      unitPrices: Set<number>;
+    }
+  >();
+
+  for (const booking of bookings) {
+    const experienceId = String(
+      booking.experience_id || booking.experience_name || "-"
+    );
+    const experience = String(
+      booking.experience_name || "Esperienza non indicata"
+    );
+
+    const categories = [
+      {
+        key: "adults",
+        label: "Adulti" as const,
+        quantity: getAdults(booking),
+        unitPrice: Number(booking._adult_unit_cost || 0),
+        amount: Number(booking._adult_amount || 0),
+      },
+      {
+        key: "children",
+        label: "Bambini" as const,
+        quantity: getChildren(booking),
+        unitPrice: Number(booking._child_unit_cost || 0),
+        amount: Number(booking._child_amount || 0),
+      },
+    ];
+
+    for (const category of categories) {
+      if (category.quantity <= 0) continue;
+
+      const key = `${experienceId}:${category.key}`;
+      const current = rows.get(key);
+
+      if (current) {
+        current.quantity += category.quantity;
+        current.total += category.amount;
+        current.unitPrices.add(category.unitPrice);
+      } else {
+        rows.set(key, {
+          key,
+          experience,
+          category: category.label,
+          quantity: category.quantity,
+          unitPrice: category.unitPrice,
+          total: category.amount,
+          unitPrices: new Set([category.unitPrice]),
+        });
+      }
+    }
+  }
+
+  return Array.from(rows.values())
+    .sort((a, b) => {
+      const experienceCompare = a.experience.localeCompare(
+        b.experience,
+        "it"
+      );
+
+      if (experienceCompare !== 0) return experienceCompare;
+      return a.category === "Adulti" ? -1 : 1;
+    })
+    .map(({ unitPrices, ...row }) => ({
+      ...row,
+      unitPrice: unitPrices.size === 1 ? row.unitPrice : null,
+    }));
 }
 
 export default async function FatturazioneFmdqPage({
@@ -963,6 +1052,9 @@ export default async function FatturazioneFmdqPage({
                   savedInvoiceNumber ||
                   defaultInvoiceNumber;
 
+                const reportRows =
+                  getInvoiceReportRows(group.bookings);
+
                 return (
                   <div
                     key={group.channelId}
@@ -1125,6 +1217,18 @@ export default async function FatturazioneFmdqPage({
                           </button>
 
                         </form>
+
+                        <InvoiceReportButton
+                          channelName={group.channelName}
+                          companyName={group.companyName}
+                          invoiceNumber={savedInvoiceNumber || null}
+                          invoiceDate={group.invoice?.invoice_date || null}
+                          period={`${formatDate(firstDay)} - ${formatDate(lastDay)}`}
+                          rows={reportRows}
+                          totalAdults={group.totalAdults}
+                          totalChildren={group.totalChildren}
+                          totalInvoice={group.total}
+                        />
 
                         <div className="min-w-[120px] text-right text-xl font-black text-zinc-900">
                           {formatEuro(group.total)}

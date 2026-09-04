@@ -46,3 +46,75 @@ button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
+
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
+@media print {
+  html,
+  body {
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  body > *:not(.invoice-report-overlay) {
+    display: none !important;
+  }
+
+  .invoice-report-overlay {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  .invoice-report-print {
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .invoice-report-no-print {
+    display: none !important;
+  }
+
+  .invoice-report-table-wrapper {
+    overflow: visible !important;
+  }
+
+  .invoice-report-print table {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .invoice-report-print thead {
+    display: table-header-group;
+  }
+
+  .invoice-report-print tr,
+  .invoice-report-print footer {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
