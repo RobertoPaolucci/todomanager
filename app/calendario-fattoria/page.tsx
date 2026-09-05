@@ -15,6 +15,10 @@ type Booking = {
   children: number | null;
   infants: number | null;
   non_paying_adults: number | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  booking_source: string | null;
+  channels: { name: string | null } | { name: string | null }[] | null;
 };
 
 // Codici del catalogo Bokun: bookings.experience_id usa invece experiences.id.
@@ -34,6 +38,11 @@ const experiences: Record<string, { label: string; color: string }> = {
   "1196268": { label: "Visita + Tagliere", color: "border-teal-200 bg-teal-50 text-teal-900" },
 };
 
+const tableExperienceCodes = new Set([
+  "956471", "992013", "1174621", "1150881", "1108658",
+  "1109713", "1149151", "956474", "956472", "1196268",
+]);
+
 function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -43,11 +52,27 @@ function monthHref(date: Date) {
 }
 
 function peopleCount(booking: Booking) {
-  if (booking.total_people !== null && booking.total_people !== undefined) {
+  if (Number(booking.total_people) > 0) {
     return Number(booking.total_people);
   }
   return Number(booking.adults || 0) + Number(booking.children || 0) +
     Number(booking.infants || 0) + Number(booking.non_paying_adults || 0);
+}
+
+function tooltipPeople(booking: Booking) {
+  return [
+    { count: booking.adults, singular: "adulto", plural: "adulti" },
+    { count: booking.children, singular: "bambino", plural: "bambini" },
+    { count: booking.infants, singular: "neonato", plural: "neonati" },
+    { count: booking.non_paying_adults, singular: "guida", plural: "guide" },
+  ].filter(({ count }) => Number(count) > 0)
+    .map(({ count, singular, plural }) => `${count} ${Number(count) === 1 ? singular : plural}`)
+    .join(" + ");
+}
+
+function tooltipChannel(booking: Booking) {
+  const channel = Array.isArray(booking.channels) ? booking.channels[0] : booking.channels;
+  return channel?.name?.trim() || booking.booking_source?.trim() || "";
 }
 
 async function loadCurrentBookings() {
@@ -60,7 +85,7 @@ async function loadCurrentBookings() {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabaseServer
       .from("bookings")
-      .select("id, booking_reference, booking_date, experience_id, is_cancelled, total_people, adults, children, infants, non_paying_adults")
+      .select("id, booking_reference, booking_date, experience_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
@@ -105,6 +130,7 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
   }).format(first);
 
   const bookingsByDay = new Map<string, { booking: Booking; label: string; color: string }[]>();
+  const tableExperienceIds = new Set<string>();
   let loadFailed = false;
   try {
     const [bookings, catalog] = await Promise.all([
@@ -113,6 +139,11 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
         .in("bokun_id", Object.keys(experiences)),
     ]);
     if (catalog.error) throw new Error("Impossibile caricare le esperienze.");
+    for (const experience of catalog.data || []) {
+      if (tableExperienceCodes.has(String(experience.bokun_id))) {
+        tableExperienceIds.add(String(experience.id));
+      }
+    }
     const experienceById = new Map(
       (catalog.data || []).map((experience) => [String(experience.id), experiences[String(experience.bokun_id)]])
     );
@@ -160,20 +191,49 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
                 const key = dateKey(day);
                 const isToday = key === today;
                 const inMonth = day.getUTCMonth() === monthIndex;
+                const dayBookings = bookingsByDay.get(key) || [];
+                const tableBookings = dayBookings.filter(({ booking }) =>
+                  tableExperienceIds.has(String(booking.experience_id))
+                );
+                const tablePeople = tableBookings.reduce(
+                  (total, { booking }) => total + peopleCount(booking), 0
+                );
                 return (
-                  <div key={key} className={`min-h-28 min-w-0 border-t border-r border-zinc-200 p-0.5 last:border-r-0 sm:min-h-36 sm:p-2 [&:nth-child(7n)]:border-r-0 ${isToday ? "bg-emerald-50/50 ring-2 ring-inset ring-emerald-500" : inMonth ? "bg-white" : "bg-zinc-100/70"}`}>
+                  <div key={key} className={`@container relative hover:z-40 focus-within:z-40 min-h-28 min-w-0 border-t border-r border-zinc-200 p-0.5 last:border-r-0 sm:min-h-36 sm:p-2 [&:nth-child(7n)]:border-r-0 ${isToday ? "bg-emerald-50/50 ring-2 ring-inset ring-emerald-500" : inMonth ? "bg-white" : "bg-zinc-100/70"}`}>
+                    <div className="mb-2 flex min-w-0 items-center gap-0.5 sm:gap-1">
                     <time dateTime={key} aria-current={isToday ? "date" : undefined}
                       aria-label={`${new Intl.DateTimeFormat("it-IT", { dateStyle: "full", timeZone: "UTC" }).format(day)}${isToday ? ", oggi" : ""}`}
-                      className={`mb-2 inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold sm:h-8 sm:w-8 sm:text-sm ${isToday ? "bg-emerald-700 text-white" : inMonth ? "text-zinc-800" : "text-zinc-400"}`}>
+                      className={`inline-flex h-[clamp(12px,24cqw,28px)] w-[clamp(12px,24cqw,28px)] shrink-0 items-center justify-center rounded-full bg-white text-[clamp(8px,14cqw,14px)] font-bold ${isToday ? "border-2 border-emerald-600 text-emerald-700" : inMonth ? "border border-zinc-300 text-zinc-800" : "border border-zinc-200 text-zinc-400"}`}>
                       {day.getUTCDate()}
                     </time>
+                    {tableBookings.length > 0 && (
+                      <span
+                        aria-label={`${tableBookings.length} tavoli, ${tablePeople} persone`}
+                        className={`whitespace-nowrap text-[clamp(4px,10cqw,11px)] font-semibold leading-tight tracking-tight ${inMonth ? "text-zinc-700" : "text-zinc-400"}`}
+                      >
+                        {tableBookings.length} T · {tablePeople} pax
+                      </span>
+                    )}
+                    </div>
                     <ul className="space-y-1.5">
-                      {(bookingsByDay.get(key) || []).map(({ booking, label, color }) => (
-                        <li key={booking.id}>
+                      {dayBookings.map(({ booking, label, color }) => (
+                        <li key={booking.id} className="group/booking relative">
                           <Link href={`/prenotazioni/${booking.id}/modifica`} prefetch={false}
-                            className={`block rounded-md border px-0.5 py-2 text-[10px] font-semibold leading-snug whitespace-normal [overflow-wrap:anywhere] transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-900 sm:px-1.5 sm:text-xs ${color}`}>
+                            aria-describedby={`booking-tooltip-${booking.id}`}
+                            className={`peer block rounded-md border px-0.5 py-2 text-[10px] font-semibold leading-snug whitespace-normal [overflow-wrap:anywhere] transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-900 sm:px-1.5 sm:text-xs ${color}`}>
                             {peopleCount(booking)} {label}
                           </Link>
+                          <div
+                            id={`booking-tooltip-${booking.id}`}
+                            role="tooltip"
+                            className={`pointer-events-none absolute top-full z-50 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-200 bg-white p-3 text-left text-xs leading-relaxed text-zinc-700 shadow-lg [overflow-wrap:anywhere] [@media(hover:hover)_and_(pointer:fine)]:group-hover/booking:block [@media(hover:hover)_and_(pointer:fine)]:peer-focus-visible:block ${day.getUTCDay() === 0 || day.getUTCDay() >= 4 ? "right-0" : "left-0"}`}
+                          >
+                            {tooltipPeople(booking) && <p>{tooltipPeople(booking)}</p>}
+                            <p className="font-bold text-zinc-900">{label}</p>
+                            {tooltipChannel(booking) && <p>{tooltipChannel(booking)}</p>}
+                            {booking.customer_name?.trim() && <p>{booking.customer_name.trim()}</p>}
+                            {booking.customer_phone?.trim() && <p>{booking.customer_phone.trim()}</p>}
+                          </div>
                         </li>
                       ))}
                     </ul>
