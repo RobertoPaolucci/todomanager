@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 const links = [
   { href: "/", label: "Dashboard", mobileLabel: "Dashboard" },
   { href: "/prenotazioni", label: "Prenotazioni", mobileLabel: "Prenot." },
+  { href: "/calendario-fattoria", label: "Calendario Fattoria", mobileLabel: "Calendario Fattoria" },
   {
     href: "/import/google-calendar",
     label: "Import Google Calendar",
