@@ -26,6 +26,7 @@ type WebhookPayload = {
   title?: string;
   summary?: string;
   description?: string;
+  notes?: string;
   start?: any;
   start_date?: string;
   startDate?: string;
@@ -683,8 +684,8 @@ function hasRelevantBookingChanges(
     adults: number;
     children: number;
     infants: number;
-    experienceId: number;
-    channelId: number;
+    experienceId: number | null;
+    channelId: number | null;
   }
 ) {
   return (
@@ -866,6 +867,12 @@ export async function POST(request: NextRequest) {
 
     const gcalUid = getEventId(payload);
     const title = getTitle(payload);
+    const isTuscanEscape = [
+      payload.title,
+      payload.summary,
+      payload.description,
+      payload.notes,
+    ].some((value) => normalize(value).includes("tuscan escape"));
     const status = getStatus(payload);
     const start = parseStart(payload);
     const gcalUpdatedAt = getGoogleCalendarUpdatedAt(payload);
@@ -911,7 +918,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (!title) {
+    if (!title && !isTuscanEscape) {
       return NextResponse.json(
         { ok: true, skipped: true, reason: "Titolo vuoto." },
         { status: 200 }
@@ -932,7 +939,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const people = parsePeople(title);
+    // Tuscan Escape puo essere un blocco provvisorio senza partecipanti.
+    const people = isTuscanEscape
+      ? { adults: 1, children: 0, infants: 0 }
+      : parsePeople(title);
 
     if (!people) {
       return NextResponse.json(
@@ -943,7 +953,7 @@ export async function POST(request: NextRequest) {
 
     const experienceId = detectExperienceId(title);
 
-    if (!experienceId) {
+    if (!experienceId && !isTuscanEscape) {
       return NextResponse.json(
         { ok: true, skipped: true, reason: "Esperienza non riconosciuta." },
         { status: 200 }
@@ -951,10 +961,12 @@ export async function POST(request: NextRequest) {
     }
 
     const channels = await getChannels(supabase);
-    const channelLabel = detectChannelLabel(title);
+    const channelLabel = isTuscanEscape
+      ? "Tuscan Escape"
+      : detectChannelLabel(title);
     const channelId = await findChannelId({ channels, label: channelLabel });
 
-    if (!channelId) {
+    if (!channelId && !isTuscanEscape) {
       return NextResponse.json(
         {
           ok: true,
@@ -965,9 +977,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const customerName = extractCustomerName(title, channelLabel);
+    const customerName = isTuscanEscape
+      ? "Tuscan Escape"
+      : extractCustomerName(title, channelLabel);
     const bookingReference = extractBookingReference(title, gcalUid);
-    const nonPayingAdults = extractNonPayingAdults(title);
+    const nonPayingAdults = isTuscanEscape ? 0 : extractNonPayingAdults(title);
 
     const existingByBookingReference = existingByGcalUid?.id
       ? null
