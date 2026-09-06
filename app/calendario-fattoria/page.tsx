@@ -8,7 +8,10 @@ type Booking = {
   id: number;
   booking_reference: string | null;
   booking_date: string | null;
+  booking_time: string | null;
   experience_id: number | null;
+  experience_name: string | null;
+  channel_id: number | null;
   is_cancelled: boolean | null;
   total_people: number | null;
   adults: number | null;
@@ -43,6 +46,12 @@ const tableExperienceCodes = new Set([
   "1109713", "1149151", "956474", "956472", "1196268",
 ]);
 
+function isTuscanEscape(booking: Booking) {
+  return booking.experience_id === 22 || booking.channel_id === 7 ||
+    booking.booking_source?.trim().toLowerCase() === "tuscan escape" ||
+    /tuscan\s+escape/i.test(booking.experience_name ?? "");
+}
+
 function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -56,7 +65,8 @@ function peopleCount(booking: Booking) {
     return Number(booking.total_people);
   }
   return Number(booking.adults || 0) + Number(booking.children || 0) +
-    Number(booking.infants || 0) + Number(booking.non_paying_adults || 0);
+    Number(booking.infants || 0) +
+    (isTuscanEscape(booking) ? 0 : Number(booking.non_paying_adults || 0));
 }
 
 function tooltipPeople(booking: Booking) {
@@ -85,7 +95,7 @@ async function loadCurrentBookings() {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabaseServer
       .from("bookings")
-      .select("id, booking_reference, booking_date, experience_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
+      .select("id, booking_reference, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
@@ -150,7 +160,9 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
     const startDate = dateKey(days[0]);
     const endDate = dateKey(days[days.length - 1]);
     for (const booking of bookings) {
-      const experience = experienceById.get(String(booking.experience_id));
+      const experience = isTuscanEscape(booking)
+        ? { label: "Tuscan Escape", color: "border-indigo-300 bg-indigo-100 text-indigo-950" }
+        : experienceById.get(String(booking.experience_id));
       if (booking.is_cancelled === true || !experience || !booking.booking_date ||
         booking.booking_date < startDate || booking.booking_date > endDate) continue;
       const list = bookingsByDay.get(booking.booking_date) || [];
@@ -193,7 +205,7 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
                 const inMonth = day.getUTCMonth() === monthIndex;
                 const dayBookings = bookingsByDay.get(key) || [];
                 const tableBookings = dayBookings.filter(({ booking }) =>
-                  tableExperienceIds.has(String(booking.experience_id))
+                  isTuscanEscape(booking) || tableExperienceIds.has(String(booking.experience_id))
                 );
                 const tablePeople = tableBookings.reduce(
                   (total, { booking }) => total + peopleCount(booking), 0
@@ -228,11 +240,24 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
                             role="tooltip"
                             className={`pointer-events-none absolute top-full z-50 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-200 bg-white p-3 text-left text-xs leading-relaxed text-zinc-700 shadow-lg [overflow-wrap:anywhere] [@media(hover:hover)_and_(pointer:fine)]:group-hover/booking:block [@media(hover:hover)_and_(pointer:fine)]:peer-focus-visible:block ${day.getUTCDay() === 0 || day.getUTCDay() >= 4 ? "right-0" : "left-0"}`}
                           >
+                            {isTuscanEscape(booking) ? (
+                              <>
+                                <p className="font-bold text-zinc-900">Tuscan Escape</p>
+                                <p>Ora: {booking.booking_time?.slice(0, 5) || "Da definire"}</p>
+                                <p>{tooltipPeople(booking) || "1 adulto"} (provvisorio)</p>
+                                <p>Canale: Tuscan Escape</p>
+                                <p>Booking #{booking.id}</p>
+                                {booking.booking_reference && <p>Riferimento: {booking.booking_reference}</p>}
+                              </>
+                            ) : (
+                              <>
                             {tooltipPeople(booking) && <p>{tooltipPeople(booking)}</p>}
                             <p className="font-bold text-zinc-900">{label}</p>
                             {tooltipChannel(booking) && <p>{tooltipChannel(booking)}</p>}
                             {booking.customer_name?.trim() && <p>{booking.customer_name.trim()}</p>}
                             {booking.customer_phone?.trim() && <p>{booking.customer_phone.trim()}</p>}
+                              </>
+                            )}
                           </div>
                         </li>
                       ))}

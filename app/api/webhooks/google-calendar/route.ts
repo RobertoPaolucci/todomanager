@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
+import { TUSCAN_ESCAPE_STAGING_DEFAULTS } from "@/lib/google-calendar-tuscan-escape";
 
 export const dynamic = "force-dynamic";
 
@@ -951,7 +952,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const experienceId = detectExperienceId(title);
+    const experienceId = isTuscanEscape
+      ? TUSCAN_ESCAPE_STAGING_DEFAULTS.experience_id
+      : detectExperienceId(title);
 
     if (!experienceId && !isTuscanEscape) {
       return NextResponse.json(
@@ -960,11 +963,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const channels = await getChannels(supabase);
+    const channels = isTuscanEscape ? [] : await getChannels(supabase);
     const channelLabel = isTuscanEscape
       ? "Tuscan Escape"
       : detectChannelLabel(title);
-    const channelId = await findChannelId({ channels, label: channelLabel });
+    const channelId = isTuscanEscape
+      ? TUSCAN_ESCAPE_STAGING_DEFAULTS.channel_id
+      : await findChannelId({ channels, label: channelLabel });
 
     if (!channelId && !isTuscanEscape) {
       return NextResponse.json(
@@ -1008,6 +1013,11 @@ export async function POST(request: NextRequest) {
     }
 
     let importStatus = nextStatusForExisting(existing);
+    // Recupera i blocchi falliti prima del mapping, senza riaprire prenotazioni collegate.
+    if (isTuscanEscape && existing?.import_status === "needs_review" &&
+      !existing.imported_booking_id) {
+      importStatus = "pending";
+    }
 
     // Se l'evento era già collegato a una prenotazione Todo Manager e Google
     // cambia data, ora, partecipanti, esperienza, canale o riferimento,

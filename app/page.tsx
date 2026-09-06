@@ -604,6 +604,7 @@ export default async function Home({ searchParams }: PageProps) {
       )
       .eq("import_origin", "make")
       .in("import_status", googleImportStatusesToShow)
+      .gte("booking_date", todayStr)
       .order("id", { ascending: false })
       .limit(200);
 

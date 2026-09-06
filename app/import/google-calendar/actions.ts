@@ -3,6 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  canRetryTuscanEscapeImport,
+  isTuscanEscapeRow,
+  TUSCAN_ESCAPE_NAME,
+  TUSCAN_ESCAPE_EXPERIENCE,
+  TUSCAN_ESCAPE_STAGING_DEFAULTS,
+  TUSCAN_ESCAPE_SUPPLIER_ID,
+  TUSCAN_ESCAPE_BUSINESS_UNIT_ID,
+} from "@/lib/google-calendar-tuscan-escape";
 
 type StagingRow = {
   id: number;
@@ -13,13 +22,14 @@ type StagingRow = {
   adults: number;
   children: number;
   infants: number | null;
-  experience_id: number;
-  channel_id: number;
+  experience_id: number | null;
+  channel_id: number | null;
   booking_source: string | null;
   notes: string | null;
   gcal_uid: string;
   original_title: string | null;
   import_status: string;
+  imported_booking_id: number | null;
 };
 
 type ExperienceRow = {
@@ -147,12 +157,16 @@ function customerMatchKey(value: string | null | undefined) {
 }
 
 function getResolvedCustomerName(row: StagingRow) {
+  if (isTuscanEscapeRow(row)) return TUSCAN_ESCAPE_NAME;
   if (isItalyOnABudgetRow(row)) return "Italy";
   if (isTuscanEscapeGuideRow(row)) return "Tuscan";
   return String(row.customer_name ?? "").trim() || "Da verificare";
 }
 
 function getImportPeople(row: StagingRow) {
+  if (isTuscanEscapeRow(row)) {
+    return { adults: 1, children: 0, infants: 0, nonPayingAdults: 0 };
+  }
   let adults = Number(row.adults ?? 0);
   let children = Number(row.children ?? 0);
   let infants = Number(row.infants ?? 0);
@@ -211,6 +225,8 @@ async function findExistingByReference(bookingReference: string) {
 }
 
 async function findPossibleDuplicate(row: StagingRow) {
+  // Il nome generico del blocco non identifica un cliente: conta il riferimento.
+  if (isTuscanEscapeRow(row)) return null;
   const rowTime = normalizeTime(row.booking_time);
   const people = getImportPeople(row);
   const rowCustomerKey = customerMatchKey(getResolvedCustomerName(row));
@@ -241,7 +257,7 @@ async function findPossibleDuplicate(row: StagingRow) {
   return possibleDuplicate ?? null;
 }
 
-async function getExperience(experienceId: number) {
+async function getExperience(experienceId: number | null) {
   const { data, error } = await supabaseServer
     .from("experiences")
     .select("id, name, supplier_id, supplier_unit_cost, is_group_pricing")
@@ -253,7 +269,7 @@ async function getExperience(experienceId: number) {
   return data as ExperienceRow;
 }
 
-async function getChannel(channelId: number) {
+async function getChannel(channelId: number | null) {
   const { data, error } = await supabaseServer
     .from("channels")
     .select("id, name")
@@ -265,7 +281,7 @@ async function getChannel(channelId: number) {
   return data as ChannelRow;
 }
 
-async function getPrice(experienceId: number, channelId: number) {
+async function getPrice(experienceId: number | null, channelId: number | null) {
   const { data, error } = await supabaseServer
     .from("experience_channel_prices")
     .select("your_unit_price, public_unit_price")
@@ -291,19 +307,21 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
   const { data: rowsData } = await supabaseServer
     .from("google_calendar_import_staging")
     .select(
-      "id, booking_date, booking_time, booking_reference, customer_name, adults, children, infants, experience_id, channel_id, booking_source, notes, gcal_uid, original_title, import_status"
+      "id, booking_date, booking_time, booking_reference, customer_name, adults, children, infants, experience_id, channel_id, booking_source, notes, gcal_uid, original_title, import_status, imported_booking_id"
     )
     .in("id", selectedIds);
 
   const rows = (rowsData ?? []) as StagingRow[];
 
   for (const row of rows) {
+    const isTuscanEscape = isTuscanEscapeRow(row);
     if (row.import_status === "gcal_cancelled") {
       continue;
     }
 
     const canProcessNormally =
-      row.import_status === "pending" || row.import_status === "rolled_back";
+      row.import_status === "pending" || row.import_status === "rolled_back" ||
+      canRetryTuscanEscapeImport(row);
 
     // Serve per rivalutare i vecchi "possible_duplicate" creati con la
     // precedente regola che non confrontava il nome cliente.
@@ -339,9 +357,21 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       continue;
     }
 
-    const experience = await getExperience(row.experience_id);
-    const channel = await getChannel(row.channel_id);
-    const price = await getPrice(row.experience_id, row.channel_id);
+    const experience = isTuscanEscape
+      ? {
+          id: TUSCAN_ESCAPE_STAGING_DEFAULTS.experience_id,
+          name: TUSCAN_ESCAPE_EXPERIENCE,
+          supplier_id: TUSCAN_ESCAPE_SUPPLIER_ID,
+          supplier_unit_cost: 0,
+          is_group_pricing: false,
+        }
+      : await getExperience(row.experience_id);
+    const channel = isTuscanEscape
+      ? { id: TUSCAN_ESCAPE_STAGING_DEFAULTS.channel_id, name: TUSCAN_ESCAPE_NAME }
+      : await getChannel(row.channel_id);
+    const price = isTuscanEscape
+      ? { your_unit_price: 0, public_unit_price: 0 }
+      : await getPrice(row.experience_id, row.channel_id);
 
     if (!experience || !channel || !price) {
       await markRow(row.id, "needs_review", null);
@@ -363,8 +393,8 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const yourUnitPrice = toNumber(price.your_unit_price);
     const publicUnitPrice = toNumber(price.public_unit_price);
-    const supplierUnitCost = toNumber(experience.supplier_unit_cost);
-    const isGroupPricing = Boolean(experience.is_group_pricing);
+    const supplierUnitCost = isTuscanEscape ? 0 : toNumber(experience.supplier_unit_cost);
+    const isGroupPricing = isTuscanEscape ? false : Boolean(experience.is_group_pricing);
 
     const totalToYou = isGroupPricing
       ? yourUnitPrice
@@ -394,7 +424,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         total_amount: totalCustomer,
         customer_payment_status: "pending",
         supplier_payment_status: "pending",
-        booking_source: channel.name,
+        booking_source: isTuscanEscape ? TUSCAN_ESCAPE_NAME : channel.name,
         booking_reference: row.booking_reference,
         booking_created_at: new Date().toISOString().slice(0, 10),
         booking_time: normalizeTime(row.booking_time),
@@ -402,8 +432,8 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         children,
         total_people: totalPeople,
         notes,
-        channel_id: row.channel_id,
-        experience_id: row.experience_id,
+        channel_id: channel.id,
+        experience_id: experience.id,
         supplier_id: experience.supplier_id,
         your_unit_price: yourUnitPrice,
         public_unit_price: publicUnitPrice,
@@ -416,7 +446,9 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         supplier_amount_paid: 0,
         infants,
         was_modified: false,
-        business_unit_id: FMDQ_BUSINESS_UNIT_ID,
+        business_unit_id: isTuscanEscape
+          ? TUSCAN_ESCAPE_BUSINESS_UNIT_ID
+          : FMDQ_BUSINESS_UNIT_ID,
         non_paying_adults: nonPayingAdults,
       })
       .select("id")
@@ -427,7 +459,28 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       continue;
     }
 
-    await markRow(row.id, "imported", insertedBooking.id);
+    if (isTuscanEscape) {
+      const { error } = await supabaseServer
+        .from("google_calendar_import_staging")
+        .update({
+          customer_name: TUSCAN_ESCAPE_NAME,
+          booking_source: TUSCAN_ESCAPE_NAME,
+          adults,
+          children,
+          infants,
+          experience_id: experience.id,
+          channel_id: channel.id,
+          import_status: "imported",
+          imported_booking_id: insertedBooking.id,
+        })
+        .eq("id", row.id);
+
+      if (error) {
+        throw new Error(`Blocco creato, errore collegamento staging: ${error.message}`);
+      }
+    } else {
+      await markRow(row.id, "imported", insertedBooking.id);
+    }
   }
 
   redirectBack(returnDate, excludeHorseback);

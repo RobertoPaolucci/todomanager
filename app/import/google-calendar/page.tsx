@@ -5,6 +5,13 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  canRetryTuscanEscapeImport,
+  isTuscanEscapeRow,
+  TUSCAN_ESCAPE_EXPERIENCE,
+  TUSCAN_ESCAPE_NAME,
+  TUSCAN_ESCAPE_STAGING_DEFAULTS,
+} from "@/lib/google-calendar-tuscan-escape";
 import { cancelBooking } from "@/app/prenotazioni/actions";
 import {
   importSelectedGoogleCalendarRows,
@@ -1567,7 +1574,9 @@ export default async function GoogleCalendarImportPage({
     .order("booking_time", { ascending: true })
     .order("id", { ascending: true });
 
-  const stagingRowsRaw = (stagingData ?? []) as StagingRow[];
+  const stagingRowsRaw = ((stagingData ?? []) as StagingRow[]).map((row) =>
+    isTuscanEscapeRow(row) ? { ...row, ...TUSCAN_ESCAPE_STAGING_DEFAULTS } : row
+  );
 
   const { data: bookingsData } = await supabaseServer
     .from("bookings")
@@ -1699,6 +1708,7 @@ export default async function GoogleCalendarImportPage({
   }
 
   const rowsWithComputedStatus: ComputedStagingRow[] = stagingRows.map((row) => {
+    const isTuscanEscape = isTuscanEscapeRow(row);
     const existingByReference = existingReferenceMap.get(row.booking_reference);
     const existingByImportedId = row.imported_booking_id
       ? existingIdMap.get(row.imported_booking_id)
@@ -1723,7 +1733,7 @@ export default async function GoogleCalendarImportPage({
       existingBookings
     );
 
-    let computedStatus = row.import_status;
+    let computedStatus = canRetryTuscanEscapeImport(row) ? "pending" : row.import_status;
     let matchedBooking: BookingRow | undefined;
     let matchReason = "";
 
@@ -1732,7 +1742,7 @@ export default async function GoogleCalendarImportPage({
       "rolled_back",
       "possible_duplicate",
       "probable_match",
-    ].includes(row.import_status);
+    ].includes(row.import_status) || canRetryTuscanEscapeImport(row);
 
     // I vecchi stati possible_duplicate/probable_match vengono ricalcolati
     // con le regole nuove. Se non c'è più una corrispondenza reale tornano
@@ -1759,6 +1769,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stesso riferimento";
     } else if (
       canReevaluateMatching &&
+      !isTuscanEscape &&
       referenceMatchFromGoogleTitle
     ) {
       computedStatus = "already_exists";
@@ -1766,6 +1777,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stesso riferimento trovato nel titolo Google Calendar";
     } else if (
       canReevaluateMatching &&
+      !isTuscanEscape &&
       possibleDuplicate
     ) {
       computedStatus = "possible_duplicate";
@@ -1773,6 +1785,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stessa data, ora, esperienza, canale e persone";
     } else if (
       canReevaluateMatching &&
+      !isTuscanEscape &&
       probableMatch
     ) {
       computedStatus = "probable_match";
@@ -1780,6 +1793,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stessa ora, esperienza e canale, ma persone diverse";
     } else if (
       canReevaluateMatching &&
+      !isTuscanEscape &&
       probableNameMatch
     ) {
       computedStatus = "probable_match";
@@ -2022,14 +2036,18 @@ export default async function GoogleCalendarImportPage({
                   const todoBooking = comparisonRow.todoBooking;
 
                   const experienceName =
-                    googleRow?.experience_id !== null &&
+                    googleRow && isTuscanEscapeRow(googleRow)
+                      ? TUSCAN_ESCAPE_EXPERIENCE
+                      : googleRow?.experience_id !== null &&
                     googleRow?.experience_id !== undefined
                       ? experienceMap.get(googleRow.experience_id) ??
                         `ID ${googleRow.experience_id}`
                       : "Da verificare";
 
                   const channelName =
-                    googleRow?.channel_id !== null &&
+                    googleRow && isTuscanEscapeRow(googleRow)
+                      ? TUSCAN_ESCAPE_NAME
+                      : googleRow?.channel_id !== null &&
                     googleRow?.channel_id !== undefined
                       ? channelMap.get(googleRow.channel_id) ??
                         `ID ${googleRow.channel_id}`
