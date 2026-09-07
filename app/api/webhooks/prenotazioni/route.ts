@@ -4,6 +4,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import {
   BokunIdentityError,
   findBokunBooking,
+  requireBokunBusinessUnit,
   getBokunBookingReference,
   hasGetYourGuideReference,
   requireBokunIdentityForGYG,
@@ -922,7 +923,10 @@ export async function POST(req: Request) {
           .filter(Boolean)
       )
     );
-    const incomingBookingReference = incomingBookingReferences[0] || bokunBookingReference;
+    const incomingBookingReference = bokunBookingReference
+      ? [body.externalBookingReference, body.external_booking_reference, body.booking_reference]
+        .map(cleanString).find(ref => ref && ref !== bokunBookingReference && !/^TOD-T\d+$/i.test(ref)) || ""
+      : incomingBookingReferences[0] || "";
     const status = cleanString(body.status).toUpperCase();
     const action = cleanString(body.action).toUpperCase();
     const isCancelled =
@@ -952,7 +956,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "bokun_id mancante" }, { status: 400 });
     }
 
-    if (!incomingBookingReference && !isCancelled) {
+    if (!incomingBookingReference && !bokunBookingReference && !isCancelled) {
       return NextResponse.json(
         { error: "booking_reference mancante" },
         { status: 400 }
@@ -965,34 +969,6 @@ export async function POST(req: Request) {
         usato_per_todo_manager: resolvedBokunId,
       });
     }
-
-    const identifiedBokunBooking = bokunBookingReference
-      ? await findBokunBooking(supabaseServer, bokunBookingReference, incomingBookingReferences) as ExistingBooking | null
-      : null;
-    const channelReference = hasGetYourGuideReference(identifiedBokunBooking?.booking_reference)
-      ? identifiedBokunBooking!.booking_reference!
-      : incomingBookingReference;
-    const resolvedChannel = resolveChannel(body, channelReference) ||
-      (identifiedBokunBooking && resolveChannel(identifiedBokunBooking, identifiedBokunBooking.booking_reference || ""));
-
-    if (!resolvedChannel) {
-      console.error(
-        "Canale non riconosciuto. Payload:",
-        JSON.stringify(body, null, 2)
-      );
-
-      return NextResponse.json(
-        { error: "Canale non riconosciuto: prenotazione non salvata" },
-        { status: 400 }
-      );
-    }
-
-    const channelId = resolvedChannel.channelId;
-    const bookingSource = resolvedChannel.bookingSource;
-    requireBokunIdentityForGYG(
-      bokunBookingReference,
-      channelId === 3 || hasGetYourGuideReference(...incomingBookingReferences)
-    );
 
     const { data: experience, error: experienceError } = await supabaseServer
       .from("experiences")
@@ -1025,6 +1001,36 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
+    const businessUnitId = requireBokunBusinessUnit(experience.business_unit_id);
+
+    const identifiedBokunBooking = bokunBookingReference
+      ? await findBokunBooking(supabaseServer, businessUnitId, bokunBookingReference, incomingBookingReferences) as ExistingBooking | null
+      : null;
+    const channelReference = hasGetYourGuideReference(identifiedBokunBooking?.booking_reference)
+      ? identifiedBokunBooking!.booking_reference!
+      : incomingBookingReference;
+    const resolvedChannel = resolveChannel(body, channelReference) ||
+      (identifiedBokunBooking && resolveChannel(identifiedBokunBooking, identifiedBokunBooking.booking_reference || ""));
+
+    if (!resolvedChannel) {
+      console.error(
+        "Canale non riconosciuto. Payload:",
+        JSON.stringify(body, null, 2)
+      );
+
+      return NextResponse.json(
+        { error: "Canale non riconosciuto: prenotazione non salvata" },
+        { status: 400 }
+      );
+    }
+
+    const channelId = resolvedChannel.channelId;
+    const bookingSource = resolvedChannel.bookingSource;
+    requireBokunIdentityForGYG(
+      bokunBookingReference,
+      channelId === 3 || hasGetYourGuideReference(...incomingBookingReferences)
+    );
 
     const incomingCustomerName = cleanString(body.customer_name);
     const incomingCustomerEmail = cleanString(body.customer_email);
@@ -1173,7 +1179,7 @@ export async function POST(req: Request) {
         bokun_booking_reference: bokunBookingReference,
         // Fill the external reference if an earlier event only had the cart ID.
         booking_reference: !existing?.booking_reference || existing.booking_reference === bokunBookingReference
-          ? incomingBookingReference
+          ? incomingBookingReference || null
           : existing.booking_reference,
       } : {}),
       channel_id: channelId,
@@ -1182,7 +1188,7 @@ export async function POST(req: Request) {
       experience_id: experience.id,
       experience_name: experience.name,
       supplier_id: experience.supplier_id,
-      business_unit_id: Number(experience.business_unit_id),
+      business_unit_id: businessUnitId,
 
       customer_name: finalCustomerName,
       customer_email: finalCustomerEmail,
@@ -1231,7 +1237,7 @@ export async function POST(req: Request) {
         const updatePayload = {
           ...bookingData,
           booking_reference:
-            bookingData.booking_reference || existing.booking_reference || incomingBookingReference || null,
+            bokunBookingReference ? bookingData.booking_reference : existing.booking_reference || incomingBookingReference || null,
           booking_created_at: shouldRefreshCreatedAt
             ? incomingEventDate
             : existing.booking_created_at || incomingEventDate,
@@ -1239,10 +1245,15 @@ export async function POST(req: Request) {
           was_modified: nextWasModified,
         };
 
-        const { error: updateError } = await supabaseServer
+        let updateQuery = supabaseServer
           .from("bookings")
           .update(updatePayload)
           .eq("id", existing.id);
+        if (bokunBookingReference) {
+          updateQuery = updateQuery.eq("business_unit_id", businessUnitId)
+            .eq("bokun_booking_reference", bokunBookingReference);
+        }
+        const { error: updateError } = await updateQuery;
 
         if (updateError) {
           throw new Error(updateError.message);
@@ -1255,7 +1266,7 @@ export async function POST(req: Request) {
         .from("bookings")
         .insert({
           ...bookingData,
-          booking_reference: incomingBookingReference,
+          booking_reference: bokunBookingReference ? bookingData.booking_reference : incomingBookingReference,
           booking_created_at: incomingEventDate,
           notes: finalNotes,
           was_modified: false,
@@ -1265,7 +1276,7 @@ export async function POST(req: Request) {
         // A concurrent delivery may win the unique-index race. Return a
         // retryable response instead of creating another row or overwriting it.
         if (bokunBookingReference && insertError.code === "23505") {
-          const concurrentBooking = await findBokunBooking(supabaseServer, bokunBookingReference, incomingBookingReferences);
+          const concurrentBooking = await findBokunBooking(supabaseServer, businessUnitId, bokunBookingReference, incomingBookingReferences);
           if (concurrentBooking) {
             return NextResponse.json({ success: false, retryable: true, error: "Conflitto di inserimento Bókun: ripetere lo stesso evento." }, { status: 409 });
           }

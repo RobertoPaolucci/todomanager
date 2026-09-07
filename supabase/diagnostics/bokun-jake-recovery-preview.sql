@@ -15,6 +15,7 @@ begin
     and booking_time in ('10:00', '10:00:00')
     and is_cancelled = true
     and experience_id = 1
+    and business_unit_id = (select business_unit_id from public.experiences where id = 1)
     and channel_id = 1 and booking_source = 'Direct'
     and bokun_booking_reference is null;
   get diagnostics affected = row_count;
@@ -22,7 +23,7 @@ begin
     raise exception 'Attesa esattamente la riga storica verificata, trovate %: nessuna modifica applicata', affected;
   end if;
 end $$;
-select id, booking_reference, bokun_booking_reference, booking_date,
+select id, business_unit_id, booking_reference, bokun_booking_reference, booking_date,
        booking_time, is_cancelled, channel_id, booking_source
 from public.bookings where id = 1999;
 rollback;

@@ -48,12 +48,23 @@ export function requireBokunIdentityForGYG(bokunReference: string, isGetYourGuid
   }
 }
 
+export function requireBokunBusinessUnit(value: unknown): number {
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new BokunIdentityError("Business unit Bokun mancante o non valida: nessun abbinamento consentito.");
+  }
+  return id;
+}
+
 export async function findBokunBooking(
   db: SupabaseClient,
+  businessUnitId: number,
   bokunReference: string,
   legacyReferences: string[],
 ) {
+  const unit = requireBokunBusinessUnit(businessUnitId);
   const { data, error } = await db.from("bookings").select("*")
+    .eq("business_unit_id", unit)
     .eq("bokun_booking_reference", bokunReference).maybeSingle();
   if (error) throw new Error(error.message);
   if (data) return data;
@@ -62,7 +73,7 @@ export async function findBokunBooking(
   // whether a legacy row belongs to this booking or its cancelled predecessor.
   const refs = [...new Set([...legacyReferences, bokunReference].filter(Boolean))];
   const { data: legacy, error: legacyError } = await db.from("bookings")
-    .select("id").in("booking_reference", refs)
+    .select("id").eq("business_unit_id", unit).in("booking_reference", refs)
     .is("bokun_booking_reference", null).limit(1);
   if (legacyError) throw new Error(legacyError.message);
   if (legacy?.length) {
@@ -75,10 +86,16 @@ export async function findBokunBooking(
 
 export function getBookingHistoryIdentity(booking: {
   id: unknown;
+  business_unit_id?: number | null;
   booking_reference?: string | null;
   bokun_booking_reference?: string | null;
 }) {
   const bokun = text(booking.bokun_booking_reference).toUpperCase();
-  if (bokun) return `BOKUN:${bokun}`;
+  if (bokun) {
+    const unit = Number(booking.business_unit_id);
+    return Number.isSafeInteger(unit) && unit > 0
+      ? `BOKUN:${unit}:${bokun}`
+      : `BOKUN:UNSCOPED:${booking.id}`;
+  }
   return text(booking.booking_reference).toUpperCase() || `NO-REF-${booking.id}`;
 }

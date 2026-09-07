@@ -48,8 +48,8 @@ function harness(seed = []) {
         if (forcedInsertError && table === 'bookings') return { data: null, error: forcedInsertError };
         if (table === 'bookings' && tables.bookings.some(row =>
           payload.bokun_booking_reference
-            ? row.bokun_booking_reference === payload.bokun_booking_reference
-            : !row.bokun_booking_reference && row.booking_reference === payload.booking_reference
+            ? row.bokun_booking_reference === payload.bokun_booking_reference && row.business_unit_id === payload.business_unit_id
+            : false
         )) return { data: null, error: { code: '23505', message: 'unique constraint' } };
         const row = { id: Math.max(0, ...tables[table].map(r => r.id)) + 1, ...structuredClone(payload) };
         tables[table].push(row); rows = [row];
@@ -162,7 +162,7 @@ test('same event repeated is unchanged and creates no additional row', async () 
 test('external reference arriving later is preserved on the identified booking', async () => {
   const h = harness();
   await h.send({ externalBookingReference: '', channel_id: 3, booking_source: 'GetYourGuide' });
-  assert.equal(h.tables.bookings[0].booking_reference, 'GET-101955189');
+  assert.equal(h.tables.bookings[0].booking_reference, null);
   await h.send();
   assert.equal(h.tables.bookings[0].booking_reference, 'GYGBLHFXQZ7B');
   assert.equal(h.tables.bookings.length, 1);
@@ -185,7 +185,7 @@ test('missing Bókun ID cannot update, cancel or insert using only GYG ref', asy
 });
 
 test('legacy ambiguity requires explicit reconciliation without historical changes', async () => {
-  const legacy = { id: 1999, booking_reference: 'GYGBLHFXQZ7B', is_cancelled: true, booking_time: '10:00', booking_source: 'Direct' };
+  const legacy = { id: 1999, business_unit_id: 2, booking_reference: 'GYGBLHFXQZ7B', is_cancelled: true, booking_time: '10:00', booking_source: 'Direct' };
   const h = harness([legacy]);
   const result = await h.send({ bokun_booking_reference: 'GET-103074524', booking_time: '17:00' });
   assert.equal(result.status, 409); assert.match(result.body.error, /1999/);
@@ -212,7 +212,7 @@ test('identity parser accepts explicit/cart aliases, rejects conflicts and produ
 
 test('list history keeps rebooking separate, preserves legacy grouping', () => {
   const { getBookingHistoryIdentity: key } = harness().load(resolve('lib/bokun-booking-identity.ts'));
-  const base = { id: 1, booking_reference: 'GYGBLHFXQZ7B' };
+  const base = { id: 1, business_unit_id: 2, booking_reference: 'GYGBLHFXQZ7B' };
   assert.notEqual(key({ ...base, bokun_booking_reference: 'GET-101955189' }), key({ ...base, bokun_booking_reference: 'GET-103074524' }));
   assert.notEqual(key(base), key({ ...base, bokun_booking_reference: 'GET-101955189' }));
   assert.equal(key(base), key({ ...base, id: 2 }));
@@ -259,18 +259,18 @@ test('webhook exposes unrelated UNIQUE failure instead of claiming concurrent du
 });
 
 test('CSV refuses unresolved legacy GYG rows and Bókun GYG without cart ref', async () => {
-  const h = harness([{ id: 1999, booking_reference: 'GYGBLHFXQZ7B' }]);
+  const h = harness([{ id: 1999, business_unit_id: 2, booking_reference: 'GYGBLHFXQZ7B' }]);
   const { importBokunBookings } = h.load(resolve('app/prenotazioni/import/actions.ts'));
   const result = await importBokunBookings([csvRow('GET-103074524'), csvRow('')], { Tour: 1 });
   assert.equal(result.imported, 0); assert.equal(result.errors.length, 2);
   assert.equal(h.tables.bookings.length, 1);
 });
 
-test('payment reconciliation using GYG pays only active identified booking', async () => {
+test('payment reconciliation using composite identity pays only selected active booking', async () => {
   const h = harness(); await h.send(); await h.send({ status: 'CANCELLED' });
   await h.send({ bokun_booking_reference: 'GET-103074524', booking_time: '17:00' });
   const { reconcilePayments } = h.load(resolve('app/prenotazioni/riconciliazione/actions.ts'));
-  const result = await reconcilePayments([{ booking_reference: 'GYGBLHFXQZ7B', booking_date: '2026-10-24' }]);
+  const result = await reconcilePayments([{ business_unit_id: 2, bokun_booking_reference: 'GET-103074524', booking_reference: 'GYGBLHFXQZ7B', booking_date: '2026-10-24' }]);
   assert.equal(result.updated, 1);
   assert.notEqual(h.tables.bookings[0].customer_payment_status, 'paid');
   assert.equal(h.tables.bookings[1].customer_payment_status, 'paid');
@@ -280,6 +280,82 @@ test('payment reconciliation refuses two active carts with same GYG ref', async 
   const h = harness(); await h.send();
   await h.send({ bokun_booking_reference: 'GET-103074524', booking_time: '17:00' });
   const { reconcilePayments } = h.load(resolve('app/prenotazioni/riconciliazione/actions.ts'));
-  await assert.rejects(reconcilePayments([{ booking_reference: 'GYGBLHFXQZ7B', booking_date: '2026-10-24' }]), /Bókun attive/);
+  await assert.rejects(reconcilePayments([{ booking_reference: 'GYGBLHFXQZ7B', booking_date: '2026-10-24' }]), /business_unit_id/);
   assert.ok(h.tables.bookings.every(row => row.customer_payment_status !== 'paid'));
+});
+
+function secondUnit(h) {
+  h.tables.experiences.push({ ...h.tables.experiences[0], id: 2, bokun_id: '200', business_unit_id: 3 });
+  h.tables.experience_channel_prices.push(...h.tables.experience_channel_prices.map(p => ({ ...p, id: p.id + 10, experience_id: 2 })));
+}
+
+test('same Bokun ref in different units: create, modify, cancel and retry are isolated', async () => {
+  const h = harness(); secondUnit(h);
+  await h.send(); await h.send({ bokun_id: '200' });
+  assert.equal(h.tables.bookings.length, 2);
+  const first = structuredClone(h.tables.bookings[0]);
+  await h.send({ bokun_id: '200', status: 'MODIFIED', booking_time: '17:00' });
+  await h.send({ bokun_id: '200', status: 'CANCELLED', booking_time: '17:00' });
+  await h.send({ bokun_id: '200', status: 'CANCELLED', booking_time: '17:00' });
+  assert.deepEqual(h.tables.bookings[0], first);
+  assert.equal(h.tables.bookings[1].is_cancelled, true);
+  assert.equal(h.tables.bookings[1].booking_time, '17:00');
+  assert.equal(h.tables.bookings.length, 2);
+});
+
+test('missing business unit refuses every Bokun event without modifying other units', async () => {
+  const h = harness(); await h.send(); const before = structuredClone(h.tables.bookings);
+  h.tables.experiences[0].business_unit_id = null;
+  for (const status of ['CONFIRMED', 'MODIFIED', 'CANCELLED']) {
+    assert.notEqual((await h.send({ status, business_unit_id: 2 })).status, 200);
+  }
+  assert.deepEqual(h.tables.bookings, before);
+});
+
+test('CSV dedupe uses both unit and Bokun ref and rejects missing unit', async () => {
+  const h = harness(); secondUnit(h);
+  const { importBokunBookings } = h.load(resolve('app/prenotazioni/import/actions.ts'));
+  await importBokunBookings([csvRow('GET-101955189')], { Tour: 1 });
+  assert.equal((await importBokunBookings([csvRow('GET-101955189')], { Tour: 2 })).imported, 1);
+  assert.equal((await importBokunBookings([csvRow('GET-101955189')], { Tour: 2 })).skipped, 1);
+  h.tables.experiences[1].business_unit_id = null;
+  assert.equal((await importBokunBookings([csvRow('GET-999')], { Tour: 2 })).errors.length, 1);
+  assert.equal(h.tables.bookings.length, 2);
+});
+
+test('history scopes identical cart refs and isolates unidentified business units', () => {
+  const { getBookingHistoryIdentity: key } = harness().load(resolve('lib/bokun-booking-identity.ts'));
+  const b = { id: 1, bokun_booking_reference: 'GET-1', business_unit_id: 2 };
+  assert.notEqual(key(b), key({ ...b, business_unit_id: 3 }));
+  assert.notEqual(key({ ...b, business_unit_id: null }), key({ ...b, id: 2, business_unit_id: null }));
+});
+
+test('payments require unit and cart even with one OTA candidate, and isolate accounts', async () => {
+  const h = harness(); secondUnit(h); await h.send(); await h.send({ bokun_id: '200' });
+  const { reconcilePayments } = h.load(resolve('app/prenotazioni/riconciliazione/actions.ts'));
+  const item = { booking_reference: 'GYGBLHFXQZ7B', booking_date: '2026-10-24' };
+  await assert.rejects(reconcilePayments([item]), /business_unit_id/);
+  await assert.rejects(reconcilePayments([{ ...item, bokun_booking_reference: 'GET-101955189' }]), /Business unit/);
+  const result = await reconcilePayments([{ ...item, business_unit_id: 3, bokun_booking_reference: 'GET-101955189' }]);
+  assert.equal(result.updated, 1);
+  assert.notEqual(h.tables.bookings[0].customer_payment_status, 'paid');
+  assert.equal(h.tables.bookings[1].customer_payment_status, 'paid');
+});
+
+test('OTA-only payment is rejected even for one active Bokun booking', async () => {
+  const h = harness(); await h.send();
+  const before = structuredClone(h.tables.bookings);
+  const { reconcilePayments } = h.load(resolve('app/prenotazioni/riconciliazione/actions.ts'));
+  await assert.rejects(reconcilePayments([{ booking_reference: 'GYGBLHFXQZ7B', booking_date: '2026-10-24' }]), /business_unit_id/);
+  assert.deepEqual(h.tables.bookings, before);
+});
+
+test('unmatched events cannot select same cart in another unit or legacy NULL scope', async () => {
+  const h = harness([{ id: 1999, business_unit_id: null, booking_reference: 'GYGBLHFXQZ7B' }]);
+  secondUnit(h); await h.send();
+  const before = structuredClone(h.tables.bookings);
+  for (const status of ['MODIFIED', 'CANCELLED']) {
+    assert.equal((await h.send({ bokun_id: '200', status })).status, 409);
+  }
+  assert.deepEqual(h.tables.bookings, before);
 });

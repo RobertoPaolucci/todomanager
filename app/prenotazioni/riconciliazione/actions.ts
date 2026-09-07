@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
 
+import { requireBokunBusinessUnit } from "@/lib/bokun-booking-identity";
+
 type ExtractedReferenceItem = {
+  business_unit_id?: number | null;
+  bokun_booking_reference?: string | null;
   booking_reference: string;
   booking_date: string;
 };
@@ -190,8 +194,14 @@ export async function reconcilePayments(
     if (!isLikelyBookingReference(booking_reference)) continue;
     if (!isValidDateString(booking_date)) continue;
 
-    if (!dedupeMap.has(booking_reference)) {
-      dedupeMap.set(booking_reference, {
+    const bokun_booking_reference = normalizeBookingReference(item.bokun_booking_reference);
+    const business_unit_id = bokun_booking_reference
+      ? requireBokunBusinessUnit(item.business_unit_id) : null;
+    const key = bokun_booking_reference ? `BOKUN:${business_unit_id}:${bokun_booking_reference}` : booking_reference;
+    if (!dedupeMap.has(key)) {
+      dedupeMap.set(key, {
+        bokun_booking_reference,
+        business_unit_id,
         booking_reference,
         booking_date,
       });
@@ -209,7 +219,7 @@ export async function reconcilePayments(
   const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select(
-      "id, booking_reference, bokun_booking_reference, is_cancelled, booking_date, customer_name, experience_name, customer_payment_status"
+      "id, booking_reference, bokun_booking_reference, business_unit_id, is_cancelled, booking_date, customer_name, experience_name, customer_payment_status"
     )
     .in("booking_reference", cleanedReferences);
 
@@ -217,30 +227,34 @@ export async function reconcilePayments(
     throw new Error(error.message);
   }
 
-  // Rebooking predecessors share the OTA reference but are not payable again.
-  // Preserve the previous reconciliation behavior for non-Bókun/legacy rows.
-  const foundBookings = (bookings || []).filter(
-    (booking) => !(booking.bokun_booking_reference && booking.is_cancelled)
-  );
-  const activeBokunReferences = new Set<string>();
-  for (const booking of foundBookings) {
-    if (!booking.bokun_booking_reference) continue;
-    const reference = normalizeBookingReference(booking.booking_reference);
-    if (activeBokunReferences.has(reference)) {
-      throw new Error(`Più prenotazioni Bókun attive per ${reference}: verificare il rebooking prima di riconciliare i pagamenti.`);
+  // Validate every item before any payment write. OTA-only files cannot
+  // establish which Bokun cart/account received the payment.
+  const foundBookings: NonNullable<typeof bookings> = [];
+  const matchedItems = new Set<ExtractedReferenceItem>();
+  for (const item of cleanedItems) {
+    if (item.bokun_booking_reference) {
+      const { data: booking, error: matchError } = await supabaseServer.from("bookings")
+        .select("id, booking_reference, bokun_booking_reference, business_unit_id, is_cancelled, booking_date, customer_name, experience_name, customer_payment_status")
+        .eq("business_unit_id", item.business_unit_id!)
+        .eq("bokun_booking_reference", item.bokun_booking_reference).maybeSingle();
+      if (matchError) throw new Error(matchError.message);
+      if (booking && normalizeBookingReference(booking.booking_reference) !== item.booking_reference) {
+        throw new Error("Riferimento OTA discordante con la coppia business unit / Booking ref Bokun.");
+      }
+      if (booking && !booking.is_cancelled) {
+        foundBookings.push(booking);
+        matchedItems.add(item);
+      }
+    } else {
+      const candidates = (bookings || []).filter(b => normalizeBookingReference(b.booking_reference) === item.booking_reference);
+      if (candidates.some(b => b.bokun_booking_reference)) {
+        throw new Error(`Pagamento Bokun ${item.booking_reference}: specificare business_unit_id e bokun_booking_reference; il solo riferimento OTA non basta.`);
+      }
+      foundBookings.push(...candidates);
+      if (candidates.length) matchedItems.add(item);
     }
-    activeBokunReferences.add(reference);
   }
-
-  const foundReferenceSet = new Set(
-    foundBookings.map((b) => normalizeBookingReference(b.booking_reference))
-  );
-
-  const notFoundItems = sortByDateAndReference(
-    cleanedItems.filter(
-      (item) => !foundReferenceSet.has(normalizeBookingReference(item.booking_reference))
-    )
-  );
+  const notFoundItems = sortByDateAndReference(cleanedItems.filter(item => !matchedItems.has(item)));
 
   const alreadyPaidRows = foundBookings.filter(
     (b) => b.customer_payment_status === "paid"
@@ -253,10 +267,18 @@ export async function reconcilePayments(
   const updatedBookings: ReconciledBookingItem[] = [];
 
   for (const booking of toUpdateRows) {
-    const { error: updateError } = await supabaseServer
+    let updateQuery = supabaseServer
       .from("bookings")
       .update({ customer_payment_status: "paid" })
       .eq("id", booking.id);
+    if (booking.bokun_booking_reference) {
+      updateQuery = updateQuery.eq("business_unit_id", booking.business_unit_id)
+        .eq("bokun_booking_reference", booking.bokun_booking_reference)
+        .eq("is_cancelled", false);
+    } else {
+      updateQuery = updateQuery.is("bokun_booking_reference", null);
+    }
+    const { error: updateError } = await updateQuery;
 
     if (!updateError) {
       updatedBookings.push(

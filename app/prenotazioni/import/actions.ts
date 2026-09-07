@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   findBokunBooking,
+  requireBokunBusinessUnit,
   getBokunBookingReference,
   hasGetYourGuideReference,
   requireBokunIdentityForGYG,
@@ -200,7 +201,7 @@ export async function importBokunBookings(
       }
 
       if (!ref || ref === "undefined") {
-        ref = String(row["Product confirmation code"] || bokunBookingReference || "");
+        ref = String(row["Product confirmation code"] || "");
       }
 
       if (!ref) {
@@ -215,8 +216,10 @@ export async function importBokunBookings(
       }
 
       const exp = experiences?.find((e) => e.id === experienceId);
+      const businessUnitId = bokunBookingReference
+        ? requireBokunBusinessUnit(exp?.business_unit_id) : exp?.business_unit_id;
       if (bokunBookingReference) {
-        const existing = await findBokunBooking(supabaseServer, bokunBookingReference, [ref]);
+        const existing = await findBokunBooking(supabaseServer, requireBokunBusinessUnit(businessUnitId), bokunBookingReference, [ref]);
         if (existing) {
           if (Number(existing.experience_id) !== Number(experienceId)) {
             throw new Error("Booking Bókun già associato a un'altra esperienza: verificare i prodotti della prenotazione.");
@@ -307,7 +310,7 @@ export async function importBokunBookings(
         channel_id: channel?.id || null,
         booking_source: channel?.name || rawChannel,
         supplier_id: exp?.supplier_id,
-        business_unit_id: exp?.business_unit_id,
+        business_unit_id: businessUnitId,
         adults,
         children,
         infants,
@@ -328,7 +331,7 @@ export async function importBokunBookings(
         if (error.code === "23505" && !bokunBookingReference) {
           results.skipped++;
         } else if (error.code === "23505" && bokunBookingReference) {
-          const existing = await findBokunBooking(supabaseServer, bokunBookingReference, [ref]);
+          const existing = await findBokunBooking(supabaseServer, requireBokunBusinessUnit(businessUnitId), bokunBookingReference, [ref]);
           if (!existing) throw new Error(`Conflitto UNIQUE non riconducibile al Booking ref Bókun: ${error.message}`);
           results.skipped++;
         } else {

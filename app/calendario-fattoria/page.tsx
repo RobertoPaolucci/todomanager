@@ -9,6 +9,7 @@ type Booking = {
   id: number;
   booking_reference: string | null;
   bokun_booking_reference: string | null;
+  business_unit_id: number | null;
   booking_date: string | null;
   booking_time: string | null;
   experience_id: number | null;
@@ -97,7 +98,7 @@ async function loadCurrentBookings() {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabaseServer
       .from("bookings")
-      .select("id, booking_reference, bokun_booking_reference, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
+      .select("id, booking_reference, bokun_booking_reference, business_unit_id, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 

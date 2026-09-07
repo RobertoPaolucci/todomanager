@@ -31,8 +31,8 @@ Nel repository:
 - `app/prenotazioni/import/page.tsx` legge Excel/CSV con SheetJS;
   `app/prenotazioni/import/actions.ts` sceglieva l'Ext. booking ref per i cart
   non TOD, faceva INSERT e contava **qualsiasi 23505** come duplicato saltato.
-  Quindi un vincolo UNIQUE sul riferimento esterno può scartare la seconda riga.
-  La presenza e il nome di tale vincolo nel DB live restano da verificare.
+  Il controllo live riferito dall'utente conferma che booking_reference NON ha
+  vincoli UNIQUE: lo scarto reale non puo essere attribuito a tale vincolo.
 - L'import Excel usava `Booking channel`: con `Direct` sceglieva il canale 1
   anche quando Ext. booking ref iniziava con GYG. Il webhook attuale e la versione
   Git del 24 agosto riconoscono invece GYG prima di `channel_id`: il dato Direct
@@ -95,16 +95,29 @@ L'import ora passa anche la business unit già configurata sull'esperienza:
 la colonna è obbligatoria nello schema live e non veniva inviata dal CSV.
 Non cambia la configurazione delle business unit.
 
-La chiave Bókun è univoca per booking/cart nel modello attuale: un evento per
-un'altra esperienza sullo stesso cart viene segnalato, non sovrascrive la riga.
+La chiave tecnica e `(business_unit_id, bokun_booking_reference)`. Assumiamo,
+come concordato, che la business unit distingua gli account: viene ricavata
+solo dall'esperienza, prima del matching. Lo stesso cart in due business unit
+puo esistere senza conflitto. Un evento senza business unit valida viene
+rifiutato prima di cercare o scrivere prenotazioni. Le righe legacy restano
+inalterate; il controllo di ambiguita legacy riguarda solo la business unit
+risolta. Le righe senza ambito non vengono associate automaticamente.
+Un'altra esperienza sullo stesso cart e nella stessa business unit viene
+segnalata, senza sovrascrivere la riga.
 I cart con più prodotti richiedono una verifica dedicata del contratto a monte;
 non sono trasformati automaticamente in una nuova struttura multiprodotto.
 
 La ricerca nell'elenco trova sia GYG sia Booking ref Bókun; desktop e mobile
 mostrano entrambi. Dashboard, calendario e fatturazione mantengono le identità
-distinte. La riconciliazione pagamenti continua a cercare GYG, esclude i
-predecessori Bókun cancellati e si ferma se trova due cart identificati attivi
-con lo stesso riferimento, evitando di marcarli entrambi come pagati.
+distinte usando entrambe le colonne; eventuali righe Bokun senza business unit
+sono isolate per id nello storico.
+La Server Action di riconciliazione richiede `business_unit_id` e
+`bokun_booking_reference` per pagare righe Bokun, verifica anche la coerenza
+OTA ed esclude le cancellate. La deduplicazione usa la coppia. I file elaborati
+dall'interfaccia attuale contengono soltanto OTA e data: se corrispondono a righe
+Bokun identificate, l'import si ferma con errore esplicito prima dei pagamenti.
+Non viene dedotta un'identita tecnica dal solo GYG, nemmeno con una sola riga
+attiva. Il comportamento di pagamento delle righe legacy resta invariato.
 Parsing e mapping Google Calendar non sono stati modificati; lo staging GCal
 non è la via da usare per recuperare questo rebooking Bókun.
 
@@ -125,15 +138,12 @@ File: `supabase/migrations/202609060001_bokun_booking_identity.sql`.
 5. Riconciliare esplicitamente soltanto le righe legacy documentate, quindi
    riprocessare gli eventi accodati. Non è previsto alcun backfill massivo.
 
-La migration aggiunge la colonna senza assegnarla alle righe esistenti, crea
-UNIQUE sul Booking ref e limita eventuali UNIQUE semplici su booking_reference
-alle righe legacy (`bokun_booking_reference IS NULL`). Mantiene nome e definizione
-dell'indice preesistente. Non inventa un vincolo legacy se prima non esisteva.
-Con indici composti, parziali, espressioni non supportate o dipendenze FK,
-la transazione si ferma senza CASCADE; il preflight va riesaminato.
-La conversione da constraint a indice parziale va verificata anche rispetto a
-integrazioni esterne che usino `ON CONFLICT (booking_reference)`.
-Riferimento: [indici parziali PostgreSQL](https://www.postgresql.org/docs/current/indexes-partial.html).
+La migration aggiunge la colonna nullable senza backfill, il controllo di
+formato e un CHECK che richiede business_unit_id quando il riferimento Bokun
+non e NULL. Crea soltanto l'indice UNIQUE parziale su
+`(business_unit_id, bokun_booking_reference) WHERE bokun_booking_reference IS NOT NULL`.
+Non modifica indici o constraint di booking_reference e non aggiunge lookup
+duplicati. Il CHECK evita che NULL aggiri l'unicita composta di PostgreSQL.
 
 ## Recupero del caso reale, solo dopo approvazione
 
@@ -161,7 +171,7 @@ Risultato atteso:
 
 `node --test tests/bokun-import.test.mjs` esegue route e Server Actions reali,
 con I/O Supabase e Next simulato; non usa dati live o credenziali.
-Risultato finale: 25 regressioni applicative e 7 regressioni SQL superate.
+Regressioni applicative e SQL coprono rebooking, doppie consegne, isolamento tra business unit, pagamenti e NULL.
 
 Per verificare SQL in un PostgreSQL isolato in memoria, senza aggiungere
 dipendenze all'applicazione:
@@ -171,11 +181,10 @@ npm install --prefix .tmp/bokun-sql --no-save --package-lock=false @electric-sql
 node --test tests/bokun-migration.test.mjs
 ```
 
-Verificati anche TypeScript (`--noEmit --incremental false`), diff e ESLint
-mirato confrontato con HEAD. I file esistenti hanno segnalazioni pregresse
-(`no-explicit-any`, `static-components`, `no-unused-vars`), non corrette fuori
-ambito. `npm run build` non eseguito secondo il flusso locale di AGENTS.md;
-nessun commit, push, deploy o test di scrittura sul DB reale.
+`npm run build` superato (compilazione e TypeScript). Test: 32 applicativi
+e 1 scenario SQL con piu verifiche, tutti superati. ESLint mirato confrontato
+con HEAD: 14 errori no-explicit-any preesistenti e invariati, nessuno nuovo. Nessuna migration,
+scrittura live, modifica Make, distribuzione o push autorizzata in questa fase.
 
 ## File interessati
 
