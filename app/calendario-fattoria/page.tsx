@@ -1,12 +1,14 @@
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 
 export const dynamic = "force-dynamic";
 
 type Booking = {
   id: number;
   booking_reference: string | null;
+  bokun_booking_reference: string | null;
   booking_date: string | null;
   booking_time: string | null;
   experience_id: number | null;
@@ -95,15 +97,14 @@ async function loadCurrentBookings() {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabaseServer
       .from("bookings")
-      .select("id, booking_reference, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
+      .select("id, booking_reference, bokun_booking_reference, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (error) throw new Error("Impossibile caricare le prenotazioni.");
     const rows: Booking[] = data || [];
     for (const booking of rows) {
-      const reference = String(booking.booking_reference ?? "").trim();
-      const key = reference ? reference.toUpperCase() : `NO-REF-${booking.id}`;
+      const key = getBookingHistoryIdentity(booking);
       const current = latestByReference.get(key);
       if (!current || Number(booking.id || 0) > Number(current.id || 0)) {
         latestByReference.set(key, booking);

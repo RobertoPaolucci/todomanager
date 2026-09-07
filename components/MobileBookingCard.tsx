@@ -275,6 +275,11 @@ export default function MobileBookingCard({
             <span className="rounded-lg bg-zinc-50 px-2.5 py-1 text-[15px] font-bold text-zinc-700">
               Rif. {wRef}
             </span>
+            {booking.bokun_booking_reference && (
+              <span className="break-all rounded-lg bg-zinc-50 px-2.5 py-1 text-[15px] font-bold text-zinc-700">
+                Bókun: {booking.bokun_booking_reference}
+              </span>
+            )}
           </div>
         </div>
 

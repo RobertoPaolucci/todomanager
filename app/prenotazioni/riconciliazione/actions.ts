@@ -209,7 +209,7 @@ export async function reconcilePayments(
   const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select(
-      "id, booking_reference, booking_date, customer_name, experience_name, customer_payment_status"
+      "id, booking_reference, bokun_booking_reference, is_cancelled, booking_date, customer_name, experience_name, customer_payment_status"
     )
     .in("booking_reference", cleanedReferences);
 
@@ -217,7 +217,20 @@ export async function reconcilePayments(
     throw new Error(error.message);
   }
 
-  const foundBookings = bookings || [];
+  // Rebooking predecessors share the OTA reference but are not payable again.
+  // Preserve the previous reconciliation behavior for non-Bókun/legacy rows.
+  const foundBookings = (bookings || []).filter(
+    (booking) => !(booking.bokun_booking_reference && booking.is_cancelled)
+  );
+  const activeBokunReferences = new Set<string>();
+  for (const booking of foundBookings) {
+    if (!booking.bokun_booking_reference) continue;
+    const reference = normalizeBookingReference(booking.booking_reference);
+    if (activeBokunReferences.has(reference)) {
+      throw new Error(`Più prenotazioni Bókun attive per ${reference}: verificare il rebooking prima di riconciliare i pagamenti.`);
+    }
+    activeBokunReferences.add(reference);
+  }
 
   const foundReferenceSet = new Set(
     foundBookings.map((b) => normalizeBookingReference(b.booking_reference))

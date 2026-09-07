@@ -7,6 +7,7 @@ import InvoiceReportButton, {
 } from "@/components/InvoiceReportButton";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 import { saveFmdqInvoice } from "./actions";
 
 type PageProps = {
@@ -176,6 +177,7 @@ function isFmdqSupplier(booking: any) {
 }
 
 function getBookingHistoryKey(booking: any) {
+  if (booking.bokun_booking_reference) return getBookingHistoryIdentity(booking);
   const reference =
     String(
       booking.booking_reference ||

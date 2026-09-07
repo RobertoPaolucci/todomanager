@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  BokunIdentityError,
+  findBokunBooking,
+  getBokunBookingReference,
+  hasGetYourGuideReference,
+  requireBokunIdentityForGYG,
+} from "@/lib/bokun-booking-identity";
 
 type ExistingBooking = {
   id: number;
@@ -56,6 +63,7 @@ const BOKUN_ID_ALIASES: Record<string, string> = {
 };
 
 const COMPARE_FIELDS = [
+  "booking_reference",
   "channel_id",
   "booking_source",
   "experience_id",
@@ -227,7 +235,10 @@ function detectChannelIdFromText(value: string) {
 function resolveChannel(body: any, bookingReference: string) {
   const ref = String(bookingReference || "").trim().toUpperCase();
 
-  if (ref.startsWith("GYG")) {
+  if (
+    ref.startsWith("GYG") ||
+    hasGetYourGuideReference(body.externalBookingReference, body.external_booking_reference, body.booking_reference)
+  ) {
     return {
       channelId: 3,
       bookingSource: "GetYourGuide",
@@ -416,6 +427,7 @@ async function getLatestBookingByReference(bookingReference: string) {
     .from("bookings")
     .select("*")
     .eq("booking_reference", ref)
+    .is("bokun_booking_reference", null)
     .order("id", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -725,6 +737,16 @@ async function findExistingBooking(params: {
 
   const selectFields = "*";
 
+  if (bookingReferences.length) {
+    const { data: identified, error } = await supabaseServer.from("bookings")
+      .select("id").in("booking_reference", bookingReferences)
+      .not("bokun_booking_reference", "is", null).limit(1);
+    if (error) throw new Error(error.message);
+    if (identified?.length) {
+      throw new BokunIdentityError("Inviare il Booking ref Bókun per aggiornare una prenotazione con identità Bókun.");
+    }
+  }
+
   for (const bookingReference of bookingReferences) {
     const latestByReference = await getLatestBookingByReference(bookingReference);
     if (latestByReference) {
@@ -746,6 +768,7 @@ async function findExistingBooking(params: {
       .eq("booking_date", bookingDate)
       .eq("experience_id", experienceId)
       .eq("is_cancelled", false)
+      .is("bokun_booking_reference", null)
       .limit(50);
 
   if (sameExperienceError) {
@@ -779,6 +802,7 @@ async function findExistingBooking(params: {
     .select(selectFields)
     .eq("booking_date", bookingDate)
     .eq("is_cancelled", false)
+    .is("bokun_booking_reference", null)
     .limit(100);
 
   if (sameDateError) {
@@ -883,6 +907,7 @@ export async function POST(req: Request) {
 
     const rawBokunId = cleanString(body.bokun_id);
     const resolvedBokunId = BOKUN_ID_ALIASES[rawBokunId] ?? rawBokunId;
+    const bokunBookingReference = getBokunBookingReference(body);
 
     const incomingBookingReferences = Array.from(
       new Set(
@@ -897,7 +922,7 @@ export async function POST(req: Request) {
           .filter(Boolean)
       )
     );
-    const incomingBookingReference = incomingBookingReferences[0] || "";
+    const incomingBookingReference = incomingBookingReferences[0] || bokunBookingReference;
     const status = cleanString(body.status).toUpperCase();
     const action = cleanString(body.action).toUpperCase();
     const isCancelled =
@@ -908,7 +933,7 @@ export async function POST(req: Request) {
       action === "BOOKING_CANCELLED" ||
       action === "BOOKING_ITEM_CANCELLED";
     const isModified =
-      action === "MODIFIED" || action === "BOOKING_MODIFIED";
+      status === "MODIFIED" || action === "MODIFIED" || action === "BOOKING_MODIFIED";
     const eventType = isCancelled
       ? "CANCELLED"
       : isModified
@@ -941,7 +966,14 @@ export async function POST(req: Request) {
       });
     }
 
-    const resolvedChannel = resolveChannel(body, incomingBookingReference);
+    const identifiedBokunBooking = bokunBookingReference
+      ? await findBokunBooking(supabaseServer, bokunBookingReference, incomingBookingReferences) as ExistingBooking | null
+      : null;
+    const channelReference = hasGetYourGuideReference(identifiedBokunBooking?.booking_reference)
+      ? identifiedBokunBooking!.booking_reference!
+      : incomingBookingReference;
+    const resolvedChannel = resolveChannel(body, channelReference) ||
+      (identifiedBokunBooking && resolveChannel(identifiedBokunBooking, identifiedBokunBooking.booking_reference || ""));
 
     if (!resolvedChannel) {
       console.error(
@@ -957,6 +989,10 @@ export async function POST(req: Request) {
 
     const channelId = resolvedChannel.channelId;
     const bookingSource = resolvedChannel.bookingSource;
+    requireBokunIdentityForGYG(
+      bokunBookingReference,
+      channelId === 3 || hasGetYourGuideReference(...incomingBookingReferences)
+    );
 
     const { data: experience, error: experienceError } = await supabaseServer
       .from("experiences")
@@ -1003,7 +1039,11 @@ export async function POST(req: Request) {
     const incomingTotalPeople =
       (adultsFromBody ?? 0) + (childrenFromBody ?? 0) + (infantsFromBody ?? 0);
 
-    const existingMatch = await findExistingBooking({
+    const existingMatch = bokunBookingReference ? {
+      booking: identifiedBokunBooking,
+      matchedReference: bokunBookingReference,
+      usedHeuristicMatch: false,
+    } : await findExistingBooking({
       bookingReferences: incomingBookingReferences,
       allowHeuristicMatch: isModified || isCancelled,
       experienceId: experience.id,
@@ -1016,6 +1056,11 @@ export async function POST(req: Request) {
       totalPeople: incomingTotalPeople > 0 ? incomingTotalPeople : null,
     });
     const existing = existingMatch?.booking || null;
+
+    // A cart containing another product must be reviewed, never overwritten.
+    if (bokunBookingReference && existing && Number(existing.experience_id) !== Number(experience.id)) {
+      throw new BokunIdentityError("Booking Bókun già associato a un'altra esperienza: verificare i prodotti della prenotazione.");
+    }
 
     console.log("WEBHOOK BOOKING MATCH", {
       event_type: eventType,
@@ -1059,7 +1104,7 @@ export async function POST(req: Request) {
         skipped: true,
         reason:
           `${eventType} ricevuto ma prenotazione esistente non trovata. Nessun dato aggiornato per evitare duplicati o abbinamenti sbagliati.`,
-      });
+      }, { status: bokunBookingReference ? 409 : 200 });
     }
 
     const finalCustomerName = firstNonEmpty(
@@ -1124,6 +1169,13 @@ export async function POST(req: Request) {
       : {};
 
     const bookingData = {
+      ...(bokunBookingReference ? {
+        bokun_booking_reference: bokunBookingReference,
+        // Fill the external reference if an earlier event only had the cart ID.
+        booking_reference: !existing?.booking_reference || existing.booking_reference === bokunBookingReference
+          ? incomingBookingReference
+          : existing.booking_reference,
+      } : {}),
       channel_id: channelId,
       booking_source: bookingSource,
 
@@ -1179,7 +1231,7 @@ export async function POST(req: Request) {
         const updatePayload = {
           ...bookingData,
           booking_reference:
-            existing.booking_reference || incomingBookingReference || null,
+            bookingData.booking_reference || existing.booking_reference || incomingBookingReference || null,
           booking_created_at: shouldRefreshCreatedAt
             ? incomingEventDate
             : existing.booking_created_at || incomingEventDate,
@@ -1210,6 +1262,14 @@ export async function POST(req: Request) {
         });
 
       if (insertError) {
+        // A concurrent delivery may win the unique-index race. Return a
+        // retryable response instead of creating another row or overwriting it.
+        if (bokunBookingReference && insertError.code === "23505") {
+          const concurrentBooking = await findBokunBooking(supabaseServer, bokunBookingReference, incomingBookingReferences);
+          if (concurrentBooking) {
+            return NextResponse.json({ success: false, retryable: true, error: "Conflitto di inserimento Bókun: ripetere lo stesso evento." }, { status: 409 });
+          }
+        }
         throw new Error(insertError.message);
       }
 
@@ -1260,6 +1320,9 @@ export async function POST(req: Request) {
           },
     });
   } catch (error: any) {
+    if (error instanceof BokunIdentityError) {
+      return NextResponse.json({ success: false, error: error.message, reason: "bokun_identity_required" }, { status: 409 });
+    }
     console.error("Errore webhook prenotazioni:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

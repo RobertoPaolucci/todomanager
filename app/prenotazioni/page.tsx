@@ -7,6 +7,7 @@ import MobileBookingCard from "@/components/MobileBookingCard";
 import SummarySelectionToolbar from "@/components/SummarySelectionToolbar";
 import BookingDateRangeFilter from "@/components/BookingDateRangeFilter";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 import { cancelBooking, restoreBooking, clearAlert } from "./actions";
 
 function formatEuro(value: number) {
@@ -117,9 +118,7 @@ function normalizeHistoryNumber(value: unknown) {
 }
 
 function getHistoryKey(booking: any) {
-  const reference = normalizeHistoryValue(booking.booking_reference);
-  if (reference) return reference.toUpperCase();
-  return `NO-REF-${booking.id}`;
+  return getBookingHistoryIdentity(booking);
 }
 
 function fieldChanged(booking: any, field: string) {
@@ -232,6 +231,7 @@ function bookingMatchesSearch(booking: any, term: string) {
   return (
     (booking.customer_name || "").toLowerCase().includes(term) ||
     (booking.booking_reference || "").toLowerCase().includes(term) ||
+    (booking.bokun_booking_reference || "").toLowerCase().includes(term) ||
     (booking.experience_name || "").toLowerCase().includes(term) ||
     (bookingChannelName || "").toLowerCase().includes(term) ||
     (booking.customer_phone || "").toLowerCase().includes(term) ||
@@ -1175,6 +1175,9 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                             )}`}
                           >
                             {booking.booking_reference || "-"}
+                            {booking.bokun_booking_reference && (
+                              <div>Bókun: {booking.bokun_booking_reference}</div>
+                            )}
                           </div>
                         </td>
 

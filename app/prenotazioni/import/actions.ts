@@ -2,6 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  findBokunBooking,
+  getBokunBookingReference,
+  hasGetYourGuideReference,
+  requireBokunIdentityForGYG,
+} from "@/lib/bokun-booking-identity";
 
 function formatExcelDate(excelDate: any) {
   if (!excelDate) return { date: null, time: null };
@@ -93,7 +99,7 @@ export async function importBokunBookings(
   const { data: channels } = await supabaseServer.from("channels").select("id, name");
   const { data: experiences } = await supabaseServer
     .from("experiences")
-    .select("id, name, supplier_id, supplier_unit_cost");
+    .select("id, name, supplier_id, supplier_unit_cost, business_unit_id");
 
   const results = { imported: 0, skipped: 0, errors: [] as string[] };
 
@@ -104,6 +110,7 @@ export async function importBokunBookings(
     try {
       const isGYG =
         row.hasOwnProperty("Booking Ref #") && row.hasOwnProperty("Product");
+      const bokunBookingReference = isGYG ? "" : getBokunBookingReference(row);
 
       let ref = "";
       let rawTitle = "";
@@ -177,6 +184,13 @@ export async function importBokunBookings(
           rawChannel = originalChannel;
         }
 
+        if (hasGetYourGuideReference(extRef)) {
+          rawChannel = "GetYourGuide";
+          isDirectOrEbike = false;
+          ref = extRef.trim();
+        }
+        requireBokunIdentityForGYG(bokunBookingReference, rawChannel === "GetYourGuide");
+
         const paxParts = parseParticipants(String(row["Participants"] || ""));
         adults = paxParts.adults;
         children = paxParts.children;
@@ -186,7 +200,7 @@ export async function importBokunBookings(
       }
 
       if (!ref || ref === "undefined") {
-        ref = String(row["Product confirmation code"] || "");
+        ref = String(row["Product confirmation code"] || bokunBookingReference || "");
       }
 
       if (!ref) {
@@ -201,6 +215,25 @@ export async function importBokunBookings(
       }
 
       const exp = experiences?.find((e) => e.id === experienceId);
+      if (bokunBookingReference) {
+        const existing = await findBokunBooking(supabaseServer, bokunBookingReference, [ref]);
+        if (existing) {
+          if (Number(existing.experience_id) !== Number(experienceId)) {
+            throw new Error("Booking Bókun già associato a un'altra esperienza: verificare i prodotti della prenotazione.");
+          }
+          // Historical imports remain insert-only; status changes use webhooks.
+          results.skipped++;
+          continue;
+        }
+      } else {
+        const { data: identified, error } = await supabaseServer.from("bookings")
+          .select("id").eq("booking_reference", ref)
+          .not("bokun_booking_reference", "is", null).limit(1);
+        if (error) throw new Error(error.message);
+        if (identified?.length) {
+          throw new Error("Riferimento già presente in Bókun: usare un export Bókun con Booking ref per distinguere i rebooking.");
+        }
+      }
       const pricingPax = adults + children;
       const { date, time } = formatExcelDate(excelStartDate);
       const { date: creationDate } = formatExcelDate(excelCreationDate);
@@ -261,6 +294,7 @@ export async function importBokunBookings(
       }
 
       const { error } = await supabaseServer.from("bookings").insert({
+        ...(bokunBookingReference ? { bokun_booking_reference: bokunBookingReference } : {}),
         booking_reference: ref,
         customer_name: customerName,
         customer_email: email,
@@ -273,6 +307,7 @@ export async function importBokunBookings(
         channel_id: channel?.id || null,
         booking_source: channel?.name || rawChannel,
         supplier_id: exp?.supplier_id,
+        business_unit_id: exp?.business_unit_id,
         adults,
         children,
         infants,
@@ -290,7 +325,11 @@ export async function importBokunBookings(
       });
 
       if (error) {
-        if (error.code === "23505") {
+        if (error.code === "23505" && !bokunBookingReference) {
+          results.skipped++;
+        } else if (error.code === "23505" && bokunBookingReference) {
+          const existing = await findBokunBooking(supabaseServer, bokunBookingReference, [ref]);
+          if (!existing) throw new Error(`Conflitto UNIQUE non riconducibile al Booking ref Bókun: ${error.message}`);
           results.skipped++;
         } else {
           throw new Error(error.message);

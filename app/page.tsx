@@ -7,6 +7,7 @@ import NotificationCenter from "@/components/NotificationCenter";
 import CognanelloAvailabilityNotifications from "@/components/CognanelloAvailabilityNotifications";
 import { getDashboardStats } from "@/lib/dashboard";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -624,7 +625,9 @@ export default async function Home({ searchParams }: PageProps) {
       .trim()
       .toUpperCase();
 
-    const key = reference ? `ref:${reference}` : `id:${booking.id}`;
+    const key = booking.bokun_booking_reference
+      ? getBookingHistoryIdentity(booking)
+      : reference ? `ref:${reference}` : `id:${booking.id}`;
     const current = latestBookingByKey.get(key);
 
     if (!current || Number(booking.id) > Number(current.id)) {

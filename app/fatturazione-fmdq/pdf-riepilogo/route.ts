@@ -7,6 +7,7 @@ import {
 } from "pdf-lib";
 
 import { supabaseServer } from "@/lib/supabase-server";
+import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -90,6 +91,7 @@ function isFmdqSupplier(booking: any) {
 }
 
 function getBookingHistoryKey(booking: any) {
+  if (booking.bokun_booking_reference) return getBookingHistoryIdentity(booking);
   const reference = String(
     booking.booking_reference || ""
   ).trim();
