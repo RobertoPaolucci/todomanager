@@ -31,12 +31,21 @@ type EconomicBookingRow = BookingRow & {
   experience_name: string | null;
   booking_reference: string | null;
   booking_source: string | null;
+  your_unit_price: number | null;
+  your_child_unit_price: number | null;
+  public_unit_price: number | null;
+  public_child_unit_price: number | null;
+  supplier_unit_cost: number | null;
+  supplier_child_unit_cost: number | null;
   total_to_you: number | null;
   total_customer: number | null;
   total_supplier_cost: number | null;
   supplier_amount_paid: number | null;
   customer_payment_status: string | null;
   supplier_payment_status: string | null;
+  experience: {
+    is_group_pricing: boolean | null;
+  }[];
 };
 
 function toYmd(date: Date) {
@@ -132,7 +141,75 @@ function getPeopleBreakdown(booking: BookingRow) {
 }
 
 function getPayingPeopleCount(booking: BookingRow) {
-  return Number(booking.adults || 0) + Number(booking.children || 0);
+  return getPayingAdultCount(booking) + Number(booking.children || 0);
+}
+
+function getPayingAdultCount(booking: BookingRow) {
+  return Math.max(
+    Number(booking.adults || 0) - Number(booking.non_paying_adults || 0),
+    0
+  );
+}
+
+function isGroupPricingBooking(booking: EconomicBookingRow) {
+  return booking.experience.some(
+    (experience) => experience.is_group_pricing === true
+  );
+}
+
+function getBookingIncome(booking: EconomicBookingRow) {
+  if (isGroupPricingBooking(booking)) {
+    return moneyValue(booking.total_to_you);
+  }
+
+  const adultPrice = moneyValue(booking.your_unit_price);
+  const childPrice = moneyValue(
+    booking.your_child_unit_price ?? booking.your_unit_price
+  );
+
+  return (
+    getPayingAdultCount(booking) * adultPrice +
+    Number(booking.children || 0) * childPrice
+  );
+}
+
+function getBookingGross(booking: EconomicBookingRow) {
+  if (isGroupPricingBooking(booking)) {
+    return moneyValue(booking.total_customer);
+  }
+
+  const adultPrice = moneyValue(booking.public_unit_price);
+  const childPrice = moneyValue(
+    booking.public_child_unit_price ?? booking.public_unit_price
+  );
+
+  return (
+    getPayingAdultCount(booking) * adultPrice +
+    Number(booking.children || 0) * childPrice
+  );
+}
+
+function getBookingSupplierCost(booking: EconomicBookingRow) {
+  if (
+    booking.total_supplier_cost !== null &&
+    booking.total_supplier_cost !== undefined
+  ) {
+    return moneyValue(booking.total_supplier_cost);
+  }
+
+  if (isGroupPricingBooking(booking)) {
+    return 0;
+  }
+
+  const adultCost = moneyValue(booking.supplier_unit_cost);
+  const childCost = moneyValue(
+    booking.supplier_child_unit_cost ?? booking.supplier_unit_cost
+  );
+
+  return (
+    getPayingAdultCount(booking) * adultCost +
+    Number(booking.children || 0) * childCost
+  );
 }
 
 function getMonthLabel(index: number) {
@@ -685,7 +762,7 @@ export default async function SupplierReportPage({
     supabaseServer
       .from("bookings")
       .select(
-        "id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled"
+        "id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_unit_cost, supplier_child_unit_cost, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled, experience:experiences(is_group_pricing)"
       )
       .eq("supplier_id", supplierId)
       .gte("booking_date", economicMonthStart)
@@ -796,7 +873,7 @@ export default async function SupplierReportPage({
     dailyIncomeMap.set(
       booking.booking_date,
       moneyValue(dailyIncomeMap.get(booking.booking_date)) +
-        moneyValue(booking.total_to_you)
+        getBookingIncome(booking)
     );
 
     const rows = dailyTransactionsMap.get(booking.booking_date) || [];
@@ -809,17 +886,17 @@ export default async function SupplierReportPage({
   );
 
   const economicIncomeTotal = validEconomicBookings.reduce(
-    (sum, booking) => sum + moneyValue(booking.total_to_you),
+    (sum, booking) => sum + getBookingIncome(booking),
     0
   );
 
   const economicGrossCustomerTotal = validEconomicBookings.reduce(
-    (sum, booking) => sum + moneyValue(booking.total_customer),
+    (sum, booking) => sum + getBookingGross(booking),
     0
   );
 
   const economicSupplierCostTotal = validEconomicBookings.reduce(
-    (sum, booking) => sum + moneyValue(booking.total_supplier_cost),
+    (sum, booking) => sum + getBookingSupplierCost(booking),
     0
   );
 
@@ -971,8 +1048,7 @@ export default async function SupplierReportPage({
                   {formatCurrency(economicIncomeTotal)}
                 </div>
                 <p className="mt-2 text-xs text-emerald-700">
-                  Somma di total_to_you. Questo è il valore usato per grafico e
-                  totali.
+                  Prezzo unitario di incasso moltiplicato per le persone paganti.
                 </p>
               </div>
 
@@ -1073,11 +1149,11 @@ export default async function SupplierReportPage({
                   const rows = dailyTransactionsMap.get(date) || [];
 
                   const dayIncome = rows.reduce(
-                    (sum, row) => sum + moneyValue(row.total_to_you),
+                    (sum, row) => sum + getBookingIncome(row),
                     0
                   );
                   const daySupplierCost = rows.reduce(
-                    (sum, row) => sum + moneyValue(row.total_supplier_cost),
+                    (sum, row) => sum + getBookingSupplierCost(row),
                     0
                   );
                   const daySupplierPaid = rows.reduce(
@@ -1164,6 +1240,9 @@ export default async function SupplierReportPage({
                                 Costo
                               </th>
                               <th className="px-2 py-3 text-right xl:px-3">
+                                Margine
+                              </th>
+                              <th className="px-2 py-3 text-right xl:px-3">
                                 Pagato forn.
                               </th>
                               <th className="px-2 py-3 xl:px-3">
@@ -1177,10 +1256,10 @@ export default async function SupplierReportPage({
 
                           <tbody>
                             {rows.map((row) => {
-                              const rowIncome = moneyValue(row.total_to_you);
-                              const rowSupplierCost = moneyValue(
-                                row.total_supplier_cost
-                              );
+                              const rowIncome = getBookingIncome(row);
+                              const rowGross = getBookingGross(row);
+                              const rowSupplierCost = getBookingSupplierCost(row);
+                              const rowMargin = rowIncome - rowSupplierCost;
                               const incomeBelowCost =
                                 rowIncome < rowSupplierCost;
 
@@ -1226,11 +1305,11 @@ export default async function SupplierReportPage({
                                         : "text-emerald-700"
                                     }`}
                                   >
-                                    {formatCurrency(row.total_to_you)}
+                                    {formatCurrency(rowIncome)}
                                   </td>
 
                                   <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-zinc-600 xl:px-3">
-                                    {formatCurrency(row.total_customer)}
+                                    {formatCurrency(rowGross)}
                                   </td>
 
                                   <td
@@ -1240,7 +1319,17 @@ export default async function SupplierReportPage({
                                         : "text-zinc-700"
                                     }`}
                                   >
-                                    {formatCurrency(row.total_supplier_cost)}
+                                    {formatCurrency(rowSupplierCost)}
+                                  </td>
+
+                                  <td
+                                    className={`whitespace-nowrap px-2 py-3 text-right font-bold xl:px-3 ${
+                                      rowMargin < 0
+                                        ? "text-rose-700"
+                                        : "text-blue-700"
+                                    }`}
+                                  >
+                                    {formatCurrency(rowMargin)}
                                   </td>
 
                                   <td className="whitespace-nowrap px-2 py-3 text-right font-bold text-blue-700 xl:px-3">
