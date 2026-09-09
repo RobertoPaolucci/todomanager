@@ -6,6 +6,21 @@ import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
 
+const BOOKINGS_PAGE_SIZE = 1000;
+
+type PaymentBookingRow = {
+  supplier_id: number | null;
+  business_unit_id: number | null;
+  total_supplier_cost: number | null;
+  booking_date: string | null;
+  is_cancelled: boolean | null;
+  supplier_payment_status: string | null;
+  supplier_amount_paid: number | null;
+  adults: number | null;
+  children: number | null;
+  infants: number | null;
+};
+
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -13,7 +28,10 @@ function formatEuro(value: number) {
   }).format(value);
 }
 
-function getBookingPaidAmount(booking: any, isInternalBooking: boolean) {
+function getBookingPaidAmount(
+  booking: PaymentBookingRow,
+  isInternalBooking: boolean
+) {
   const costo = Number(booking.total_supplier_cost || 0);
 
   if (booking.is_cancelled) return 0;
@@ -24,12 +42,48 @@ function getBookingPaidAmount(booking: any, isInternalBooking: boolean) {
   return Math.max(0, Math.min(rawPaid, costo));
 }
 
-function getBookingPeopleCount(booking: any) {
+function getBookingPeopleCount(booking: PaymentBookingRow) {
   return (
     Number(booking.adults || 0) +
     Number(booking.children || 0) +
     Number(booking.infants || 0)
   );
+}
+
+async function getAllBookings() {
+  const bookings: PaymentBookingRow[] = [];
+
+  for (let from = 0; ; from += BOOKINGS_PAGE_SIZE) {
+    const { data, error } = await supabaseServer
+      .from("bookings")
+      .select(`
+        supplier_id,
+        business_unit_id,
+        total_supplier_cost,
+        booking_date,
+        is_cancelled,
+        supplier_payment_status,
+        supplier_amount_paid,
+        adults,
+        children,
+        infants
+      `)
+      .order("id", { ascending: true })
+      .range(from, from + BOOKINGS_PAGE_SIZE - 1);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    const page = data || [];
+    bookings.push(...page);
+
+    if (page.length < BOOKINGS_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return { data: bookings, error: null };
 }
 
 export default async function PagamentiPage() {
@@ -39,18 +93,7 @@ export default async function PagamentiPage() {
   const [suppliersRes, bookingsRes, internalRulesRes] = await Promise.all([
     supabaseServer.from("suppliers").select("id, name").order("name"),
 
-    supabaseServer.from("bookings").select(`
-      supplier_id,
-      business_unit_id,
-      total_supplier_cost,
-      booking_date,
-      is_cancelled,
-      supplier_payment_status,
-      supplier_amount_paid,
-      adults,
-      children,
-      infants
-    `),
+    getAllBookings(),
 
     supabaseServer
       .from("business_unit_internal_suppliers")
