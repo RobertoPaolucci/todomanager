@@ -101,24 +101,31 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
               <strong>{formatCurrency(baseSupplierAdultCost)}</strong>.
             </div>
 
+            <p className="text-sm text-zinc-600">
+              Incasso: quanto resta a noi per persona dopo la commissione del canale.
+              Prezzo cliente: prezzo lordo pagato dal cliente. Costo fornitore: quanto
+              dobbiamo riconoscere al fornitore per persona.
+            </p>
+
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1220px] text-left text-sm">
                 <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
                   <tr>
                     <th className="w-[210px] py-3 pr-4">Canale</th>
+                    <th className="py-3 pr-4">Tipo</th>
                     <th className="w-[140px] py-3 pr-4 text-zinc-900">
-                      Agenzia adulto
+                      Incasso adulto
                     </th>
                     <th className="w-[140px] py-3 pr-4 text-zinc-900">
-                      Agenzia bambino
+                      Incasso bambino
                     </th>
-                    <th className="w-[140px] py-3 pr-4">Pubblico adulto</th>
-                    <th className="w-[140px] py-3 pr-4">Pubblico bambino</th>
+                    <th className="w-[140px] py-3 pr-4">Prezzo cliente adulto</th>
+                    <th className="w-[140px] py-3 pr-4">Prezzo cliente bambino</th>
                     <th className="w-[155px] py-3 pr-4 text-zinc-900">
-                      Costo forn. adulto
+                      Costo fornitore adulto
                     </th>
                     <th className="w-[155px] py-3 pr-4 text-zinc-900">
-                      Costo forn. bambino
+                      Costo fornitore bambino
                     </th>
                   </tr>
                 </thead>
@@ -136,9 +143,6 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
                           <div className="font-medium text-zinc-900">
                             {channel.name}
                           </div>
-                          <div className="mt-1 text-[10px] font-bold uppercase italic text-zinc-400">
-                            {channel.type}
-                          </div>
 
                           <input
                             type="hidden"
@@ -151,6 +155,12 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
                             name={`notes_${channel.id}`}
                             value={current?.notes ?? ""}
                           />
+                        </td>
+
+                        <td className="py-4 pr-4">
+                          <div className="text-[10px] font-bold uppercase italic text-zinc-400">
+                            {channel.type}
+                          </div>
                         </td>
 
                         <td className="py-4 pr-4">
