@@ -26,17 +26,16 @@ type BookingRow = {
 };
 
 type EconomicBookingRow = BookingRow & {
+  experience_id: number | null;
+  channel_id: number | null;
   booking_time: string | null;
   customer_name: string | null;
   experience_name: string | null;
   booking_reference: string | null;
   booking_source: string | null;
   your_unit_price: number | null;
-  your_child_unit_price: number | null;
   public_unit_price: number | null;
-  public_child_unit_price: number | null;
   supplier_unit_cost: number | null;
-  supplier_child_unit_cost: number | null;
   total_to_you: number | null;
   total_customer: number | null;
   total_supplier_cost: number | null;
@@ -45,7 +44,22 @@ type EconomicBookingRow = BookingRow & {
   supplier_payment_status: string | null;
   experience: {
     is_group_pricing: boolean | null;
-  }[];
+  } | {
+    is_group_pricing: boolean | null;
+  }[] | null;
+};
+
+type ExperienceChannelPriceRow = {
+  experience_id: number;
+  channel_id: number;
+  your_child_unit_price: number | null;
+  public_child_unit_price: number | null;
+  supplier_adult_unit_cost: number | null;
+  supplier_child_unit_cost: number | null;
+};
+
+type EconomicBookingWithChannelPrice = EconomicBookingRow & {
+  channelPrice: ExperienceChannelPriceRow | null;
 };
 
 function toYmd(date: Date) {
@@ -152,19 +166,23 @@ function getPayingAdultCount(booking: BookingRow) {
 }
 
 function isGroupPricingBooking(booking: EconomicBookingRow) {
-  return booking.experience.some(
-    (experience) => experience.is_group_pricing === true
-  );
+  if (Array.isArray(booking.experience)) {
+    return booking.experience.some(
+      (experience) => experience.is_group_pricing === true
+    );
+  }
+
+  return booking.experience?.is_group_pricing === true;
 }
 
-function getBookingIncome(booking: EconomicBookingRow) {
+function getBookingIncome(booking: EconomicBookingWithChannelPrice) {
   if (isGroupPricingBooking(booking)) {
     return moneyValue(booking.total_to_you);
   }
 
   const adultPrice = moneyValue(booking.your_unit_price);
   const childPrice = moneyValue(
-    booking.your_child_unit_price ?? booking.your_unit_price
+    booking.channelPrice?.your_child_unit_price ?? booking.your_unit_price
   );
 
   return (
@@ -173,14 +191,14 @@ function getBookingIncome(booking: EconomicBookingRow) {
   );
 }
 
-function getBookingGross(booking: EconomicBookingRow) {
+function getBookingGross(booking: EconomicBookingWithChannelPrice) {
   if (isGroupPricingBooking(booking)) {
     return moneyValue(booking.total_customer);
   }
 
   const adultPrice = moneyValue(booking.public_unit_price);
   const childPrice = moneyValue(
-    booking.public_child_unit_price ?? booking.public_unit_price
+    booking.channelPrice?.public_child_unit_price ?? booking.public_unit_price
   );
 
   return (
@@ -189,7 +207,7 @@ function getBookingGross(booking: EconomicBookingRow) {
   );
 }
 
-function getBookingSupplierCost(booking: EconomicBookingRow) {
+function getBookingSupplierCost(booking: EconomicBookingWithChannelPrice) {
   if (
     booking.total_supplier_cost !== null &&
     booking.total_supplier_cost !== undefined
@@ -203,7 +221,9 @@ function getBookingSupplierCost(booking: EconomicBookingRow) {
 
   const adultCost = moneyValue(booking.supplier_unit_cost);
   const childCost = moneyValue(
-    booking.supplier_child_unit_cost ?? booking.supplier_unit_cost
+    booking.channelPrice?.supplier_child_unit_cost ??
+      booking.channelPrice?.supplier_adult_unit_cost ??
+      booking.supplier_unit_cost
   );
 
   return (
@@ -762,7 +782,7 @@ export default async function SupplierReportPage({
     supabaseServer
       .from("bookings")
       .select(
-        "id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_unit_cost, supplier_child_unit_cost, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled, experience:experiences(is_group_pricing)"
+        "id, experience_id, channel_id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled, experience:experiences(is_group_pricing)"
       )
       .eq("supplier_id", supplierId)
       .gte("booking_date", economicMonthStart)
@@ -791,6 +811,47 @@ export default async function SupplierReportPage({
     throw new Error(economicBookingsError.message);
   }
 
+  const economicBookingRows = (economicBookings || []) as EconomicBookingRow[];
+  const experienceIds = [
+    ...new Set(
+      economicBookingRows
+        .map((booking) => booking.experience_id)
+        .filter((value): value is number => value !== null)
+    ),
+  ];
+  const channelIds = [
+    ...new Set(
+      economicBookingRows
+        .map((booking) => booking.channel_id)
+        .filter((value): value is number => value !== null)
+    ),
+  ];
+
+  let channelPrices: ExperienceChannelPriceRow[] = [];
+
+  if (experienceIds.length > 0 && channelIds.length > 0) {
+    const { data, error } = await supabaseServer
+      .from("experience_channel_prices")
+      .select(
+        "experience_id, channel_id, your_child_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost"
+      )
+      .in("experience_id", experienceIds)
+      .in("channel_id", channelIds);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    channelPrices = (data || []) as ExperienceChannelPriceRow[];
+  }
+
+  const channelPricesMap = new Map(
+    channelPrices.map((price) => [
+      `${price.experience_id}:${price.channel_id}`,
+      price,
+    ])
+  );
+
   const validBookings = ((bookings || []) as BookingRow[]).filter(
     (b) => b.is_cancelled !== true
   );
@@ -799,9 +860,16 @@ export default async function SupplierReportPage({
     (b) => b.is_cancelled !== true
   );
 
-  const validEconomicBookings = (
-    (economicBookings || []) as EconomicBookingRow[]
-  ).filter((b) => b.is_cancelled !== true);
+  const validEconomicBookings: EconomicBookingWithChannelPrice[] =
+    economicBookingRows
+      .filter((booking) => booking.is_cancelled !== true)
+      .map((booking) => ({
+        ...booking,
+        channelPrice:
+          channelPricesMap.get(
+            `${booking.experience_id}:${booking.channel_id}`
+          ) ?? null,
+      }));
 
   const totalBookings = validBookings.length;
   const totalPeople = validBookings.reduce(
@@ -860,7 +928,10 @@ export default async function SupplierReportPage({
   const economicMonthDates = getMonthDates(economicMonth);
 
   const dailyIncomeMap = new Map<string, number>();
-  const dailyTransactionsMap = new Map<string, EconomicBookingRow[]>();
+  const dailyTransactionsMap = new Map<
+    string,
+    EconomicBookingWithChannelPrice[]
+  >();
 
   economicMonthDates.forEach((date) => {
     dailyIncomeMap.set(date, 0);
