@@ -1004,6 +1004,69 @@ export async function POST(req: Request) {
 
     const businessUnitId = requireBokunBusinessUnit(experience.business_unit_id);
 
+    // Cancellation identity is authoritative: never enter legacy/heuristic matching.
+    if (isCancelled && bokunBookingReference) {
+      const { data: candidates, error: matchError } = await supabaseServer
+        .from("bookings").select("*")
+        .eq("business_unit_id", businessUnitId)
+        .eq("bokun_booking_reference", bokunBookingReference).limit(2);
+      if (matchError) throw new Error(matchError.message);
+
+      const booking = candidates?.length === 1
+        ? candidates[0] as ExistingBooking : null;
+      const diagnostics = {
+        matched_booking_id: booking?.id ?? null,
+        matched_bokun_booking_reference: booking?.bokun_booking_reference ?? null,
+        matching_method: "bokun_booking_reference",
+        channel_id: booking?.channel_id ?? null,
+        booking_source: booking?.booking_source ?? null,
+        business_unit_id: businessUnitId,
+      };
+      if (!booking || Number(booking.experience_id) !== Number(experience.id)) {
+        return NextResponse.json({
+          ...diagnostics, success: false, skipped: true,
+          updated_existing_booking: false,
+          reason: "bokun_reconciliation_required",
+          error: "Riferimento Bókun non associato a una sola prenotazione valida nella business unit. Riconciliazione necessaria; nessuna riga modificata.",
+        }, { status: 409 });
+      }
+
+      const unchanged = booking.is_cancelled === true;
+      if (!unchanged) {
+        const notes = stripSystemAlert(cleanString(booking.notes));
+        const alert = buildSystemAlert("cancelled");
+        // Only cancellation state and its alert change; preserve stored identity,
+        // channel, customer, schedule and economics even with incomplete payloads.
+        const { data: updated, error: updateError } = await supabaseServer
+          .from("bookings")
+          .update({ is_cancelled: true, notes: notes ? `${alert}\n${notes}` : alert })
+          .eq("id", booking.id)
+          .eq("business_unit_id", businessUnitId)
+          .eq("bokun_booking_reference", bokunBookingReference)
+          .eq("experience_id", experience.id)
+          .select("id").maybeSingle();
+        if (updateError) throw new Error(updateError.message);
+        if (!updated || updated.id !== booking.id) {
+          return NextResponse.json({
+            ...diagnostics, success: false, updated_existing_booking: false,
+            reason: "bokun_update_not_verified",
+            error: "Aggiornamento della prenotazione Bókun non verificato: riconciliare prima di ripetere l'evento.",
+          }, { status: 409 });
+        }
+        revalidatePath("/");
+        revalidatePath("/prenotazioni");
+      }
+      return NextResponse.json({
+        ...diagnostics, success: true, action: unchanged ? "unchanged" : "updated",
+        bokun_id_ricevuto: rawBokunId, bokun_id_risolto: resolvedBokunId,
+        matched_existing_booking: true, updated_existing_booking: !unchanged,
+        created_new_history_row: false, unchanged,
+        changed_fields: unchanged ? [] : ["is_cancelled"],
+        preserved_existing_reference: Boolean(booking.booking_reference),
+        applied_channel_price: false, totals: null,
+      });
+    }
+
     const identifiedBokunBooking = bokunBookingReference
       ? await findBokunBooking(supabaseServer, businessUnitId, bokunBookingReference, incomingBookingReferences) as ExistingBooking | null
       : null;

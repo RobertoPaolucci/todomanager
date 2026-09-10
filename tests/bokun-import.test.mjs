@@ -21,6 +21,7 @@ function harness(seed = []) {
     import_logs: [], payment_reconciliation_imports: [],
   };
   let forcedInsertError = null;
+  let emptyUpdate = false;
   const db = { from(table) {
     let predicates = [], maximum = Infinity, sorting = null, operation = 'select', payload;
     const q = {
@@ -41,6 +42,7 @@ function harness(seed = []) {
       then(ok, fail) { return Promise.resolve().then(() => execute(false)).then(ok, fail); },
     };
     function execute(single) {
+      if (operation === 'update' && emptyUpdate) return { data: single ? null : [], error: null };
       let rows = tables[table].filter(row => predicates.every(p => p(row)));
       if (sorting) rows.sort((a, b) => (a[sorting[0]] - b[sorting[0]]) * (sorting[1] ? 1 : -1));
       rows = rows.slice(0, maximum);
@@ -86,6 +88,7 @@ function harness(seed = []) {
   return {
     tables, load,
     failInsert(error) { forcedInsertError = error; },
+    returnEmptyUpdate() { emptyUpdate = true; },
     async send(overrides = {}) {
       const response = await route.POST(new Request('http://localhost/api/webhooks/prenotazioni', {
         method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' },
@@ -101,6 +104,100 @@ function harness(seed = []) {
     },
   };
 }
+
+const cancellationPayload = {
+  bokun_id: '958091', bokun_booking_reference: '', externalBookingReference: '',
+  confirmationCode: 'GET-98090108', productConfirmationCode: 'TOD-T138861035',
+  productId: 958091, status: 'CANCELLED', action: 'BOOKING_ITEM_CANCELLED',
+  booking_date: '2026-09-11', booking_time: '17:00', adults: 2,
+  customer_name: 'Eva', channel_id: 1, booking_source: 'Direct',
+};
+
+function cancellationHarness() {
+  const common = {
+    business_unit_id: 2, experience_id: 1, experience_name: 'Horseback Riding',
+    booking_date: '2026-09-11', booking_time: '17:00', adults: 2,
+    children: 0, infants: 0, total_people: 2, is_cancelled: false,
+    notes: 'Existing note',
+  };
+  const h = harness([
+    { ...common, id: 1717, booking_reference: 'GYGG45NY7H58',
+      bokun_booking_reference: 'GET-98090108', channel_id: 3, booking_source: 'GetYourGuide' },
+    { ...common, id: 2100, booking_reference: 'EVA-DIRECT',
+      bokun_booking_reference: null, channel_id: 1, booking_source: 'Direct', customer_name: 'Eva' },
+  ]);
+  h.tables.experiences[0].bokun_id = '958091';
+  h.tables.experiences[0].name = 'Horseback Riding';
+  return h;
+}
+
+test('GET-98090108 cancels only historical row 1717, never identical-slot Eva 2100; replay is idempotent', async () => {
+  const h = cancellationHarness();
+  const before = structuredClone(h.tables.bookings);
+  const result = await h.send(cancellationPayload);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.matched_booking_id, 1717);
+  assert.equal(result.body.matched_bokun_booking_reference, 'GET-98090108');
+  assert.equal(result.body.matching_method, 'bokun_booking_reference');
+  assert.equal(result.body.updated_existing_booking, true);
+  assert.equal(result.body.channel_id, 3);
+  assert.equal(result.body.booking_source, 'GetYourGuide');
+  assert.equal(h.tables.bookings[0].is_cancelled, true);
+  assert.deepEqual(h.tables.bookings[1], before[1]);
+  const { is_cancelled, notes, ...preserved } = h.tables.bookings[0];
+  assert.equal(is_cancelled, true);
+  assert.deepEqual({ ...preserved, is_cancelled: false, notes: before[0].notes }, before[0]);
+  assert.ok(notes.includes('Existing note'));
+  const after = structuredClone(h.tables.bookings);
+  const replay = await h.send(cancellationPayload);
+  assert.equal(replay.body.action, 'unchanged');
+  assert.equal(replay.body.updated_existing_booking, false);
+  assert.equal(replay.body.matched_booking_id, 1717);
+  assert.deepEqual(h.tables.bookings, after);
+});
+
+for (const scenario of ['unknown', 'legacy without cart', 'duplicate', 'other unit', 'wrong experience']) {
+  test(`strict cancellation refuses ${scenario} with 409 and no writes`, async () => {
+    const h = cancellationHarness();
+    const payload = { ...cancellationPayload };
+    if (scenario === 'unknown') payload.confirmationCode = 'GET-99999999';
+    if (scenario === 'legacy without cart') {
+      h.tables.bookings[0].bokun_booking_reference = null;
+      payload.externalBookingReference = 'GYGG45NY7H58';
+    }
+    if (scenario === 'duplicate') h.tables.bookings.push({ ...h.tables.bookings[0], id: 2200 });
+    if (scenario === 'other unit') h.tables.bookings[0].business_unit_id = 3;
+    if (scenario === 'wrong experience') h.tables.bookings[0].experience_id = 99;
+    const before = structuredClone(h.tables.bookings);
+    const result = await h.send(payload);
+    assert.equal(result.status, 409);
+    assert.equal(result.body.updated_existing_booking, false);
+    assert.equal(result.body.reason, 'bokun_reconciliation_required');
+    assert.deepEqual(h.tables.bookings, before);
+  });
+}
+
+test('identified GYG channel and NULL external reference survive misleading Direct payload', async () => {
+  const h = cancellationHarness();
+  h.tables.bookings[0].booking_reference = null;
+  const result = await h.send({ ...cancellationPayload, externalBookingReference: 'DIFFERENT' });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.channel_id, 3);
+  assert.equal(result.body.booking_source, 'GetYourGuide');
+  assert.equal(h.tables.bookings[0].booking_reference, null);
+});
+
+test('UPDATE returning no row never reports updated_existing_booking=true', async () => {
+  const h = cancellationHarness();
+  h.returnEmptyUpdate();
+  const before = structuredClone(h.tables.bookings);
+  const result = await h.send(cancellationPayload);
+  assert.equal(result.status, 409);
+  assert.equal(result.body.success, false);
+  assert.equal(result.body.updated_existing_booking, false);
+  assert.equal(result.body.matched_booking_id, 1717);
+  assert.deepEqual(h.tables.bookings, before);
+});
 
 test('normal CONFIRMED retains external ref, stores Bókun identity and uses GYG prices', async () => {
   const h = harness();
