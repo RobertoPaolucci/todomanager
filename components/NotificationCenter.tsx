@@ -14,7 +14,7 @@ export default async function NotificationCenter() {
   const { data: bookings, error } = await supabaseServer
     .from("bookings")
     .select(
-      "id, customer_name, experience_name, notes, booking_date, total_people, booking_source"
+      "id, customer_name, experience_name, notes, booking_date, total_people, booking_source, is_cancelled"
     )
     .not("notes", "is", null)
     .order("id", { ascending: false });
@@ -24,12 +24,13 @@ export default async function NotificationCenter() {
   }
 
   const alerts =
-    bookings?.filter(
-      (b) =>
-        b.notes?.includes("🔴") ||
-        b.notes?.includes("🟡") ||
-        b.notes?.includes("🟢")
-    ) || [];
+    bookings?.filter((b) => {
+      const notes = b.notes || "";
+      // Hide stale alerts without changing the stored notes.
+      if (notes.includes("🔴") && b.is_cancelled !== true) return false;
+      if (notes.includes("🟢") && b.is_cancelled !== false) return false;
+      return notes.includes("🔴") || notes.includes("🟡") || notes.includes("🟢");
+    }) || [];
 
   if (alerts.length === 0) {
     return (
