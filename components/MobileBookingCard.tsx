@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { cancelBooking, clearAlert } from "@/app/prenotazioni/actions";
+import { getBookingDisplayNotes } from "@/lib/booking-display-notes";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -148,11 +149,11 @@ export default function MobileBookingCard({
     isTomorrow = true;
   }
 
+  const displayNotes = getBookingDisplayNotes(booking.notes);
   const hasAlert =
-    booking.notes &&
-    (booking.notes.includes("🔴") ||
-      booking.notes.includes("🟡") ||
-      booking.notes.includes("🟢"));
+    displayNotes.includes("🔴") ||
+    displayNotes.includes("🟡") ||
+    displayNotes.includes("🟢");
 
   return (
     <div
@@ -334,6 +335,11 @@ export default function MobileBookingCard({
             Note / Alert
           </div>
 
+          {isCancelled && (
+            <div className="mb-2 text-[14px] font-bold text-red-700">
+              Prenotazione cancellata
+            </div>
+          )}
           {hasAlert ? (
             <form action={clearAlert}>
               <input type="hidden" name="id" value={booking.id} />
@@ -341,14 +347,14 @@ export default function MobileBookingCard({
                 type="submit"
                 title="Segna alert come letto"
                 className={`w-full rounded-xl px-3 py-3 text-left text-[14px] font-bold leading-tight transition ${
-                  booking.notes.includes("🔴")
+                  displayNotes.includes("🔴")
                     ? "bg-red-50 text-red-700 hover:bg-red-100"
-                    : booking.notes.includes("🟡")
+                    : displayNotes.includes("🟡")
                     ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
                     : "bg-green-50 text-green-700 hover:bg-green-100"
                 }`}
               >
-                <div>{booking.notes}</div>
+                <div>{displayNotes}</div>
                 <div className="mt-1 text-[12px] font-medium underline opacity-80">
                   Segna come letto
                 </div>
@@ -356,7 +362,7 @@ export default function MobileBookingCard({
             </form>
           ) : (
             <div className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3 text-[15px] text-zinc-600">
-              {booking.notes || "-"}
+              {displayNotes || "-"}
             </div>
           )}
         </div>

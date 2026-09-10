@@ -8,6 +8,7 @@ import SummarySelectionToolbar from "@/components/SummarySelectionToolbar";
 import BookingDateRangeFilter from "@/components/BookingDateRangeFilter";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
+import { getBookingDisplayNotes } from "@/lib/booking-display-notes";
 import { cancelBooking, restoreBooking, clearAlert } from "./actions";
 
 function formatEuro(value: number) {
@@ -1015,11 +1016,11 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                       isTomorrow = true;
                     }
 
+                    const displayNotes = getBookingDisplayNotes(booking.notes);
                     const hasAlert =
-                      booking.notes &&
-                      (booking.notes.includes("🔴") ||
-                        booking.notes.includes("🟡") ||
-                        booking.notes.includes("🟢"));
+                      displayNotes.includes("🔴") ||
+                      displayNotes.includes("🟡") ||
+                      displayNotes.includes("🟢");
 
                     const dateChanged = fieldChanged(booking, "booking_date");
                     const timeChanged = fieldChanged(booking, "booking_time");
@@ -1225,6 +1226,11 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                         </td>
 
                         <td className="py-4 pr-4">
+                          {isCancelled && (
+                            <div className="mb-1 text-[11px] font-bold text-red-600">
+                              Prenotazione cancellata
+                            </div>
+                          )}
                           {hasAlert && !isOldHistory ? (
                             <form action={clearAlert}>
                               <input type="hidden" name="id" value={booking.id} />
@@ -1232,14 +1238,14 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                                 type="submit"
                                 title="Clicca per confermare la presa visione"
                                 className={`group -ml-1.5 max-w-[130px] cursor-pointer rounded p-1.5 text-left text-[11px] font-bold leading-tight transition-all ${
-                                  booking.notes.includes("🔴")
+                                  displayNotes.includes("🔴")
                                     ? "text-red-600 hover:bg-red-50"
-                                    : booking.notes.includes("🟡")
+                                    : displayNotes.includes("🟡")
                                     ? "text-amber-600 hover:bg-amber-50"
                                     : "text-green-600 hover:bg-green-50"
                                 } ${changedClass(booking, statusChanged)}`}
                               >
-                                {booking.notes}
+                                {displayNotes}
                                 <span className="mt-1 block text-[9px] font-medium text-zinc-400 underline group-hover:text-zinc-600">
                                   Segna come letto
                                 </span>
@@ -1252,7 +1258,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                                 statusChanged
                               )}`}
                             >
-                              {booking.notes || (isOldHistory ? "Versione storica" : "-")}
+                              {displayNotes || (isOldHistory ? "Versione storica" : "-")}
                             </div>
                           )}
                         </td>
