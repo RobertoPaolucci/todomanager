@@ -67,7 +67,7 @@ export default async function NotificationCenter() {
           return (
             <Link
               key={alert.id}
-              href={`/prenotazioni?highlight=${alert.id}`}
+              href={`/prenotazioni/${alert.id}/modifica`}
               className={`block rounded-lg border p-3 transition hover:shadow-md ${bgClass}`}
             >
               <div className="flex items-start justify-between gap-3">

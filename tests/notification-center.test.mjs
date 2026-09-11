@@ -16,7 +16,9 @@ async function render(rows) {
   const before = structuredClone(rows);
   const query = {
     select(fields) {
-      assert.ok(fields.split(',').map(s => s.trim()).includes('is_cancelled'));
+      const selected = fields.split(',').map(s => s.trim());
+      assert.ok(selected.includes('is_cancelled'));
+      assert.ok(selected.includes('id'));
       return query;
     },
     not() { return query; },
@@ -48,8 +50,8 @@ test('Eva restored is hidden, actual cancellation remains and distinct Valer boo
       customer_name: 'Valer Odi', notes: '🟢 Nuova prenotazione', is_cancelled: false })),
   ];
   const html = await render(rows);
-  assert.ok(!html.includes('highlight=2100'));
-  for (const id of [1717, 2106, 2107]) assert.ok(html.includes(`highlight=${id}`));
+  assert.ok(!html.includes('/prenotazioni/2100/modifica'));
+  for (const id of [1717, 2106, 2107]) assert.ok(html.includes(`/prenotazioni/${id}/modifica`));
   assert.ok(html.includes('3 Avvisi'));
 });
 
@@ -61,12 +63,33 @@ test('cancelled green and unknown-state red/green alerts are hidden; yellow rema
     { id: 4, notes: '🟡 Prenotazione modificata', is_cancelled: false },
     { id: 5, notes: 'Nota ordinaria', is_cancelled: false },
   ]);
-  for (const id of [1, 2, 3, 5]) assert.ok(!html.includes(`highlight=${id}`));
-  assert.ok(html.includes('highlight=4'));
+  for (const id of [1, 2, 3, 5]) assert.ok(!html.includes(`/prenotazioni/${id}/modifica`));
+  assert.ok(html.includes('/prenotazioni/4/modifica'));
 });
 
 test('only stale cancellation shows empty state without changing notes', async () => {
   const html = await render([{ id: 2100, notes: '🔴 Prenotazione cancellata', is_cancelled: false }]);
   assert.ok(html.includes('Nessun avviso da leggere'));
   assert.ok(!html.includes('Prenotazione cancellata'));
+});
+
+test('new booking cards link to their own row IDs even with a shared booking reference', async () => {
+  const rows = [
+    { id: 2106, customer_name: 'Cliente prima card', experience_name: 'Tour mattina' },
+    { id: 2107, customer_name: 'Cliente seconda card', experience_name: 'Tour pomeriggio' },
+  ].map(row => ({ ...row, booking_reference: 'SHARED-REFERENCE',
+    notes: '🟢 Nuova prenotazione', is_cancelled: false }));
+  const html = await render(rows);
+  const cards = [...html.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cards.map(card => card[1]), [
+    '/prenotazioni/2106/modifica', '/prenotazioni/2107/modifica',
+  ]);
+  for (const [index, card] of cards.entries()) {
+    assert.ok(card[2].includes(rows[index].customer_name));
+    assert.ok(card[2].includes(rows[index].experience_name));
+    assert.ok(card[2].includes('Nuova prenotazione'));
+    assert.ok(card[2].includes('<svg'));
+    assert.doesNotMatch(card[2], /<(?:a|button|input|form)\b/);
+  }
 });
