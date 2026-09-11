@@ -456,6 +456,15 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
   });
 
   const allBookings = historyGroups.flatMap((group) => group.versions);
+  // Prioritize the notified row without changing the order of the other bookings.
+  const highlightedIndex = allBookings.findIndex(
+    (booking) => String(booking.id) === highlightId
+  );
+  if (highlightedIndex > 0) {
+    const [highlightedBooking] = allBookings.splice(highlightedIndex, 1);
+    allBookings.unshift(highlightedBooking);
+  }
+
   const currentVisibleBookings = allBookings.filter(
     (booking) => booking._is_history_latest
   );

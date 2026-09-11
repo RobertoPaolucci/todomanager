@@ -29,7 +29,7 @@ function harness(booking) {
         }
         if (name === '@/lib/supabase-server') return { supabaseServer: {
           from(table) {
-            const result = { data: table === 'bookings' ? [structuredClone(booking)] : [], error: null };
+            const result = { data: table === 'bookings' ? structuredClone(Array.isArray(booking) ? booking : [booking]) : [], error: null };
             const query = {
               select() { return query; }, order() { return query; },
               async range() { return result; },
@@ -49,9 +49,9 @@ function harness(booking) {
     return loaded.exports;
   }
   return {
-    async desktop() {
+    async desktop(searchParams = { past: 'true' }) {
       const Page = load('app/prenotazioni/page.tsx').default;
-      const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve({ past: 'true' }) }));
+      const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve(searchParams) }));
       assert.deepEqual(booking, before);
       return html;
     },
@@ -101,4 +101,35 @@ test('ordinary operational notes, including red warnings, retain their text and 
     assert.ok(html.includes('Segna come letto'));
     assert.ok(!html.includes('Prenotazione cancellata'));
   }
+});
+
+test('highlight moves only the requested row first in both mobile and desktop lists', async () => {
+  const rows = [
+    { id: 1, booking_date: '2026-01-01', notes: '🟢 Nuova prenotazione' },
+    { id: 2, booking_date: '2026-02-01', notes: '🟢 Nuova prenotazione' },
+    { id: 3, booking_date: '2026-03-01', notes: null },
+    { id: 4, booking_date: '2026-04-01', notes: null },
+  ].map(row => ({ ...row, customer_name: `Cliente ${row.id}`, is_cancelled: false }));
+  const h = harness(rows);
+  function assertOrder(html, expected) {
+    // Selection checkboxes are rendered once in the mobile list and once in the desktop table.
+    const ids = [...html.matchAll(/<input\b[^>]*name="ids"[^>]*value="(\d+)"/g)].map(match => Number(match[1]));
+    assert.deepEqual(ids, [...expected, ...expected]);
+  }
+  assertOrder(await h.desktop(), [1, 2, 3, 4]);
+  assertOrder(await h.desktop({ past: 'true', highlight: '2' }), [2, 1, 3, 4]);
+  assertOrder(await h.desktop({ past: 'true', highlight: '4' }), [4, 1, 2, 3]);
+  assertOrder(await h.desktop({ past: 'true', highlight: '999' }), [1, 2, 3, 4]);
+  const html = await h.desktop({ highlight: '2', from: '2099-01-01' });
+  assertOrder(html, [2]);
+  assert.ok(html.includes('🟢 Nuova prenotazione'));
+  assert.ok(html.includes('Segna come letto'));
+});
+
+test('highlight identifies an exact historical row even when its reference is shared', async () => {
+  const rows = [1, 2, 3].map(id => ({ id, booking_reference: 'SHARED',
+    customer_name: `Cliente ${id}`, booking_date: '2026-01-01', is_cancelled: false }));
+  const html = await harness(rows).desktop({ past: 'true', highlight: '1' });
+  const ids = [...html.matchAll(/<input\b[^>]*name="ids"[^>]*value="(\d+)"/g)].map(match => Number(match[1]));
+  assert.deepEqual(ids, [1, 3, 2, 1, 3, 2]);
 });
