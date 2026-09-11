@@ -50,8 +50,8 @@ test('Eva restored is hidden, actual cancellation remains and distinct Valer boo
       customer_name: 'Valer Odi', notes: '🟢 Nuova prenotazione', is_cancelled: false })),
   ];
   const html = await render(rows);
-  assert.ok(!html.includes('/prenotazioni/2100/modifica'));
-  for (const id of [1717, 2106, 2107]) assert.ok(html.includes(`/prenotazioni/${id}/modifica`));
+  assert.ok(!html.includes('href="/prenotazioni?highlight=2100"'));
+  for (const id of [1717, 2106, 2107]) assert.ok(html.includes(`href="/prenotazioni?highlight=${id}"`));
   assert.ok(html.includes('3 Avvisi'));
 });
 
@@ -63,8 +63,8 @@ test('cancelled green and unknown-state red/green alerts are hidden; yellow rema
     { id: 4, notes: '🟡 Prenotazione modificata', is_cancelled: false },
     { id: 5, notes: 'Nota ordinaria', is_cancelled: false },
   ]);
-  for (const id of [1, 2, 3, 5]) assert.ok(!html.includes(`/prenotazioni/${id}/modifica`));
-  assert.ok(html.includes('/prenotazioni/4/modifica'));
+  for (const id of [1, 2, 3, 5]) assert.ok(!html.includes(`href="/prenotazioni?highlight=${id}"`));
+  assert.ok(html.includes('href="/prenotazioni?highlight=4"'));
 });
 
 test('only stale cancellation shows empty state without changing notes', async () => {
@@ -73,7 +73,7 @@ test('only stale cancellation shows empty state without changing notes', async (
   assert.ok(!html.includes('Prenotazione cancellata'));
 });
 
-test('new booking cards link to their own row IDs even with a shared booking reference', async () => {
+test('new booking cards open the list highlighting their own row IDs even with a shared booking reference', async () => {
   const rows = [
     { id: 2106, customer_name: 'Cliente prima card', experience_name: 'Tour mattina' },
     { id: 2107, customer_name: 'Cliente seconda card', experience_name: 'Tour pomeriggio' },
@@ -83,7 +83,7 @@ test('new booking cards link to their own row IDs even with a shared booking ref
   const cards = [...html.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
   assert.equal(cards.length, 2);
   assert.deepEqual(cards.map(card => card[1]), [
-    '/prenotazioni/2106/modifica', '/prenotazioni/2107/modifica',
+    '/prenotazioni?highlight=2106', '/prenotazioni?highlight=2107',
   ]);
   for (const [index, card] of cards.entries()) {
     assert.ok(card[2].includes(rows[index].customer_name));
