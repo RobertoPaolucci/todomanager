@@ -1,22 +1,42 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import type { QueryData } from "@supabase/supabase-js";
 
 export async function getDashboardStats() {
-  const { data: bookings, error } = await supabaseServer
+  const query = supabaseServer
     .from("bookings")
     .select(`
       id,
+      booking_date,
       booking_source,
       total_customer,
       total_to_you,
       total_supplier_cost,
       margin_total
-    `);
+    `)
+    .order("id", { ascending: true });
 
-  if (error) {
-    throw new Error(`Errore caricamento dashboard: ${error.message}`);
+  const pageSize = 1000;
+  const safeBookings: QueryData<typeof query> = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await query.range(from, from + pageSize - 1);
+
+    if (error) {
+      throw new Error(`Errore caricamento dashboard: ${error.message}`);
+    }
+
+    const page = data || [];
+    safeBookings.push(...page);
+    if (page.length < pageSize) break;
   }
 
-  const safeBookings = bookings || [];
+  const channelStartDate = safeBookings.reduce<string | null>(
+    (earliest, booking) =>
+      booking.booking_date && (!earliest || booking.booking_date < earliest)
+        ? booking.booking_date
+        : earliest,
+    null
+  );
 
   const totals = safeBookings.reduce(
     (acc, booking) => {
@@ -53,5 +73,6 @@ export async function getDashboardStats() {
   return {
     totals,
     bookingsByChannel,
+    channelStartDate,
   };
 }

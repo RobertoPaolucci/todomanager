@@ -59,6 +59,19 @@ function formatDateTimeRome(value: string | null) {
   }).format(d);
 }
 
+function formatHistoryPeriod(startDate: string | null) {
+  if (!startDate) return "Periodo: tutto lo storico disponibile · data iniziale non disponibile";
+
+  const [year, month, day] = startDate.split("-").map(Number);
+  const formatted = new Intl.DateTimeFormat("it-IT", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day));
+
+  return `Periodo: dal ${formatted} · tutto lo storico disponibile`;
+}
+
 function formatTime(value: string | null) {
   if (!value) return "-";
   return String(value).slice(0, 5);
@@ -535,9 +548,6 @@ export default async function Home({ searchParams }: PageProps) {
   tenDaysFromNow.setDate(today.getDate() + 10);
   const tenDaysFromNowStr = tenDaysFromNow.toISOString().split("T")[0];
 
-  const { bookingsByChannel } = await getDashboardStats();
-  const maxChannelCount = Math.max(...bookingsByChannel.map((c) => c.count), 1);
-
   const { data: bookings, error } = await loadAllDashboardBookings();
 
   if (error) {
@@ -710,6 +720,9 @@ export default async function Home({ searchParams }: PageProps) {
   const currentRomeMonth = todayRomeParts[1];
   const currentRomeDay = todayRomeParts[2];
 
+  const { bookingsByChannel, channelStartDate } = await getDashboardStats();
+  const maxChannelCount = Math.max(...bookingsByChannel.map((c) => c.count), 1);
+
   const selectedMonthIsCurrent =
     selectedYear === currentRomeYear && selectedMonth === currentRomeMonth;
 
@@ -878,6 +891,7 @@ export default async function Home({ searchParams }: PageProps) {
   const prossimePrenotazioni: any[] = [];
 
   const expPaxCounts: Record<string, number> = {};
+  let experienceStartDate: string | null = null;
 
   activeBookings.forEach((b) => {
     if (b.is_cancelled) return;
@@ -885,6 +899,10 @@ export default async function Home({ searchParams }: PageProps) {
     const expName = b.experience_name || "Sconosciuta";
     const numPeople = Number(b.total_people || 0);
     expPaxCounts[expName] = (expPaxCounts[expName] || 0) + numPeople;
+
+    if (b.booking_date && (!experienceStartDate || b.booking_date < experienceStartDate)) {
+      experienceStartDate = b.booking_date;
+    }
 
     if (b.booking_date) {
       const bookingYearMonth = getYearMonthFromBookingDate(b.booking_date);
@@ -1460,6 +1478,64 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
             </div>
           </div>
+
+          <div className="order-3 md:order-none">
+          <SectionCard title="Esperienze più vendute (Pax Totali)">
+            <p className="-mt-2 mb-4 text-sm text-zinc-500">
+              {formatHistoryPeriod(experienceStartDate)}
+            </p>
+            <div className="space-y-4 pt-1">
+              {bookingsByExperience.map((item) => (
+                <div key={item.name} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate pr-2 font-medium text-zinc-800">
+                      {item.name}
+                    </span>
+                    <span className="shrink-0 font-bold text-zinc-900">
+                      {item.count} Pax
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                    <div
+                      className="h-full rounded-full bg-emerald-600"
+                      style={{ width: `${(item.count / maxExpPax) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+          </div>
+
+          <div className="order-3 md:order-none">
+          <SectionCard title="Prenotazioni per canale (Storico)">
+            <p className="-mt-2 mb-4 text-sm text-zinc-500">
+              {formatHistoryPeriod(channelStartDate)}
+            </p>
+            <div className="space-y-4 pt-1">
+              {bookingsByChannel.map((item) => (
+                <div key={item.channel} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate font-medium text-zinc-800">
+                      {item.channel}
+                    </span>
+                    <span className="shrink-0 font-bold text-zinc-900">
+                      {item.count}
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                    <div
+                      className="h-full rounded-full bg-zinc-800"
+                      style={{
+                        width: `${(item.count / maxChannelCount) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+          </div>
         </div>
 
         <div className="contents md:block md:space-y-6">
@@ -1758,58 +1834,6 @@ export default async function Home({ searchParams }: PageProps) {
                 </table>
               </div>
             </>
-          </SectionCard>
-          </div>
-
-          <div className="order-4 md:order-none">
-          <SectionCard title="Prenotazioni per canale (Storico)">
-            <div className="space-y-4 pt-1">
-              {bookingsByChannel.map((item) => (
-                <div key={item.channel} className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="truncate font-medium text-zinc-800">
-                      {item.channel}
-                    </span>
-                    <span className="shrink-0 font-bold text-zinc-900">
-                      {item.count}
-                    </span>
-                  </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      className="h-full rounded-full bg-zinc-800"
-                      style={{
-                        width: `${(item.count / maxChannelCount) * 100}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-          </div>
-
-          <div className="order-4 md:order-none">
-          <SectionCard title="Esperienze più vendute (Pax Totali)">
-            <div className="space-y-4 pt-1">
-              {bookingsByExperience.map((item) => (
-                <div key={item.name} className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="truncate pr-2 font-medium text-zinc-800">
-                      {item.name}
-                    </span>
-                    <span className="shrink-0 font-bold text-zinc-900">
-                      {item.count} Pax
-                    </span>
-                  </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      className="h-full rounded-full bg-emerald-600"
-                      style={{ width: `${(item.count / maxExpPax) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
           </SectionCard>
           </div>
         </div>
