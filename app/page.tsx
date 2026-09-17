@@ -798,11 +798,31 @@ export default async function Home({ searchParams }: PageProps) {
       ? (monthToDateBookingsDifference / monthToDateBookings2025) * 100
       : null;
 
+  // The annual chart uses the Calendar snapshot only before the 2026 cutover.
+  const chartMonthlyPresence2026 = Array.from({ length: 12 }, (_, index) =>
+    index < 2 ? monthlyPresence2026[index] : 0
+  );
+
+  for (const booking of activeBookings) {
+    if (booking.is_cancelled || !booking.booking_date) continue;
+
+    const yearMonth = getYearMonthFromBookingDate(booking.booking_date);
+    if (
+      yearMonth?.year !== 2026 ||
+      yearMonth.month < 3 ||
+      yearMonth.month > 12
+    ) continue;
+
+    chartMonthlyPresence2026[yearMonth.month - 1] += Number(
+      booking.total_people || 0
+    );
+  }
+
   const annualPresence2025 = monthlyPresence2025.reduce(
     (sum, value) => sum + value,
     0
   );
-  const annualPresence2026 = monthlyPresence2026.reduce(
+  const annualPresence2026 = chartMonthlyPresence2026.reduce(
     (sum, value) => sum + value,
     0
   );
@@ -811,7 +831,7 @@ export default async function Home({ searchParams }: PageProps) {
     label: getShortMonthName(index),
     month: index + 1,
     presence2025: monthlyPresence2025[index],
-    presence2026: monthlyPresence2026[index],
+    presence2026: chartMonthlyPresence2026[index],
   }));
 
   const comparisonMaxPresence = Math.max(
@@ -1394,7 +1414,7 @@ export default async function Home({ searchParams }: PageProps) {
                       Grafico annuale delle presenze
                     </div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      Confronto mensile tra esportazioni Google Calendar 2025 e 2026
+                      Confronto mensile delle presenze 2025 e 2026
                     </div>
                   </div>
 
