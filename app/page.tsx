@@ -526,6 +526,31 @@ async function loadAllDashboardBookings() {
   return { data: rows, error: null };
 }
 
+async function loadCanonicalAnnualPresence() {
+  const pageSize = 1000;
+  const rows: { id: number; event_date: string | null; effective_total_guests: number | null }[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabaseServer
+      .from("google_calendar_events")
+      .select("id, event_date, effective_total_guests")
+      .gte("event_date", "2025-01-01")
+      .lt("event_date", "2027-01-01")
+      .neq("gcal_event_status", "cancelled")
+      .not("event_classification", "in", "(operational_block,test)")
+      .not("effective_total_guests", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) return { data: [], error };
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return { data: rows, error: null };
+}
+
 export default async function Home({ searchParams }: PageProps) {
   const params = await searchParams;
   const today = new Date();
@@ -557,6 +582,7 @@ export default async function Home({ searchParams }: PageProps) {
   const [
     { data: historicalBookings2025Data, error: historicalBookings2025Error },
     { data: historicalBookings2026Data, error: historicalBookings2026Error },
+    { data: canonicalPresenceData, error: canonicalPresenceError },
   ] = await Promise.all([
     supabaseServer
       .from("historical_bookings")
@@ -568,6 +594,7 @@ export default async function Home({ searchParams }: PageProps) {
       .select("booking_date, total_guests, historical_year")
       .eq("historical_year", 2026)
       .order("booking_date", { ascending: true }),
+    loadCanonicalAnnualPresence(),
   ]);
 
   const historicalBookingsError =
@@ -578,6 +605,10 @@ export default async function Home({ searchParams }: PageProps) {
       "Errore caricamento storico Google Calendar:",
       historicalBookingsError.message
     );
+  }
+
+  if (canonicalPresenceError) {
+    console.error("Errore caricamento presenze Google Calendar:", canonicalPresenceError.message);
   }
 
   const { data: businessUnitsData, error: businessUnitsError } =
@@ -798,11 +829,24 @@ export default async function Home({ searchParams }: PageProps) {
       ? (monthToDateBookingsDifference / monthToDateBookings2025) * 100
       : null;
 
-  const annualPresence2025 = monthlyPresence2025.reduce(
+  const canonicalMonthlyPresence2025 = Array.from({ length: 12 }, () => 0);
+  const canonicalMonthlyPresence2026 = Array.from({ length: 12 }, () => 0);
+
+  // Only canonical, eligible events contribute; unknown attendance is never coerced to zero.
+  for (const row of canonicalPresenceData || []) {
+    if (!row.event_date || row.effective_total_guests === null) continue;
+    const yearMonth = getYearMonthFromBookingDate(row.event_date);
+    if (!yearMonth || yearMonth.month < 1 || yearMonth.month > 12) continue;
+    const monthly = yearMonth.year === 2025 ? canonicalMonthlyPresence2025
+      : yearMonth.year === 2026 ? canonicalMonthlyPresence2026 : null;
+    if (monthly) monthly[yearMonth.month - 1] += Number(row.effective_total_guests);
+  }
+
+  const annualPresence2025 = canonicalMonthlyPresence2025.reduce(
     (sum, value) => sum + value,
     0
   );
-  const annualPresence2026 = monthlyPresence2026.reduce(
+  const annualPresence2026 = canonicalMonthlyPresence2026.reduce(
     (sum, value) => sum + value,
     0
   );
@@ -810,8 +854,8 @@ export default async function Home({ searchParams }: PageProps) {
   const comparisonChartData = Array.from({ length: 12 }, (_, index) => ({
     label: getShortMonthName(index),
     month: index + 1,
-    presence2025: monthlyPresence2025[index],
-    presence2026: monthlyPresence2026[index],
+    presence2025: canonicalMonthlyPresence2025[index],
+    presence2026: canonicalMonthlyPresence2026[index],
   }));
 
   const comparisonMaxPresence = Math.max(
@@ -1469,10 +1513,10 @@ export default async function Home({ searchParams }: PageProps) {
                   </div>
                 </div>
 
-                {historicalBookingsError ? (
+                {canonicalPresenceError ? (
                   <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
                     Lo storico Google Calendar non è stato caricato:{" "}
-                    {historicalBookingsError.message}
+                    {canonicalPresenceError.message}
                   </div>
                 ) : null}
               </div>
