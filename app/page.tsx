@@ -538,7 +538,6 @@ async function loadCanonicalAnnualPresence() {
       .lt("event_date", "2027-01-01")
       .neq("gcal_event_status", "cancelled")
       .not("event_classification", "in", "(operational_block,test)")
-      .not("effective_total_guests", "is", null)
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
@@ -579,33 +578,8 @@ export default async function Home({ searchParams }: PageProps) {
     console.error("Errore caricamento prenotazioni:", error.message);
   }
 
-  const [
-    { data: historicalBookings2025Data, error: historicalBookings2025Error },
-    { data: historicalBookings2026Data, error: historicalBookings2026Error },
-    { data: canonicalPresenceData, error: canonicalPresenceError },
-  ] = await Promise.all([
-    supabaseServer
-      .from("historical_bookings")
-      .select("booking_date, total_guests, historical_year")
-      .eq("historical_year", 2025)
-      .order("booking_date", { ascending: true }),
-    supabaseServer
-      .from("historical_bookings")
-      .select("booking_date, total_guests, historical_year")
-      .eq("historical_year", 2026)
-      .order("booking_date", { ascending: true }),
-    loadCanonicalAnnualPresence(),
-  ]);
-
-  const historicalBookingsError =
-    historicalBookings2025Error || historicalBookings2026Error;
-
-  if (historicalBookingsError) {
-    console.error(
-      "Errore caricamento storico Google Calendar:",
-      historicalBookingsError.message
-    );
-  }
+  const { data: canonicalPresenceData, error: canonicalPresenceError } =
+    await loadCanonicalAnnualPresence();
 
   if (canonicalPresenceError) {
     console.error("Errore caricamento presenze Google Calendar:", canonicalPresenceError.message);
@@ -678,40 +652,24 @@ export default async function Home({ searchParams }: PageProps) {
 
   const activeBookings = Array.from(latestBookingByKey.values());
 
-  const historicalBookings2025 = historicalBookings2025Data || [];
-  const historicalBookings2026 = historicalBookings2026Data || [];
-
   const monthlyPresence2025 = Array.from({ length: 12 }, () => 0);
   const monthlyBookings2025 = Array.from({ length: 12 }, () => 0);
   const monthlyPresence2026 = Array.from({ length: 12 }, () => 0);
   const monthlyBookings2026 = Array.from({ length: 12 }, () => 0);
 
-  for (const row of historicalBookings2025) {
-    if (!row.booking_date) continue;
-
-    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
-
-    if (yearMonth?.year !== 2025) continue;
-
-    monthlyPresence2025[yearMonth.month - 1] += Number(
-      row.total_guests || 0
-    );
-    monthlyBookings2025[yearMonth.month - 1] += 1;
+  for (const row of canonicalPresenceData || []) {
+    const yearMonth = getYearMonthFromBookingDate(row.event_date);
+    if (!yearMonth || yearMonth.month < 1 || yearMonth.month > 12) continue;
+    const presences = yearMonth.year === 2025 ? monthlyPresence2025
+      : yearMonth.year === 2026 ? monthlyPresence2026 : null;
+    const events = yearMonth.year === 2025 ? monthlyBookings2025
+      : yearMonth.year === 2026 ? monthlyBookings2026 : null;
+    if (!presences || !events) continue;
+    events[yearMonth.month - 1] += 1;
+    if (row.effective_total_guests !== null) {
+      presences[yearMonth.month - 1] += Number(row.effective_total_guests);
+    }
   }
-
-  for (const row of historicalBookings2026) {
-    if (!row.booking_date) continue;
-
-    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
-
-    if (yearMonth?.year !== 2026) continue;
-
-    monthlyPresence2026[yearMonth.month - 1] += Number(
-      row.total_guests || 0
-    );
-    monthlyBookings2026[yearMonth.month - 1] += 1;
-  }
-
   const selectedComparisonIndex = selectedMonth - 1;
   const selectedPresence2025 =
     monthlyPresence2025[selectedComparisonIndex] || 0;
@@ -784,32 +742,36 @@ export default async function Home({ searchParams }: PageProps) {
   let monthToDatePresence2026 = 0;
   let monthToDateBookings2026 = 0;
 
-  for (const row of historicalBookings2025) {
-    if (!row.booking_date) continue;
+  for (const row of canonicalPresenceData || []) {
+    if (!row.event_date) continue;
 
-    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
+    const yearMonth = getYearMonthFromBookingDate(row.event_date);
 
     if (
       yearMonth?.year === 2025 &&
       yearMonth.month === selectedMonth &&
-      row.booking_date <= comparisonCutoff2025
+      row.event_date <= comparisonCutoff2025
     ) {
-      monthToDatePresence2025 += Number(row.total_guests || 0);
+      if (row.effective_total_guests !== null) {
+        monthToDatePresence2025 += Number(row.effective_total_guests);
+      }
       monthToDateBookings2025 += 1;
     }
   }
 
-  for (const row of historicalBookings2026) {
-    if (!row.booking_date) continue;
+  for (const row of canonicalPresenceData || []) {
+    if (!row.event_date) continue;
 
-    const yearMonth = getYearMonthFromBookingDate(row.booking_date);
+    const yearMonth = getYearMonthFromBookingDate(row.event_date);
 
     if (
       yearMonth?.year === 2026 &&
       yearMonth.month === selectedMonth &&
-      row.booking_date <= comparisonCutoff2026
+      row.event_date <= comparisonCutoff2026
     ) {
-      monthToDatePresence2026 += Number(row.total_guests || 0);
+      if (row.effective_total_guests !== null) {
+        monthToDatePresence2026 += Number(row.effective_total_guests);
+      }
       monthToDateBookings2026 += 1;
     }
   }
@@ -829,24 +791,11 @@ export default async function Home({ searchParams }: PageProps) {
       ? (monthToDateBookingsDifference / monthToDateBookings2025) * 100
       : null;
 
-  const canonicalMonthlyPresence2025 = Array.from({ length: 12 }, () => 0);
-  const canonicalMonthlyPresence2026 = Array.from({ length: 12 }, () => 0);
-
-  // Only canonical, eligible events contribute; unknown attendance is never coerced to zero.
-  for (const row of canonicalPresenceData || []) {
-    if (!row.event_date || row.effective_total_guests === null) continue;
-    const yearMonth = getYearMonthFromBookingDate(row.event_date);
-    if (!yearMonth || yearMonth.month < 1 || yearMonth.month > 12) continue;
-    const monthly = yearMonth.year === 2025 ? canonicalMonthlyPresence2025
-      : yearMonth.year === 2026 ? canonicalMonthlyPresence2026 : null;
-    if (monthly) monthly[yearMonth.month - 1] += Number(row.effective_total_guests);
-  }
-
-  const annualPresence2025 = canonicalMonthlyPresence2025.reduce(
+  const annualPresence2025 = monthlyPresence2025.reduce(
     (sum, value) => sum + value,
     0
   );
-  const annualPresence2026 = canonicalMonthlyPresence2026.reduce(
+  const annualPresence2026 = monthlyPresence2026.reduce(
     (sum, value) => sum + value,
     0
   );
@@ -854,8 +803,8 @@ export default async function Home({ searchParams }: PageProps) {
   const comparisonChartData = Array.from({ length: 12 }, (_, index) => ({
     label: getShortMonthName(index),
     month: index + 1,
-    presence2025: canonicalMonthlyPresence2025[index],
-    presence2026: canonicalMonthlyPresence2026[index],
+    presence2025: monthlyPresence2025[index],
+    presence2026: monthlyPresence2026[index],
   }));
 
   const comparisonMaxPresence = Math.max(
@@ -1438,7 +1387,7 @@ export default async function Home({ searchParams }: PageProps) {
                       Grafico annuale delle presenze
                     </div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      Confronto mensile tra esportazioni Google Calendar 2025 e 2026
+                      Confronto mensile delle presenze Google Calendar 2025 e 2026
                     </div>
                   </div>
 
