@@ -210,6 +210,113 @@ test('normal CONFIRMED retains external ref, stores Bókun identity and uses GYG
   assert.equal(row.total_customer, 60);
 });
 
+const viatorPayload = {
+  bokun_booking_reference: 'VIA-103724193', externalBookingReference: '1446865537',
+  channel_id: 2, booking_source: 'Viator', booking_date: '2026-09-14', adults: 2,
+};
+
+function viatorHarness() {
+  const h = harness();
+  Object.assign(h.tables.experience_channel_prices.find(p => p.channel_id === 2), {
+    your_unit_price: 90, public_unit_price: 110, supplier_adult_unit_cost: 110,
+  });
+  return h;
+}
+
+test('Viator uses source_total_price 171.6 as the whole booking total for two adults', async () => {
+  const h = viatorHarness();
+  const result = await h.send({ ...viatorPayload, source_total_price: 171.6 });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.action, 'created');
+  assert.equal(result.body.totals.total_to_you, 171.60);
+  const row = h.tables.bookings[0];
+  assert.equal(row.total_to_you, 171.60);
+  assert.equal(row.total_supplier_cost, 220);
+  assert.equal(row.total_customer, 220);
+  assert.equal(row.your_unit_price, 90);
+  assert.equal(row.margin_total, -48.40);
+  assert.equal(row.booking_reference, '1446865537');
+  assert.equal(row.bokun_booking_reference, 'VIA-103724193');
+  const replay = await h.send({ ...viatorPayload, source_total_price: 171.6 });
+  assert.equal(replay.body.action, 'unchanged');
+  assert.equal(h.tables.bookings.length, 1);
+});
+
+for (const [label, value] of [
+  ['missing', undefined], ['null', null], ['empty', ''], ['whitespace', '   '],
+  ['negative', -1], ['invalid text', 'invalid'], ['infinity', 'Infinity'],
+  ['NaN', 'NaN'], ['boolean', true], ['array', [171.6]], ['object', { amount: 171.6 }],
+]) {
+  test(`Viator falls back to configured prices when source_total_price is ${label}`, async () => {
+    const h = viatorHarness();
+    const result = await h.send({ ...viatorPayload, source_total_price: value });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.totals.total_to_you, 180);
+    assert.equal(h.tables.bookings[0].total_to_you, 180);
+    assert.equal(h.tables.bookings[0].total_supplier_cost, 220);
+    assert.equal(h.tables.bookings[0].margin_total, -40);
+  });
+}
+
+for (const value of [0, '171.6']) {
+  test(`Viator accepts source_total_price ${JSON.stringify(value)} without multiplying it`, async () => {
+    const h = viatorHarness();
+    const result = await h.send({ ...viatorPayload, source_total_price: value });
+    assert.equal(result.status, 200);
+    assert.equal(h.tables.bookings[0].total_to_you, Number(value));
+    assert.equal(h.tables.bookings[0].total_supplier_cost, 220);
+  });
+}
+
+for (const [channel_id, externalBookingReference] of [
+  [3, 'GYGBLHFXQZ7B'], [1, 'DIRECT-TEST'], [4, 'TOD123'], [5, 'FREE123'], [6, 'FMDQ123'],
+]) {
+  test(`channel ${channel_id} ignores source_total_price and preserves configured economics`, async () => {
+    const h = harness();
+    const result = await h.send({ channel_id, externalBookingReference, source_total_price: 171.6 });
+    assert.equal(result.status, 200);
+    const row = h.tables.bookings[0];
+    assert.equal(row.channel_id, channel_id);
+    assert.equal(row.total_to_you, 40);
+    assert.equal(row.total_supplier_cost, 20);
+    assert.equal(row.margin_total, 20);
+  });
+}
+
+test('Viator MODIFIED updates only the identified booking with the new source total and margin', async () => {
+  const h = viatorHarness();
+  await h.send(viatorPayload);
+  await h.send({ ...viatorPayload, bokun_booking_reference: 'VIA-OTHER', externalBookingReference: 'OTHER-VIATOR' });
+  const otherBefore = structuredClone(h.tables.bookings[1]);
+  const result = await h.send({ ...viatorPayload, status: 'MODIFIED', source_total_price: 171.6 });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.action, 'updated');
+  assert.ok(result.body.changed_fields.includes('total_to_you'));
+  assert.ok(result.body.changed_fields.includes('margin_total'));
+  assert.equal(h.tables.bookings.length, 2);
+  assert.equal(h.tables.bookings[0].total_to_you, 171.60);
+  assert.equal(h.tables.bookings[0].total_supplier_cost, 220);
+  assert.equal(h.tables.bookings[0].margin_total, -48.40);
+  assert.deepEqual(h.tables.bookings[1], otherBefore);
+  const second = await h.send({ ...viatorPayload, action: 'BOOKING_MODIFIED', source_total_price: 160 });
+  assert.equal(second.body.action, 'updated');
+  assert.equal(h.tables.bookings[0].total_to_you, 160);
+  assert.equal(h.tables.bookings[0].margin_total, -60);
+});
+
+test('Viator cancellation ignores source_total_price and preserves stored economics', async () => {
+  const h = viatorHarness();
+  await h.send({ ...viatorPayload, source_total_price: 171.6 });
+  const before = structuredClone(h.tables.bookings[0]);
+  const result = await h.send({ ...viatorPayload, status: 'CANCELLED', source_total_price: 0 });
+  assert.equal(result.status, 200);
+  assert.equal(h.tables.bookings[0].is_cancelled, true);
+  const { is_cancelled, notes, ...preserved } = h.tables.bookings[0];
+  assert.equal(is_cancelled, true);
+  assert.match(notes, /Prenotazione cancellata/);
+  assert.deepEqual({ ...preserved, is_cancelled: before.is_cancelled, notes: before.notes }, before);
+});
+
 for (const event of [{ action: 'MODIFIED' }, { status: 'MODIFIED' }, { action: 'BOOKING_MODIFIED' }]) {
   test(`modification updates same Bókun row: ${JSON.stringify(event)}`, async () => {
     const h = harness(); await h.send();

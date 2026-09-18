@@ -321,6 +321,8 @@ async function getExperienceChannelPrice(params: {
 
 function calculateBookingEconomics(params: {
   priceRule: ExperienceChannelPrice;
+  channelId: number;
+  sourceTotalPrice?: unknown;
   isGroupPricing: boolean;
   adults: number;
   children: number;
@@ -350,9 +352,18 @@ function calculateBookingEconomics(params: {
       priceRule.your_unit_price
   );
 
-  const totalToYou = isGroupPricing
-    ? adultYourPrice
-    : adultYourPrice * adults + childYourPrice * children;
+  const sourceTotalPrice = params.channelId === 2 &&
+    (typeof params.sourceTotalPrice === "number" ||
+      typeof params.sourceTotalPrice === "string")
+    ? toOptionalNumber(params.sourceTotalPrice)
+    : null;
+
+  // Viator supplies the total for the entire booking, not a per-person price.
+  const totalToYou = sourceTotalPrice !== null && sourceTotalPrice >= 0
+    ? toMoney(sourceTotalPrice)
+    : isGroupPricing
+      ? adultYourPrice
+      : adultYourPrice * adults + childYourPrice * children;
 
   const totalCustomer = isGroupPricing
     ? adultPublicPrice
@@ -1230,6 +1241,8 @@ export async function POST(req: Request) {
     const economicData = priceRule
       ? calculateBookingEconomics({
           priceRule,
+          channelId,
+          sourceTotalPrice: isCancelled ? undefined : body.source_total_price,
           isGroupPricing: Boolean(experience.is_group_pricing),
           adults: finalAdults,
           children: finalChildren,
