@@ -941,6 +941,11 @@ export default async function Home({ searchParams }: PageProps) {
     }
   });
 
+  const marginePercentuale = meseTodointheworld.entrate === 0
+    ? 0
+    : ((meseTodointheworld.entrate - meseTodointheworld.spese) /
+        meseTodointheworld.entrate) * 100;
+
   const bookingsByExperience = Object.entries(expPaxCounts)
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
@@ -1073,7 +1078,7 @@ export default async function Home({ searchParams }: PageProps) {
                 </span>
               </div>
 
-              <div className="grid gap-3 border-t border-dashed border-zinc-200 pt-4 sm:grid-cols-2">
+              <div className="grid gap-3 border-t border-dashed border-zinc-200 pt-4">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-800">
                     Todointheworld
@@ -1088,23 +1093,10 @@ export default async function Home({ searchParams }: PageProps) {
                     {formatEuro(meseTodointheworld.totale)}
                   </div>
                   <div className="mt-1 text-[11px] text-emerald-900/80">
-                    Entrate {formatEuro(meseTodointheworld.entrate)} · Spese {formatEuro(meseTodointheworld.spese)}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
-                    FMDQ
-                  </div>
-                  <div
-                    className={`mt-1 text-lg font-black ${
-                      meseFmdq.totale >= 0 ? "text-amber-700" : "text-red-600"
-                    }`}
-                  >
-                    {formatEuro(meseFmdq.totale)}
-                  </div>
-                  <div className="mt-1 text-[11px] text-amber-900/80">
-                    Entrate {formatEuro(meseFmdq.entrate)} · Spese {formatEuro(meseFmdq.spese)}
+                    Entrate {formatEuro(meseTodointheworld.entrate)} · Spese {formatEuro(meseTodointheworld.spese)} · Margine {new Intl.NumberFormat("it-IT", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    }).format(marginePercentuale)}%
                   </div>
                 </div>
               </div>
