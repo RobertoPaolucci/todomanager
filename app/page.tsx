@@ -880,6 +880,12 @@ export default async function Home({ searchParams }: PageProps) {
   const meseTodointheworld = emptyBusinessUnitTotals();
   const meseFmdq = emptyBusinessUnitTotals();
   const meseAltro = emptyBusinessUnitTotals();
+  const meseReale = { total: 0, todointheworld: 0, fmdq: 0 };
+  const todayRomeStr = toLocalDateString(
+    currentRomeYear,
+    currentRomeMonth,
+    currentRomeDay
+  );
 
   const prossimePrenotazioni: any[] = [];
 
@@ -910,6 +916,15 @@ export default async function Home({ searchParams }: PageProps) {
         meseTotale += amounts.totale;
 
         const businessUnitKey = getBusinessUnitKey(b, businessUnitNameById);
+
+        if (b.booking_date <= todayRomeStr) {
+          meseReale.total += amounts.entrate;
+          if (businessUnitKey === "todointheworld") {
+            meseReale.todointheworld += amounts.entrate;
+          } else if (businessUnitKey === "fmdq") {
+            meseReale.fmdq += amounts.entrate;
+          }
+        }
 
         if (businessUnitKey === "todointheworld") {
           addAmounts(meseTodointheworld, amounts);
@@ -1198,19 +1213,35 @@ export default async function Home({ searchParams }: PageProps) {
                   })}
                 </div>
 
-                <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-[11px] text-zinc-500">
-                  Mese selezionato: {" "}
-                  <span className="font-bold text-zinc-800">
-                    Totale {formatEuro(selectedMonthChartData?.total || 0)}
-                  </span>
-                  {" · "}
-                  <span className="font-bold text-emerald-700">
-                    Todointheworld {formatEuro(selectedMonthChartData?.todointheworld || 0)}
-                  </span>
-                  {" · "}
-                  <span className="font-bold text-amber-700">
-                    FMDQ {formatEuro(selectedMonthChartData?.fmdq || 0)}
-                  </span>
+                <div className="mt-3 space-y-1 rounded-xl bg-zinc-50 px-3 py-2 text-[11px] text-zinc-500">
+                  <div>
+                    Reale fino a oggi: {" "}
+                    <span className="font-bold text-zinc-800">
+                      Totale {formatEuro(meseReale.total)}
+                    </span>
+                    {" · "}
+                    <span className="font-bold text-emerald-700">
+                      Todointheworld {formatEuro(meseReale.todointheworld)}
+                    </span>
+                    {" · "}
+                    <span className="font-bold text-amber-700">
+                      FMDQ {formatEuro(meseReale.fmdq)}
+                    </span>
+                  </div>
+                  <div>
+                    Previsto mese intero: {" "}
+                    <span className="font-bold text-zinc-800">
+                      Totale {formatEuro(selectedMonthChartData?.total || 0)}
+                    </span>
+                    {" · "}
+                    <span className="font-bold text-emerald-700">
+                      Todointheworld {formatEuro(selectedMonthChartData?.todointheworld || 0)}
+                    </span>
+                    {" · "}
+                    <span className="font-bold text-amber-700">
+                      FMDQ {formatEuro(selectedMonthChartData?.fmdq || 0)}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
