@@ -85,6 +85,7 @@ const COMPARE_FIELDS = [
   "public_unit_price",
   "supplier_unit_cost",
   "total_to_you",
+  "total_to_you_source",
   "total_customer",
   "total_supplier_cost",
   "margin_total",
@@ -359,7 +360,8 @@ function calculateBookingEconomics(params: {
     : null;
 
   // Viator supplies the total for the entire booking, not a per-person price.
-  const totalToYou = sourceTotalPrice !== null && sourceTotalPrice >= 0
+  const usesSourceTotalPrice = sourceTotalPrice !== null && sourceTotalPrice >= 0;
+  const totalToYou = usesSourceTotalPrice
     ? toMoney(sourceTotalPrice)
     : isGroupPricing
       ? adultYourPrice
@@ -378,6 +380,9 @@ function calculateBookingEconomics(params: {
     public_unit_price: adultPublicPrice,
     supplier_unit_cost: adultSupplierCost,
     total_to_you: toMoney(totalToYou),
+    ...(params.channelId === 2 ? {
+      total_to_you_source: usesSourceTotalPrice ? "bokun_webhook" : "configured_price",
+    } : {}),
     total_customer: toMoney(totalCustomer),
     total_supplier_cost: toMoney(totalSupplierCost),
     margin_total: toMoney(totalToYou - totalSupplierCost),

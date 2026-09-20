@@ -231,6 +231,7 @@ test('Viator uses source_total_price 171.6 as the whole booking total for two ad
   assert.equal(result.body.totals.total_to_you, 171.60);
   const row = h.tables.bookings[0];
   assert.equal(row.total_to_you, 171.60);
+  assert.equal(row.total_to_you_source, 'bokun_webhook');
   assert.equal(row.total_supplier_cost, 220);
   assert.equal(row.total_customer, 220);
   assert.equal(row.your_unit_price, 90);
@@ -253,6 +254,7 @@ for (const [label, value] of [
     assert.equal(result.status, 200);
     assert.equal(result.body.totals.total_to_you, 180);
     assert.equal(h.tables.bookings[0].total_to_you, 180);
+    assert.equal(h.tables.bookings[0].total_to_you_source, 'configured_price');
     assert.equal(h.tables.bookings[0].total_supplier_cost, 220);
     assert.equal(h.tables.bookings[0].margin_total, -40);
   });
@@ -264,6 +266,7 @@ for (const value of [0, '171.6']) {
     const result = await h.send({ ...viatorPayload, source_total_price: value });
     assert.equal(result.status, 200);
     assert.equal(h.tables.bookings[0].total_to_you, Number(value));
+    assert.equal(h.tables.bookings[0].total_to_you_source, 'bokun_webhook');
     assert.equal(h.tables.bookings[0].total_supplier_cost, 220);
   });
 }
@@ -278,6 +281,7 @@ for (const [channel_id, externalBookingReference] of [
     const row = h.tables.bookings[0];
     assert.equal(row.channel_id, channel_id);
     assert.equal(row.total_to_you, 40);
+    assert.equal(Object.hasOwn(row, 'total_to_you_source'), false);
     assert.equal(row.total_supplier_cost, 20);
     assert.equal(row.margin_total, 20);
   });
@@ -315,6 +319,28 @@ test('Viator cancellation ignores source_total_price and preserves stored econom
   assert.equal(is_cancelled, true);
   assert.match(notes, /Prenotazione cancellata/);
   assert.deepEqual({ ...preserved, is_cancelled: before.is_cancelled, notes: before.notes }, before);
+});
+
+test('Viator persists provenance even when source total equals configured price; retry is unchanged', async () => {
+  const h = viatorHarness();
+  await h.send(viatorPayload);
+  const result = await h.send({ ...viatorPayload, source_total_price: 180 });
+  assert.equal(result.body.action, 'updated');
+  assert.deepEqual(Array.from(result.body.changed_fields), ['total_to_you_source']);
+  assert.equal(h.tables.bookings[0].total_to_you_source, 'bokun_webhook');
+  assert.equal((await h.send({ ...viatorPayload, source_total_price: 180 })).body.action, 'unchanged');
+  await h.send(viatorPayload);
+  assert.equal(h.tables.bookings[0].total_to_you_source, 'configured_price');
+});
+
+test('Viator source metadata can be added to a legacy total without changing economics', async () => {
+  const h = viatorHarness();
+  await h.send({ ...viatorPayload, source_total_price: 171.6 });
+  delete h.tables.bookings[0].total_to_you_source;
+  const result = await h.send({ ...viatorPayload, source_total_price: 171.6 });
+  assert.deepEqual(Array.from(result.body.changed_fields), ['total_to_you_source']);
+  assert.equal(h.tables.bookings[0].total_to_you, 171.6);
+  assert.equal(h.tables.bookings[0].total_to_you_source, 'bokun_webhook');
 });
 
 for (const event of [{ action: 'MODIFIED' }, { status: 'MODIFIED' }, { action: 'BOOKING_MODIFIED' }]) {
