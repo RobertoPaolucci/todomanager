@@ -12,7 +12,7 @@ const approvedHashes = {
   'snapshot.json': 'b104ad16f1341e44e9774f282f4c52cdc00db2486c13a50c6393f319931769f8',
 };
 
-export async function readCurrent({ url, key, fetchImpl = fetch }) {
+export async function readCurrent({ url, key, fetchImpl = fetch, fullRows = false }) {
   if (!url || !key) throw new Error('Missing server configuration');
   async function get(route) {
     const response = await fetchImpl(new URL(route, url), {
@@ -38,7 +38,7 @@ export async function readCurrent({ url, key, fetchImpl = fetch }) {
   }
   async function capture() {
     const results = await Promise.allSettled([
-      all('bookings', fields + (sourceColumnPresent ? ',total_to_you_source' : '')),
+      all('bookings', fullRows ? '*' : fields + (sourceColumnPresent ? ',total_to_you_source' : '')),
       all('experiences', 'id,bokun_id'),
     ]);
     if (results.some(r => r.status === 'rejected')) throw new Error('Read-only capture failed');
@@ -47,6 +47,20 @@ export async function readCurrent({ url, key, fetchImpl = fetch }) {
   const first = await capture();
   if (JSON.stringify(first) !== JSON.stringify(await capture())) throw new Error('Data changed during capture; repeat dry-run');
   return { ...first, sourceColumnPresent, capturedAt: new Date().toISOString() };
+}
+
+export async function loadReviewedCandidates(auditDirectory) {
+  const inputs = {};
+  for (const [name, expectedHash] of Object.entries(approvedHashes)) {
+    const bytes = await readFile(join(resolve(auditDirectory), name));
+    if (createHash('sha256').update(bytes).digest('hex') !== expectedHash) throw new Error('Reviewed input changed');
+    inputs[name] = bytes.toString('utf8');
+  }
+  const prepared = prepareCandidates(parseAuditCsv(inputs['AUTO_FIX.csv']), parseAuditCsv(inputs['REVIEW.csv']), JSON.parse(inputs['snapshot.json']));
+  if (prepared.candidates.length !== 246 || prepared.alreadyCorrect.length !== 17 || prepared.reviewIds.length !== 153) throw new Error('Reviewed counts changed');
+  const { exactCents } = await import('../lib/viator-backfill.mjs');
+  if (prepared.candidates.reduce((n, r) => n + r.targetCents - exactCents(r.expected.total_to_you), 0) !== 26402) throw new Error('Reviewed delta changed');
+  return { prepared, inputSha256: approvedHashes };
 }
 
 async function main() {
@@ -61,16 +75,7 @@ async function main() {
     flags.set(args[i], args[i + 1]);
   }
   if (flags.size !== 2) throw new Error('Missing arguments');
-  const inputs = {};
-  for (const [name, expectedHash] of Object.entries(approvedHashes)) {
-    const bytes = await readFile(join(resolve(flags.get('--audit-dir')), name));
-    if (createHash('sha256').update(bytes).digest('hex') !== expectedHash) throw new Error('Reviewed input changed');
-    inputs[name] = bytes.toString('utf8');
-  }
-  const prepared = prepareCandidates(parseAuditCsv(inputs['AUTO_FIX.csv']), parseAuditCsv(inputs['REVIEW.csv']), JSON.parse(inputs['snapshot.json']));
-  if (prepared.candidates.length !== 246 || prepared.alreadyCorrect.length !== 17 || prepared.reviewIds.length !== 153) throw new Error('Reviewed counts changed');
-  const { exactCents } = await import('../lib/viator-backfill.mjs');
-  if (prepared.candidates.reduce((n, r) => n + r.targetCents - exactCents(r.expected.total_to_you), 0) !== 26402) throw new Error('Reviewed delta changed');
+  const { prepared } = await loadReviewedCandidates(flags.get('--audit-dir'));
   const envModule = await import('@next/env');
   (envModule.loadEnvConfig ?? envModule.default.loadEnvConfig)(process.cwd(), false, { info() {}, error() {} });
   const current = await readCurrent({ url: process.env.NEXT_PUBLIC_SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY });
