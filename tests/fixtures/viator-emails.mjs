@@ -33,6 +33,7 @@ ${changeText}`;
 // the other values are synthetic. No original customer/contact data is included.
 export const duplicatedHtml = `<html><body>
 <h1>Prenotazione confermata</h1>
+<h2>Dettagli della prenotazione</h2>
 <table>
 <tr><td>Riferimento prenotazione:</td><td>BR-1447626735</td></tr>
 <tr><td>Nome del tour:</td><td>Passeggiata in fattoria</td></tr>
@@ -45,6 +46,7 @@ export const duplicatedHtml = `<html><body>
 <tr><td>Telefono:</td><td><a href="tel:+390000000001">+39 000 000 0001</a></td></tr>
 <tr><td>Tariffa netta Viator:</td><td>EUR &euro;33,30</td></tr>
 </table>
+<h2>Hai domande? Serve aiuto?</h2>
 <div>Nome del tour: [Passeggiata in fattoria](https://example.test/tour) Codice prodotto: 200401P1 Codice livello del tour: TG1 Riferimento prenotazione: BR-1447626735</div>
 <div>Viaggiatori: 1 Adulto Cliente: Alex Example Data: Wed, Sep 23, 2026 Ora: 10:30</div>
 <div>Telefono: +39 000 000 0001 [tel:+390000000001] Tariffa netta Viator: EUR &euro;33,30</div>

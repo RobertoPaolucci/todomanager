@@ -161,23 +161,93 @@ test("duplicated HTML keeps canonical fields without false repeated-field review
   assert.match(p.normalized_text, /\[Passeggiata in fattoria\]\(https:/);
   assert.equal(h.tables.viator_email_imports[0].raw_body, duplicatedHtml);
 });
-test("discordant labelled fields still require review in flattened and structured copies", async () => {
+test("discordant copies outside booking details are ignored; conflicts inside still require review", async () => {
   for (const [key, original, replacement, structured, canonical] of [
     ["tour_name", "[Passeggiata in fattoria]", "[Visita al vigneto]", "Nome del tour: Visita al vigneto", "Passeggiata in fattoria"],
     ["travellers", "Viaggiatori: 1 Adulto", "Viaggiatori: 2 Adulti", "Viaggiatori: 2 Adulti", "1 Adulto"],
     ["phone", "Telefono: +39 000 000 0001", "Telefono: +39 000 000 0002", "Telefono: +39 000 000 0002", "+39 000 000 0001"],
+    ["tour_grade", "Codice livello del tour: TG1", "Codice livello del tour: TG2", "Codice livello del tour: TG2", "TG1"],
+    ["net_amount", "EUR &euro;33,30</div>", "EUR &euro;99,00</div>", "Tariffa netta: EUR €99,00", 33.30],
+    ["lead_traveller", "Cliente: Alex Example", "Nome viaggiatore principale: Other Example", "Nome viaggiatore principale: Other Example", "Alex Example"],
   ]) {
-    for (const body of [
-      duplicatedHtml.replace(original, replacement),
-      duplicatedHtml.replace("</body>", `<p>${structured}</p></body>`),
-    ]) {
-      const h = harness();
-      assert.equal((await h.send({ body })).body.status, "needs_review");
-      const p = h.tables.viator_email_imports[0].parsed_data;
-      assert.ok(p.warnings.includes(`repeated_field:${key}`), key);
-      assert.equal(p[key], canonical);
-    }
+    const outside = parse(duplicatedHtml.replace(original, replacement));
+    assert.equal(outside.warnings.length, 0, key);
+    assert.equal(outside[key], canonical);
+    const body = duplicatedHtml.replace("</table>", `<tr><td>${structured}</td></tr></table>`);
+    const h = harness();
+    assert.equal((await h.send({ body })).body.status, "needs_review");
+    const p = h.tables.viator_email_imports[0].parsed_data;
+    assert.ok(p.warnings.includes(`repeated_field:${key}`), key);
+    assert.equal(p[key], canonical);
   }
+});
+// Reconstructed layout using the reported booking values; contact/description are synthetic.
+const reportedHtml = `<html><body>
+<h1>Prenotazione confermata</h1>
+<h2>Dettagli della prenotazione</h2>
+<table>
+<tr><td>Riferimento prenotazione:</td><td>BR-1448287381</td></tr>
+<tr><td>Codice prodotto:</td><td>200401P10</td></tr>
+<tr><td>Nome viaggiatore principale:</td><td>Giulia Bastianelli</td></tr>
+<tr><td>Nomi dei viaggiatori:</td><td>Giulia Bastianelli<br>Second Traveller</td></tr>
+<tr><td>Viaggiatori:</td><td>2 Adulti</td></tr>
+<tr><td>Livello del tour:</td><td>Visita delle 12:00</td></tr>
+<tr><td>Codice livello del tour:</td><td>TG1~12:00</td></tr>
+<tr><td>Descrizione livello del tour:</td><td>Visita guidata</td></tr>
+<tr><td>Tariffa netta:</td><td>EUR &euro;40,32</td></tr>
+<tr><td>Telefono:</td><td>+39 000 000 0001</td></tr>
+</table>
+<h2>Hai domande?<br>Serve aiuto?</h2>
+<div>Dettagli della prenotazione Nome viaggiatore principale: Giulia Bastianelli Nomi dei viaggiatori: Giulia Bastianelli, Second Traveller Viaggiatori: 2 Adulti Livello del tour: Visita delle 12:00 Codice livello del tour: TG1~12:00 Descrizione livello del tour: Visita guidata Tariffa netta: EUR &euro;40,32 Telefono: +39 000 000 0001 [tel:+390000000001]</div>
+</body></html>`;
+
+test("reported Viator HTML separates traveller names, counts, tour level and grade", () => {
+  const p = parse(reportedHtml);
+  assert.equal(p.booking_reference, "BR-1448287381");
+  assert.equal(p.product_code, "200401P10");
+  assert.equal(p.lead_traveller, "Giulia Bastianelli");
+  assert.equal(p.travellers, "2 Adulti");
+  assert.equal(p.adults, 2); assert.equal(p.total_travellers, 2);
+  assert.equal(p.option_name, "Visita delle 12:00");
+  assert.equal(p.tour_grade, "TG1~12:00");
+  assert.equal(p.net_amount, 40.32); assert.equal(p.currency, "EUR");
+  assert.equal(p.phone, "+39 000 000 0001");
+  assert.equal(p.warnings.length, 0);
+  assert.match(p.normalized_text, /\[tel:/);
+});
+test("exact line labels do not mix traveller names or tour descriptions into booking values", () => {
+  const p = parse(`Dettagli della prenotazione
+Nome viaggiatore principale: Giulia Bastianelli
+Viaggiatori: 2 Adulti
+Nomi dei viaggiatori:
+Giulia Bastianelli
+Second Traveller
+Livello del tour: Visita delle 12:00
+Descrizione livello del tour: Codice livello del tour: TG9
+Hai domande? Serve aiuto?`);
+  assert.equal(p.travellers, "2 Adulti");
+  assert.equal(p.adults, 2); assert.equal(p.total_travellers, 2);
+  assert.equal(p.lead_traveller, "Giulia Bastianelli");
+  assert.equal(p.option_name, "Visita delle 12:00");
+  assert.equal(p.tour_grade, null);
+  assert.equal(p.warnings.length, 0);
+  assert.equal(parse("Nomi dei viaggiatori: Giulia Bastianelli").travellers, null);
+});
+test("only first booking block is extracted while event and change text use the full body", () => {
+  const tail = `<p>Modifiche:</p><p>Telefono: +39 000 000 0002</p>
+<h2>Dettagli della prenotazione</h2><p>Booking: BR-9999</p>
+<p>Viaggiatori: 3 Adulti</p><p>Codice livello del tour: TG2</p>
+<h2>Hai domande? Serve aiuto?</h2>`;
+  const p = parse(reportedHtml.replace("Prenotazione confermata", "Prenotazione modificata")
+    .replace("</body>", `${tail}</body>`));
+  assert.equal(p.event_type, "modified");
+  assert.equal(p.booking_reference, "BR-1448287381");
+  assert.equal(p.adults, 2); assert.equal(p.tour_grade, "TG1~12:00");
+  assert.equal(p.phone, "+39 000 000 0001");
+  assert.equal(p.warnings.length, 0);
+  assert.equal(p.change_text, parser.normalizeViatorBody(tail).replace(/^Modifiche:\s*/, ""));
+  const withoutHeading = parse(reportedHtml, "Prenotazione modificata");
+  assert.equal(withoutHeading.change_text, withoutHeading.normalized_text);
 });
 test("Italian dates, separate pax fields, missing values and invalid amounts stay explicit", () => {
   const p = parse("CONFIRMED\nBooking: BR-123\nData: 23 settembre 2026\nAdulti: 2\nBambini: 1\nNeonati: 0\nTelefono:\nLingua: Italiano");

@@ -7,7 +7,7 @@ const labels = {
   product_code: "(?:codice(?: del)? prodotto|product(?: code)?)",
   tour_grade: "(?:codice livello del tour|codice(?: del)? tour grade|tour grade(?: code)?|codice opzione)",
   tour_name: "(?:nome(?: del)? tour|nome esperienza|esperienza|tour name|product name)",
-  option_name: "(?:nome (?:dell[’'])?opzione|opzione|option(?: name)?)",
+  option_name: "(?:nome (?:dell[’'])?opzione|opzione|livello del tour|option(?: name)?)",
   activity_date: "(?:data(?: dell[’']attività| del tour| di viaggio)?|activity date|travel date|date)",
   activity_time: "(?:ora(?:rio)?(?: di inizio| del tour)?|activity time|start time|time)",
   lead_traveller: "(?:viaggiatore principale|nome(?: del)? viaggiatore principale|cliente|lead traveller|lead traveler|customer)",
@@ -46,14 +46,21 @@ export function normalizeViatorBody(body: string): string {
     .replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function bookingDetails(text: string) {
+  const start = /^[\t ]*Dettagli della prenotazione[\t ]*[:：]?[\t ]*$/im.exec(text);
+  if (!start) return text;
+  const details = text.slice(start.index + start[0].length);
+  const end = /^[\t ]*Hai domande\?\s*Serve aiuto\?/im.exec(details);
+  return end ? details.slice(0, end.index) : details;
+}
+
 function fields(text: string) {
   const result: Partial<Record<keyof typeof labels, string>> = {};
   const warnings: string[] = [];
-  // HTML-to-text copies can put several labelled fields on the same line.
-  // Keep label boundaries even when the original row boundaries were flattened.
-  const inlineLabel = new RegExp(`[\\t ]+(?=(?:${Object.values(labels).join("|")})\\s*[:：])`, "gi");
-  const lines = text.replace(inlineLabel, "\n").split("\n");
+  // Labels must occupy the start of a line, never a suffix of another label.
+  const lines = text.split("\n");
   const patterns = Object.entries(labels).map(([key, pattern]) => [key, new RegExp(`^\\s*${pattern}(?:\\s*[:：]\\s*(.*)|\\s*)$`, "i")] as const);
+  const unextractedLabel = /^\s*(?:nomi dei viaggiatori|descrizione livello del tour)(?:\s*[:：].*|\s*)$/i;
   let key: keyof typeof labels | null = null;
   let value = "";
   function save() {
@@ -80,6 +87,10 @@ function fields(text: string) {
       save();
       key = found.name as keyof typeof labels;
       value = found.match![1] ?? "";
+    } else if (unextractedLabel.test(line)) {
+      save();
+      key = null;
+      value = "";
     } else if (key) {
       value += `\n${line}`;
     }
@@ -145,7 +156,8 @@ function eventFromText(text: string): ViatorEventType {
 
 export function parseViatorEmail(rawBody: string, subject = "") {
   const normalized_text = normalizeViatorBody(rawBody);
-  const { values, warnings } = fields(normalized_text);
+  const booking_text = bookingDetails(normalized_text);
+  const { values, warnings } = fields(booking_text);
   const first = (key: keyof typeof labels) => values[key]?.trim().split("\n")[0]?.trim() || null;
   const full = (key: keyof typeof labels) => values[key]?.trim() || null;
   const subjectEvent = eventFromText(subject);
@@ -153,7 +165,7 @@ export function parseViatorEmail(rawBody: string, subject = "") {
   const bodyEvent = eventFromText(normalized_text.split("\n").slice(0, 12).join("\n"));
   const event_type = subjectEvent !== "unknown" ? subjectEvent : bodyEvent;
   if (subjectEvent !== "unknown" && bodyEvent !== "unknown" && subjectEvent !== bodyEvent) warnings.push("conflicting_event_type");
-  const references = [...new Set((`${subject}\n${normalized_text}`).match(/\bBR-\d+\b/gi)?.map(ref => ref.toUpperCase()) ?? [])];
+  const references = [...new Set((`${subject}\n${booking_text}`).match(/\bBR-\d+\b/gi)?.map(ref => ref.toUpperCase()) ?? [])];
   if (references.length > 1) warnings.push("multiple_booking_references");
   const product = first("product_code");
   const grade = first("tour_grade");
