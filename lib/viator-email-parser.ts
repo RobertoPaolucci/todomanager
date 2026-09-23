@@ -49,19 +49,41 @@ export function normalizeViatorBody(body: string): string {
 function fields(text: string) {
   const result: Partial<Record<keyof typeof labels, string>> = {};
   const warnings: string[] = [];
-  const lines = text.split("\n");
+  // HTML-to-text copies can put several labelled fields on the same line.
+  // Keep label boundaries even when the original row boundaries were flattened.
+  const inlineLabel = new RegExp(`[\\t ]+(?=(?:${Object.values(labels).join("|")})\\s*[:：])`, "gi");
+  const lines = text.replace(inlineLabel, "\n").split("\n");
   const patterns = Object.entries(labels).map(([key, pattern]) => [key, new RegExp(`^\\s*${pattern}(?:\\s*[:：]\\s*(.*)|\\s*)$`, "i")] as const);
   let key: keyof typeof labels | null = null;
+  let value = "";
+  function save() {
+    if (!key || !value.trim()) return;
+    const multiline = ["travellers", "meeting_point", "special_requests", "change_text"].includes(key);
+    const comparable = (raw: string) => {
+      const field = multiline ? raw.trim() : raw.trim().split("\n")[0];
+      // Linkified copies retain the visible value but add a link destination.
+      return field.replace(/\[([^\]\n]+)\]\((?:https?:\/\/|tel:|mailto:)[^\s)]*\)/gi, "$1")
+        .replace(/[\t ]*\[(?:https?:\/\/|tel:|mailto:)[^\]\s]+\]/gi, "")
+        .replace(/\s+/g, " ").trim();
+    };
+    if (result[key]) {
+      if (comparable(result[key]) !== comparable(value)) warnings.push(`repeated_field:${key}`);
+    } else {
+      // The first structured occurrence is canonical; later copies cannot replace it.
+      result[key] = value;
+    }
+  }
   for (const line of lines) {
     const found = patterns.map(([name, pattern]) => ({ name, match: line.match(pattern) })).find(item => item.match);
     if (found) {
+      save();
       key = found.name as keyof typeof labels;
-      if (result[key]) warnings.push(`repeated_field:${key}`);
-      result[key] = found.match![1] ?? "";
+      value = found.match![1] ?? "";
     } else if (key) {
-      result[key] += `\n${line}`;
+      value += `\n${line}`;
     }
   }
+  save();
   return { values: result, warnings };
 }
 

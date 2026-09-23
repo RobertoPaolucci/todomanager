@@ -5,7 +5,7 @@ import { resolve, dirname } from "node:path";
 import vm from "node:vm";
 import * as crypto from "node:crypto";
 import ts from "typescript";
-import { confirmed, cancelled, modified, changeText } from "./fixtures/viator-emails.mjs";
+import { confirmed, cancelled, modified, changeText, duplicatedHtml } from "./fixtures/viator-emails.mjs";
 
 // Real route/parser/repository, with DB and environment isolated in memory.
 // No .env access, network requests or production data.
@@ -147,6 +147,37 @@ test("HTML table fields/entities and multiline requests normalize without losing
   assert.equal(row.parsed_data.phone, "+32 123456789"); assert.equal(row.parsed_data.language, "Inglese");
   assert.match(row.parsed_data.meeting_point, /Fattoria\nIngresso nord/);
   assert.match(row.parsed_data.special_requests, /Niente noci & arachidi/);
+});
+test("duplicated HTML keeps canonical fields without false repeated-field review", async () => {
+  const h = harness({ mappings: [{ ...mapping, viator_product_code: "200401P1", viator_tour_grade_code: "TG1" }] });
+  assert.equal((await h.send({ body: duplicatedHtml })).body.status, "ready");
+  const p = h.tables.viator_email_imports[0].parsed_data;
+  assert.equal(p.booking_reference, "BR-1447626735");
+  assert.equal(p.product_code, "200401P1"); assert.equal(p.tour_grade, "TG1");
+  assert.equal(p.tour_name, "Passeggiata in fattoria");
+  assert.equal(p.travellers, "1 Adulto"); assert.equal(p.adults, 1);
+  assert.equal(p.phone, "+39 000 000 0001"); assert.equal(p.net_amount, 33.30);
+  assert.equal(p.warnings.length, 0);
+  assert.match(p.normalized_text, /\[Passeggiata in fattoria\]\(https:/);
+  assert.equal(h.tables.viator_email_imports[0].raw_body, duplicatedHtml);
+});
+test("discordant labelled fields still require review in flattened and structured copies", async () => {
+  for (const [key, original, replacement, structured, canonical] of [
+    ["tour_name", "[Passeggiata in fattoria]", "[Visita al vigneto]", "Nome del tour: Visita al vigneto", "Passeggiata in fattoria"],
+    ["travellers", "Viaggiatori: 1 Adulto", "Viaggiatori: 2 Adulti", "Viaggiatori: 2 Adulti", "1 Adulto"],
+    ["phone", "Telefono: +39 000 000 0001", "Telefono: +39 000 000 0002", "Telefono: +39 000 000 0002", "+39 000 000 0001"],
+  ]) {
+    for (const body of [
+      duplicatedHtml.replace(original, replacement),
+      duplicatedHtml.replace("</body>", `<p>${structured}</p></body>`),
+    ]) {
+      const h = harness();
+      assert.equal((await h.send({ body })).body.status, "needs_review");
+      const p = h.tables.viator_email_imports[0].parsed_data;
+      assert.ok(p.warnings.includes(`repeated_field:${key}`), key);
+      assert.equal(p[key], canonical);
+    }
+  }
 });
 test("Italian dates, separate pax fields, missing values and invalid amounts stay explicit", () => {
   const p = parse("CONFIRMED\nBooking: BR-123\nData: 23 settembre 2026\nAdulti: 2\nBambini: 1\nNeonati: 0\nTelefono:\nLingua: Italiano");
