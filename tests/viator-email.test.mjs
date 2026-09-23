@@ -116,6 +116,20 @@ test("real cancelled values: no invented product or tour grade", () => {
   assert.equal(p.lead_traveller, "Autumn Cronin"); assert.equal(p.adults, 2);
   assert.match(p.tour_name, /Val d’Orcia/); assert.match(p.option_name, /with Guide 09:00/);
 });
+test("Italian tour grade label preserves the exact code and time", () => {
+  const p = parse("Codice livello del tour: TG1~12:00");
+  assert.equal(p.tour_grade, "TG1~12:00");
+  assert.equal(p.activity_time, "12:00");
+  assert.equal(p.warnings.length, 0);
+});
+test("European net amount with currency code and euro symbol parses without warnings", () => {
+  const p = parse("Tariffa netta: EUR €40,32");
+  assert.equal(parser.parseViatorNetAmount("EUR €40,32"), 40.32);
+  assert.equal(p.net_amount_text, "EUR €40,32");
+  assert.equal(p.net_amount, 40.32);
+  assert.equal(p.currency, "EUR");
+  assert.equal(p.warnings.includes("invalid_net_amount"), false);
+});
 test("real modified values: complete change text retained", () => {
   const p = parse(modified);
   assert.equal(p.event_type, "modified"); assert.equal(p.booking_reference, "BR-1436713371");

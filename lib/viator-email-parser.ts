@@ -5,7 +5,7 @@ export type ViatorEventType = "confirmed" | "modified" | "cancelled" | "unknown"
 const labels = {
   booking_reference: "(?:riferimento(?: della)? prenotazione|numero(?: di)? prenotazione|booking(?: reference)?|booking ref)",
   product_code: "(?:codice(?: del)? prodotto|product(?: code)?)",
-  tour_grade: "(?:codice(?: del)? tour grade|tour grade(?: code)?|codice opzione)",
+  tour_grade: "(?:codice livello del tour|codice(?: del)? tour grade|tour grade(?: code)?|codice opzione)",
   tour_name: "(?:nome(?: del)? tour|nome esperienza|esperienza|tour name|product name)",
   option_name: "(?:nome (?:dell[’'])?opzione|opzione|option(?: name)?)",
   activity_date: "(?:data(?: dell[’']attività| del tour| di viaggio)?|activity date|travel date|date)",
