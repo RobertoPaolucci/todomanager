@@ -66,8 +66,9 @@ function fields(text: string) {
         .replace(/[\t ]*\[(?:https?:\/\/|tel:|mailto:)[^\]\s]+\]/gi, "")
         .replace(/\s+/g, " ").trim();
     };
-    if (result[key]) {
-      if (comparable(result[key]) !== comparable(value)) warnings.push(`repeated_field:${key}`);
+    const existingValue = result[key];
+    if (existingValue) {
+      if (comparable(existingValue) !== comparable(value)) warnings.push(`repeated_field:${key}`);
     } else {
       // The first structured occurrence is canonical; later copies cannot replace it.
       result[key] = value;
