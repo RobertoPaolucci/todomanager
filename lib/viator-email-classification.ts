@@ -14,9 +14,14 @@ export function findViatorHistoricalNumericCandidates(reference: string, booking
   return bookings.filter(b => b.business_unit_id === 1 && b.booking_reference === reference.slice(3));
 }
 
-export function classifyViatorEmail(parsed: ParsedViatorEmail, bookings: ViatorBookingCandidate[], mappings: ViatorProductMapping[]) {
+export function isViatorBookingRequest(subject: string) {
+  return /nuova\s+richiesta\s+di\s+prenotazione/i.test(subject);
+}
+
+export function classifyViatorEmail(parsed: ParsedViatorEmail, bookings: ViatorBookingCandidate[], mappings: ViatorProductMapping[], subject = "") {
   const base = { ...VIATOR_EMAIL_SCOPE, booking_writes_enabled: false, booking_id: null };
   const outcome = (status: ViatorImportStatus, reason: string, extra: Record<string, unknown> = {}) => ({ ...base, status, reason, would_do: "none", ...extra });
+  if (isViatorBookingRequest(subject)) return outcome("needs_review", "booking_request_pending");
   if (parsed.event_type === "unknown") return outcome("needs_review", "unrecognized_email");
   if (!parsed.booking_reference || parsed.warnings.length) return outcome("needs_review", "missing_or_ambiguous_fields", { warnings: parsed.warnings });
   const exact = bookings.filter(b => b.business_unit_id === 1 && b.booking_reference === parsed.booking_reference);

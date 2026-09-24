@@ -346,9 +346,47 @@ test("missing fields never fabricate values or create bookings; configured defau
   assert.equal((await timed.send({ body: confirmed.replace("TG1~12:00", "TG1") })).body.status, "ready");
   assert.equal(timed.tables.viator_email_imports[0].parsed_data.classification.proposed_booking.booking_time, "10:30");
 });
+for (const flag of [undefined, "false", "true", "TRUE"]) {
+  test(`FMDQ booking request stays pending without booking access with processing env ${flag}`, async () => {
+    const subject = "Rispondi. Nuova richiesta di prenotazione: Sat, Jan 09, 2027 (BR-1449715643)";
+    // Reported identifiers; remaining booking details are synthetic.
+    const details = `Riferimento prenotazione: BR-1449715643
+Codice prodotto: 200401P5
+Tour grade: TG1~10:30
+Data: Sat, Jan 09, 2027
+Cliente: Test Traveller
+Viaggiatori: 2 Adulti`;
+    for (const headline of ["", "Prenotazione confermata", "Prenotazione modificata", "Prenotazione cancellata"]) {
+      for (const bookings of [[], [candidate("BR-1449715643")]]) {
+        const h = harness({ bookings, mappings: [{ ...mapping, viator_product_code: "200401P5", viator_tour_grade_code: "TG1~10:30" }], env: { VIATOR_EMAIL_PROCESS_BOOKINGS: flag } });
+        const result = await h.send({ subject, body: `${headline}\n${details}` });
+        assert.equal(result.status, 200);
+        assert.equal(result.body.status, "needs_review");
+        assert.equal(result.body.booking_writes_enabled, false);
+        const row = h.tables.viator_email_imports[0];
+        assert.equal(row.event_type, "unknown");
+        assert.equal(row.booking_id, null);
+        const p = row.parsed_data;
+        assert.equal(p.event_type, "unknown");
+        assert.equal(p.booking_reference, "BR-1449715643");
+        assert.equal(p.product_code, "200401P5");
+        assert.equal(p.tour_grade, "TG1~10:30");
+        assert.equal(p.activity_time, "10:30");
+        assert.equal(p.classification.status, "needs_review");
+        assert.equal(p.classification.reason, "booking_request_pending");
+        assert.equal(p.classification.would_do, "none");
+        assert.equal("proposed_booking" in p.classification, false);
+        assert.equal(h.operations.some(o => o.table !== "viator_email_imports"), false);
+        assert.deepEqual(h.tables.bookings, bookings);
+      }
+    }
+  });
+}
+
 test("unknown email and conflicting identities go to review, not implicit confirmed", async () => {
   const h = harness(); const result = await h.send({ body: "Informazioni generiche sulla policy di cancellazione", subject: "Newsletter" });
   assert.equal(result.body.status, "needs_review"); assert.equal(h.tables.viator_email_imports[0].event_type, "unknown");
+  assert.equal(h.tables.viator_email_imports[0].parsed_data.classification.reason, "unrecognized_email");
   assert.equal(h.operations.some(o => o.table === "bookings"), false);
   assert.equal(parse(`${confirmed}\nBooking: BR-9876`).booking_reference, null);
   assert.equal((await harness().send({ body: cancelled })).body.status, "needs_review");

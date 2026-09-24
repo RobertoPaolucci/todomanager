@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseViatorEmail, VIATOR_EMAIL_PARSER_VERSION, type ParsedViatorEmail } from "./viator-email-parser";
-import { classifyViatorEmail, VIATOR_IMPORT_STATUSES, type ViatorImportStatus, type ViatorBookingCandidate, type ViatorProductMapping } from "./viator-email-classification";
+import { classifyViatorEmail, isViatorBookingRequest, VIATOR_IMPORT_STATUSES, type ViatorImportStatus, type ViatorBookingCandidate, type ViatorProductMapping } from "./viator-email-classification";
 
 export type ViatorEmailPayload = {
   message_id?: string | null; received_at?: string | null; subject?: string | null; sender?: string | null;
@@ -72,6 +72,9 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     .eq("attempts", attempts).eq("processing_started_at", startedAt).select("id").maybeSingle();
   try {
     parsed = parseViatorEmail(payload.body, payload.subject ?? "");
+    // Pending requests are not booking events, even if the body quotes a confirmation.
+    // Keep the existing DB event type; the classification reason identifies the request.
+    if (isViatorBookingRequest(payload.subject ?? "")) parsed.event_type = "unknown";
     let bookings: ViatorBookingCandidate[] = [];
     let mappings: ViatorProductMapping[] = [];
     if (parsed.booking_reference && parsed.event_type !== "unknown" && !parsed.warnings.length) {
@@ -100,7 +103,7 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
         }
       }
     }
-    const classification = classifyViatorEmail(parsed, bookings, mappings);
+    const classification = classifyViatorEmail(parsed, bookings, mappings, payload.subject ?? "");
     const result = await save({
       ...parsingColumns(), status: classification.status, booking_id: null,
       parsed_data: {
