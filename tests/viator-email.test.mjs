@@ -98,7 +98,7 @@ const parser = harness().load("lib/viator-email-parser.ts");
 const parse = parser.parseViatorEmail;
 // Synthetic explicit test mapping, deliberately NOT approved experience 16.
 const mapping = { id: 1, business_unit_id: 1, viator_product_code: "200401P10", viator_tour_grade_code: "TG1~12:00", experience_id: 999, active: true, default_time: null };
-const candidate = (reference, business_unit_id = 1, id = 1) => ({ id, business_unit_id, booking_reference: reference, notes: "untouched", total_to_you: 99, is_cancelled: false });
+const candidate = (reference, business_unit_id = 1, id = 1) => ({ id, business_unit_id, channel_id: 2, booking_reference: reference, notes: "untouched", total_to_you: 99, is_cancelled: false });
 
 test("real confirmed values: canonical BR, exact codes, English date, adults and net booking total", () => {
   const p = parse(confirmed);
@@ -285,10 +285,10 @@ test("absent message IDs are nullable, hash is diagnostic and not a uniqueness r
   assert.equal(h.tables.viator_email_imports[0].content_hash, h.tables.viator_email_imports[1].content_hash);
 });
 for (const [body, event, status, reference] of [[cancelled, "cancelled", "cancellation_unmatched", "BR-1446150053"], [modified, "modified", "modification_unmatched", "BR-1436713371"]]) {
-  test(`${event}: unmatched numeric legacy or another unit never used as fallback`, async () => {
+  test(`${event}: numeric legacy classified without writes; another unit excluded`, async () => {
     const bookings = [candidate(reference.slice(3)), candidate(reference, 2, 2)];
     const h = harness({ bookings }); const result = await h.send({ body, subject: "" });
-    assert.equal(result.body.status, status); assert.deepEqual(h.tables.bookings, bookings);
+    assert.equal(result.body.status, event === "cancelled" ? "cancelled" : status); assert.deepEqual(h.tables.bookings, bookings);
     assert.equal(h.tables.viator_email_imports[0].booking_id, null);
   });
   test(`${event}: unique canonical candidate classified, multiple canonical candidates require review`, async () => {

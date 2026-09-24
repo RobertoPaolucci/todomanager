@@ -47,12 +47,13 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     };
   }
   if (!row) throw new Error("email_archive_failed");
-  const response = (status: string, http_status = 200, retryable = false, bookingId: number | null = null) => ({
+  const response = (status: string, http_status = 200, retryable = false, bookingId: number | null = null, action = "create_booking") => ({
     http_status, import_id: row.id, status, duplicate, retryable, booking_writes_enabled: bookingId !== null,
-    ...(bookingId !== null ? { booking_id: bookingId, action: "create_booking" } : {}),
+    ...(bookingId !== null ? { booking_id: bookingId, action } : {}),
   });
   if (!["archived", "processing", "processing_failed"].includes(row.status)) return response(row.status, 200, false,
-    row.parsed_data?.classification?.action === "create_booking" ? row.booking_id : null);
+    ["create_booking", "cancel_booking"].includes(row.parsed_data?.classification?.action) ? row.booking_id : null,
+    row.parsed_data?.classification?.action);
   if (row.status === "processing" && Date.now() - Date.parse(row.processing_started_at) < LEASE_MS) return response("processing", 503, true);
 
   const attempts = row.attempts + 1;
@@ -80,8 +81,12 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     let bookings: ViatorBookingCandidate[] = [];
     let mappings: ViatorProductMapping[] = [];
     if (parsed.booking_reference && parsed.event_type !== "unknown" && !parsed.warnings.length) {
-      const lookup = await db.from("bookings").select("id, business_unit_id, booking_reference")
-        .eq("business_unit_id", 1).eq("booking_reference", parsed.booking_reference).limit(2);
+      const lookup = parsed.event_type === "cancelled"
+        ? await db.from("bookings").select("id, business_unit_id, channel_id, booking_reference")
+          .eq("business_unit_id", 1).eq("channel_id", 2)
+          .in("booking_reference", [parsed.booking_reference, parsed.booking_reference.slice(3)]).limit(2)
+        : await db.from("bookings").select("id, business_unit_id, booking_reference")
+          .eq("business_unit_id", 1).eq("booking_reference", parsed.booking_reference).limit(2);
       if (lookup.error) throw new Error("booking_lookup_failed");
       bookings = lookup.data ?? [];
       if (parsed.event_type === "confirmed") {
@@ -135,6 +140,23 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
       };
       return response(result.status, 200, false, result.action === "create_booking" ? result.booking_id : null);
     }
+    if (processingRequested && parsed.event_type === "cancelled" && classification.status === "cancelled" &&
+        classification.would_do === "cancel_booking" && /^BR-\d+$/.test(parsed.booking_reference ?? "")) {
+      // Cancellation has its own transaction; creation and modification stay separate.
+      const prepared = await save({ ...parsingColumns(), parsed_data: {
+        ...parsedData, processing_mode: "cancel_booking", booking_writes_blocked_reason: null,
+      } });
+      if (prepared.error || !prepared.data) throw new Error("classification_save_failed");
+      const cancelled = await db.rpc("cancel_viator_email_booking", {
+        p_import_id: row.id, p_attempts: attempts, p_started_at: startedAt,
+      });
+      if (cancelled.error || !cancelled.data) throw new Error("booking_cancellation_failed");
+      const result = cancelled.data;
+      if (result.status === "processing_failed") return {
+        ...response(result.status, 503, true), error: "booking_cancellation_failed",
+      };
+      return response(result.status, 200, false, result.action === "cancel_booking" ? result.booking_id : null, "cancel_booking");
+    }
     const result = await save({
       ...parsingColumns(), status: classification.status, booking_id: null,
       parsed_data: parsedData,
@@ -144,7 +166,7 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     return response(classification.status);
   } catch (error) {
     // Store only controlled error codes; never database messages, raw emails or secrets in HTTP/logs.
-    const allowed = ["booking_lookup_failed", "mapping_lookup_failed", "mapping_business_unit_mismatch", "classification_save_failed", "booking_creation_failed"];
+    const allowed = ["booking_lookup_failed", "mapping_lookup_failed", "mapping_business_unit_mismatch", "classification_save_failed", "booking_creation_failed", "booking_cancellation_failed"];
     const code = error instanceof Error && allowed.includes(error.message) ? error.message : "email_processing_failed";
     const saved = await save({
       ...parsingColumns(), parsed_data: parsed ?? {}, status: "processing_failed",

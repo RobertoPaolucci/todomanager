@@ -55,6 +55,7 @@ async function database() {
   await pg.exec(readFileSync("supabase/migrations/202609200001_booking_total_source.sql", "utf8"));
   await pg.exec(readFileSync("supabase/migrations/202609220001_viator_email_phase1.sql", "utf8"));
   await pg.exec(migration);
+  await pg.exec(readFileSync("supabase/migrations/202609240002_viator_email_cancel_booking.sql", "utf8"));
   return pg;
 }
 
@@ -74,6 +75,7 @@ function harness(pg, flag = "true") {
         update(value) { operation = "update"; payload = value; return q; },
         eq(key, value) { filters.push([key, value]); return q; },
         is(key, value) { filters.push([key, value]); return q; },
+        in(key, value) { filters.push([key, value, "in"]); return q; },
         limit(value) { maximum = value; return q; },
         single() { single = true; return q; },
         maybeSingle() { single = true; return q; },
@@ -88,7 +90,7 @@ function harness(pg, flag = "true") {
             } else if (operation === "update") {
               sql = `update ${table} set ${Object.entries(payload).map(([k, v]) => `${k}=${param(v)}`).join(",")}`;
             } else sql = `select ${columns} from ${table}`;
-            if (filters.length) sql += ` where ${filters.map(([k, v]) => v === null ? `${k} is null` : `${k}=${param(v)}`).join(" and ")}`;
+            if (filters.length) sql += ` where ${filters.map(([k, v, op]) => op === "in" ? `${k} in (${v.map(param).join(",")})` : v === null ? `${k} is null` : `${k}=${param(v)}`).join(" and ")}`;
             if (operation !== "select") sql += ` returning ${columns}`;
             else if (maximum) sql += ` limit ${Number(maximum)}`;
             const { rows } = await pg.query(sql, values);
@@ -100,12 +102,12 @@ function harness(pg, flag = "true") {
       return q;
     },
     async rpc(name, args) {
-      assert.equal(name, "create_viator_email_booking");
+      assert.ok(["create_viator_email_booking", "cancel_viator_email_booking"].includes(name));
       operations.push({ table: name, operation: "rpc" });
       if (faults.beforeRpc) await faults.beforeRpc();
       if (faults.missingRpc) return { data: null, error: { code: "PGRST202" } };
       try {
-        const { rows } = await pg.query("select create_viator_email_booking($1,$2,$3) as result", [args.p_import_id, args.p_attempts, args.p_started_at]);
+        const { rows } = await pg.query(`select ${name}($1,$2,$3) as result`, [args.p_import_id, args.p_attempts, args.p_started_at]);
         if (faults.lostResponse) return { data: null, error: { code: "network" } };
         return { data: rows[0].result, error: null };
       } catch (error) { return { data: null, error: { code: error.code } }; }
@@ -194,14 +196,166 @@ test("Viator Phase 2 transactional integration", options, async t => {
       assert.equal((await harness(pg).send()).body.status, "duplicate_candidate");
       assert.deepEqual(await rows("bookings"), before);
     });
-    for (const [body, event, ref] of [[modified, "modified", "BR-1436713371"], [cancelled, "cancelled", "BR-1446150053"]]) {
+    for (const [body, event, ref] of [[modified, "modified", "BR-1436713371"]]) {
       await scenario(`${event} matched booking stays entirely unchanged with env true`, async () => {
-        await pg.query("insert into bookings(business_unit_id,booking_reference,customer_name,experience_name,booking_date) values (1,$1,'Existing','Existing','2026-09-23')", [ref]);
+        await pg.query("insert into bookings(business_unit_id,channel_id,booking_reference,customer_name,experience_name,booking_date) values (1,2,$1,'Existing','Existing','2026-09-23')", [ref]);
         const before = await rows("bookings");
         assert.equal((await harness(pg).send({ body, subject: "" })).body.status, event);
         assert.deepEqual(await rows("bookings"), before);
       });
     }
+    // Reported real identity; all other fields are synthetic and local only.
+    const cancellation = { subject: "Prenotazione cancellata", body: "Prenotazione cancellata\nRiferimento prenotazione: BR-1413153957" };
+    async function seedCancellation(reference = "1413153957", isCancelled = false, id = 1595, unit = 1, channel = 2) {
+      await pg.query(`insert into bookings(id,business_unit_id,channel_id,booking_reference,customer_name,experience_name,
+        booking_date,notes,total_to_you,total_supplier_cost,margin_total,adults,children,total_people,pax,is_cancelled)
+        overriding system value values ($1,$2,$3,$4,'Synthetic customer','Original experience','2026-09-23',
+        'Original note',99,60,39,2,1,3,3,$5)`, [id, unit, channel, reference, isCancelled]);
+    }
+    for (const reference of ["BR-1413153957", "1413153957"]) await scenario(`cancel ${reference}: only flag changes; import linked atomically`, async () => {
+      await seedCancellation(reference);
+      // Cancellation never depends on product mappings or prices.
+      await pg.exec("delete from viator_product_mappings; delete from experience_channel_prices");
+      const before = await rows("bookings"), h = harness(pg);
+      const result = await h.send(cancellation);
+      assert.equal(result.status, 200); assert.equal(result.body.status, "cancelled");
+      assert.equal(result.body.action, "cancel_booking"); assert.equal(result.body.booking_id, 1595);
+      assert.equal(result.body.booking_writes_enabled, true);
+      assert.deepEqual(await rows("bookings"), before.map(b => ({ ...b, is_cancelled: true })));
+      const [imp] = await rows("viator_email_imports");
+      assert.equal(imp.booking_id, 1595); assert.equal(imp.parsed_data.classification.action, "cancel_booking");
+      assert.equal(imp.parsed_data.classification.reason, "booking_cancelled");
+      assert.equal(imp.parsed_data.classification.booking_id, 1595);
+      assert.equal((await h.send(cancellation)).body.action, "cancel_booking");
+      assert.equal(h.operations.filter(o => o.operation === "rpc").length, 1);
+      assert.equal(h.operations.some(o => o.table === "bookings" && o.operation !== "select"), false);
+      const repeated = await pg.query("select cancel_viator_email_booking($1,0,now()) as result", [imp.id]);
+      assert.equal(repeated.rows[0].result.booking_id, 1595);
+    });
+    await scenario("cancel zero matches / wrong BU or channel: no booking writes or link", async () => {
+      await seedCancellation("1413153957", false, 1595, 2, 2);
+      await seedCancellation("BR-1413153957", false, 1596, 1, 3);
+      const before = await rows("bookings"), h = harness(pg);
+      assert.equal((await h.send(cancellation)).body.status, "cancellation_unmatched");
+      assert.deepEqual(await rows("bookings"), before);
+      assert.equal((await rows("viator_email_imports"))[0].booking_id, null);
+      assert.equal(h.operations.some(o => o.operation === "rpc"), false);
+    });
+    await scenario("cancel unique scoped match ignores same references in other scopes", async () => {
+      await seedCancellation();
+      await seedCancellation("BR-1413153957", false, 1596, 2, 2);
+      await seedCancellation("1413153957", false, 1597, 1, 3);
+      const before = await rows("bookings");
+      assert.equal((await harness(pg).send(cancellation)).body.booking_id, 1595);
+      assert.deepEqual(await rows("bookings"), before.map(b => ({ ...b, is_cancelled: b.id === 1595 })));
+    });
+    for (const refs of [["BR-1413153957", "1413153957"], ["1413153957", "1413153957"], ["BR-1413153957", "BR-1413153957"]]) {
+      await scenario(`cancel ambiguous ${refs.join(" + ")}: no writes, even if one is cancelled`, async () => {
+        await seedCancellation(refs[0]); await seedCancellation(refs[1], true, 1596);
+        const before = await rows("bookings"), h = harness(pg);
+        assert.equal((await h.send(cancellation)).body.status, "needs_review");
+        assert.deepEqual(await rows("bookings"), before);
+        assert.equal((await rows("viator_email_imports"))[0].booking_id, null);
+        assert.equal(h.operations.some(o => o.operation === "rpc"), false);
+      });
+    }
+    await scenario("already cancelled / different message IDs: no UPDATE or duplicated notes", async () => {
+      await seedCancellation("1413153957", true);
+      const before = await rows("bookings");
+      // Any UPDATE, including a no-op, would fail. Linking must still succeed.
+      await pg.exec(`create function reject_test_booking_update() returns trigger language plpgsql as $$
+        begin raise exception 'unexpected booking update'; end $$;
+        create trigger reject_test_booking_update before update on bookings for each row execute function reject_test_booking_update();`);
+      try {
+        const h = harness(pg);
+        for (const message_id of ["cancel-1", "cancel-2"]) {
+          const result = await h.send({ ...cancellation, message_id });
+          assert.equal(result.status, 200); assert.equal(result.body.action, "cancel_booking");
+        }
+        assert.deepEqual(await rows("bookings"), before);
+        assert.ok((await rows("viator_email_imports")).every(imp => imp.booking_id === 1595));
+      } finally { await pg.exec("drop trigger reject_test_booking_update on bookings; drop function reject_test_booking_update()"); }
+    });
+    for (const flag of ["", "false", "TRUE"]) await scenario(`cancel env ${flag}: dry-run, no RPC or link`, async () => {
+      await seedCancellation(); const before = await rows("bookings"), h = harness(pg, flag);
+      const result = await h.send(cancellation);
+      assert.equal(result.body.booking_writes_enabled, false);
+      assert.equal(result.body.action, undefined);
+      assert.deepEqual(await rows("bookings"), before);
+      assert.equal((await rows("viator_email_imports"))[0].booking_id, null);
+      assert.equal(h.operations.some(o => o.operation === "rpc"), false);
+    });
+    for (const overrides of [{ business_unit_id: 2 }, { channel_id: 3 }, { subject: "Nuova richiesta di prenotazione" },
+      { body: `${cancellation.body}\nBooking: BR-9999` }]) await scenario(`cancel unsafe envelope ${JSON.stringify(overrides)}`, async () => {
+      await seedCancellation(); const before = await rows("bookings"), h = harness(pg);
+      assert.equal((await h.send({ ...cancellation, ...overrides })).body.status, "needs_review");
+      assert.deepEqual(await rows("bookings"), before);
+      assert.equal(h.operations.some(o => o.operation === "rpc"), false);
+    });
+    for (const [name, sql, status] of [
+      ["late second candidate", "insert into bookings(business_unit_id,channel_id,booking_reference,customer_name,experience_name,booking_date) values (1,2,'BR-1413153957','Other','Other','2026-09-23')", "needs_review"],
+      ["candidate moved to other channel", "update bookings set channel_id=3", "cancellation_unmatched"],
+      ["modified event", "update viator_email_imports set event_type='modified'", "needs_review"],
+      ["processing disabled", "update viator_email_imports set parsed_data=jsonb_set(parsed_data,'{processing_requested}','false')", "needs_review"],
+      ["scope tampered", "update viator_email_imports set parsed_data=jsonb_set(parsed_data,'{classification,channel_id}','3')", "needs_review"],
+    ]) await scenario(`cancel RPC rechecks ${name}`, async () => {
+      await seedCancellation(); const h = harness(pg); let before;
+      h.faults.beforeRpc = async () => { await pg.exec(sql); before = await rows("bookings"); };
+      assert.equal((await h.send(cancellation)).body.status, status);
+      assert.deepEqual(await rows("bookings"), before);
+      assert.equal((await rows("viator_email_imports"))[0].booking_id, null);
+    });
+    await scenario("cancel expired lease cannot write", async () => {
+      await seedCancellation(); const before = await rows("bookings"), h = harness(pg);
+      h.faults.beforeRpc = () => pg.exec("update viator_email_imports set attempts=attempts+1");
+      assert.equal((await h.send(cancellation)).status, 503);
+      assert.deepEqual(await rows("bookings"), before);
+      assert.equal((await rows("viator_email_imports"))[0].status, "processing");
+    });
+    await scenario("cancel missing RPC fails closed; retry succeeds", async () => {
+      await seedCancellation(); const before = await rows("bookings"), h = harness(pg);
+      h.faults.missingRpc = true;
+      const failed = await h.send(cancellation);
+      assert.equal(failed.status, 503); assert.equal(failed.body.error, "booking_cancellation_failed");
+      assert.deepEqual(await rows("bookings"), before);
+      h.faults.missingRpc = false;
+      assert.equal((await h.send(cancellation)).body.action, "cancel_booking");
+    });
+    await scenario("cancel link failure rolls back flag; retry succeeds", async () => {
+      await seedCancellation(); const before = await rows("bookings"), h = harness(pg);
+      await pg.exec("alter table viator_email_imports add constraint simulated_cancel_link_failure check(booking_id is null)");
+      try {
+        assert.equal((await h.send(cancellation)).status, 503);
+        assert.deepEqual(await rows("bookings"), before);
+        const [imp] = await rows("viator_email_imports");
+        assert.equal(imp.status, "processing_failed"); assert.equal(imp.booking_id, null);
+        assert.match(imp.error_message, /^booking_cancellation_failed:23514$/);
+      } finally { await pg.exec("alter table viator_email_imports drop constraint simulated_cancel_link_failure"); }
+      assert.equal((await h.send(cancellation)).body.action, "cancel_booking");
+    });
+    await scenario("cancel lost RPC response preserves committed result on redelivery", async () => {
+      await seedCancellation(); const h = harness(pg); h.faults.lostResponse = true;
+      assert.equal((await h.send(cancellation)).status, 503);
+      const before = await rows("bookings");
+      assert.equal(before[0].is_cancelled, true);
+      assert.equal((await rows("viator_email_imports"))[0].booking_id, 1595);
+      h.faults.lostResponse = false;
+      const result = await h.send(cancellation);
+      assert.equal(result.body.action, "cancel_booking"); assert.equal(result.body.booking_id, 1595);
+      assert.deepEqual(await rows("bookings"), before);
+      assert.equal(h.operations.filter(o => o.operation === "rpc").length, 1);
+    });
+    await scenario("cancel RPC denied to browser roles; service_role allowed", async () => {
+      await seedCancellation();
+      for (const role of ["anon", "authenticated"]) {
+        await pg.exec(`set role ${role}`);
+        await assert.rejects(pg.query("select cancel_viator_email_booking(1,1,now())"), e => e.code === "42501");
+        await pg.exec("reset role");
+      }
+      await pg.exec("set role service_role");
+      try { assert.equal((await harness(pg).send(cancellation)).body.action, "cancel_booking"); }
+      finally { await pg.exec("reset role"); }
+    });
     for (const [name, overrides, setup] of [
       ["modified", { body: modified, subject: "Prenotazione modificata" }],
       ["cancelled", { body: cancelled, subject: "Prenotazione cancellata" }],
