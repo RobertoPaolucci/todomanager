@@ -316,8 +316,8 @@ test("many historical numeric rows cannot hide multiple canonical bookings", asy
   assert.equal((await h.send()).body.status, "needs_review");
   assert.deepEqual(h.tables.bookings, bookings);
 });
-for (const flag of [undefined, "false", "true", "TRUE"]) {
-  test(`ready confirmation never writes bookings even with processing env ${flag}`, async () => {
+for (const flag of [undefined, "false", "TRUE"]) {
+  test(`ready confirmation stays dry-run with processing env ${flag}`, async () => {
     const bookings = [candidate("BR-1449799117", 2), candidate("1449799117", 2, 2)];
     const h = harness({ bookings, mappings: [mapping], env: { VIATOR_EMAIL_PROCESS_BOOKINGS: flag } });
     const result = await h.send({ business_unit_id: 2, channel_id: 3, booking_source: "Bokun", process_bookings: true });

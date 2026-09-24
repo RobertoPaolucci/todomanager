@@ -47,10 +47,12 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     };
   }
   if (!row) throw new Error("email_archive_failed");
-  const response = (status: string, http_status = 200, retryable = false) => ({
-    http_status, import_id: row.id, status, duplicate, retryable, booking_writes_enabled: false,
+  const response = (status: string, http_status = 200, retryable = false, bookingId: number | null = null) => ({
+    http_status, import_id: row.id, status, duplicate, retryable, booking_writes_enabled: bookingId !== null,
+    ...(bookingId !== null ? { booking_id: bookingId, action: "create_booking" } : {}),
   });
-  if (!["archived", "processing", "processing_failed"].includes(row.status)) return response(row.status);
+  if (!["archived", "processing", "processing_failed"].includes(row.status)) return response(row.status, 200, false,
+    row.parsed_data?.classification?.action === "create_booking" ? row.booking_id : null);
   if (row.status === "processing" && Date.now() - Date.parse(row.processing_started_at) < LEASE_MS) return response("processing", 503, true);
 
   const attempts = row.attempts + 1;
@@ -103,21 +105,46 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
         }
       }
     }
-    const classification = classifyViatorEmail(parsed, bookings, mappings, payload.subject ?? "");
+    let classification = classifyViatorEmail(parsed, bookings, mappings, payload.subject ?? "");
+    // Envelope scope never overrides the fixed FMDQ scope. In live mode a
+    // contradictory scope is reviewed rather than silently used for a write.
+    if (processingRequested && ((payload.business_unit_id != null && payload.business_unit_id !== 1) ||
+        (payload.channel_id != null && payload.channel_id !== 2))) {
+      classification = { ...classification, status: "needs_review", reason: "scope_mismatch", would_do: "none" };
+    }
+    const parsedData = {
+      ...parsed, classification, processing_requested: processingRequested,
+      processing_mode: "dry_run", booking_writes_blocked_reason: "phase_1_historical_transition_pending",
+      transport_warnings: received && !receivedAt ? ["invalid_received_at"] : [],
+    };
+    if (processingRequested && parsed.event_type === "confirmed" && classification.status === "ready" &&
+        classification.would_do === "create_booking" && /^BR-\d+$/.test(parsed.booking_reference ?? "")) {
+      // Persist the plan while retaining the lease. The RPC revalidates it and
+      // commits the INSERT + import link together; never fall back to REST INSERT.
+      const prepared = await save({ ...parsingColumns(), parsed_data: {
+        ...parsedData, processing_mode: "create_confirmed", booking_writes_blocked_reason: null,
+      } });
+      if (prepared.error || !prepared.data) throw new Error("classification_save_failed");
+      const created = await db.rpc("create_viator_email_booking", {
+        p_import_id: row.id, p_attempts: attempts, p_started_at: startedAt,
+      });
+      if (created.error || !created.data) throw new Error("booking_creation_failed");
+      const result = created.data;
+      if (result.status === "processing_failed") return {
+        ...response(result.status, 503, true), error: "booking_creation_failed",
+      };
+      return response(result.status, 200, false, result.action === "create_booking" ? result.booking_id : null);
+    }
     const result = await save({
       ...parsingColumns(), status: classification.status, booking_id: null,
-      parsed_data: {
-        ...parsed, classification, processing_requested: processingRequested,
-        processing_mode: "dry_run", booking_writes_blocked_reason: "phase_1_historical_transition_pending",
-        transport_warnings: received && !receivedAt ? ["invalid_received_at"] : [],
-      },
+      parsed_data: parsedData,
       error_message: null, processed_at: new Date().toISOString(), processing_started_at: null,
     });
     if (result.error || !result.data) throw new Error("classification_save_failed");
     return response(classification.status);
   } catch (error) {
     // Store only controlled error codes; never database messages, raw emails or secrets in HTTP/logs.
-    const allowed = ["booking_lookup_failed", "mapping_lookup_failed", "mapping_business_unit_mismatch", "classification_save_failed"];
+    const allowed = ["booking_lookup_failed", "mapping_lookup_failed", "mapping_business_unit_mismatch", "classification_save_failed", "booking_creation_failed"];
     const code = error instanceof Error && allowed.includes(error.message) ? error.message : "email_processing_failed";
     const saved = await save({
       ...parsingColumns(), parsed_data: parsed ?? {}, status: "processing_failed",
