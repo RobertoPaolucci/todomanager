@@ -398,6 +398,140 @@ test('external reference arriving later is preserved on the identified booking',
   assert.equal(h.tables.bookings.length, 1);
 });
 
+const todoPayload = {
+  bokun_id: '1276082', bokun_booking_reference: 'TOD-104921603',
+  externalBookingReference: '', booking_reference: 'TOD-T147665882',
+  channel_id: 4, booking_source: 'Todointheworld', source_total_price: 70,
+  booking_date: '2026-09-26', booking_time: '16:00', adults: 2,
+  status: 'CONFIRMED', action: 'BOOKING_CONFIRMED',
+};
+
+async function todoHarness() {
+  const h = harness();
+  Object.assign(h.tables.experiences[0], {
+    id: 27, bokun_id: '1276082', name: 'Walk with goats or donkeys in Tuscany',
+    is_group_pricing: false,
+  });
+  h.tables.experience_channel_prices.forEach(price => Object.assign(price, {
+    experience_id: 27, your_unit_price: 38, public_unit_price: 38, supplier_adult_unit_cost: 20,
+  }));
+  assert.equal((await h.send({ ...todoPayload, booking_reference: undefined })).status, 200);
+  h.tables.bookings[0].id = 2240;
+  return h;
+}
+
+for (const reference of [null, '', '   ']) {
+  for (const status of ['CONFIRMED', 'MODIFIED']) {
+    test(`Todointheworld ${status} fills ${JSON.stringify(reference)} with explicit product ref; replay is unchanged`, async () => {
+      const h = await todoHarness();
+      h.tables.bookings[0].booking_reference = reference;
+      const result = await h.send({ ...todoPayload, status, action: `BOOKING_${status}` });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.action, 'updated');
+      assert.deepEqual(result.body.changed_fields, ['booking_reference']);
+      const row = h.tables.bookings[0];
+      assert.equal(row.id, 2240);
+      assert.equal(row.booking_reference, 'TOD-T147665882');
+      assert.equal(row.bokun_booking_reference, 'TOD-104921603');
+      assert.equal(row.business_unit_id, 2);
+      assert.equal(row.channel_id, 4);
+      assert.equal(row.booking_source, 'Todointheworld');
+      assert.equal(row.total_customer, 76);
+      assert.equal(row.total_to_you, 76);
+      assert.equal(row.total_supplier_cost, 40);
+      assert.equal(row.margin_total, 36);
+      const beforeReplay = structuredClone(h.tables.bookings);
+      assert.equal((await h.send({ ...todoPayload, status, action: `BOOKING_${status}` })).body.action, 'unchanged');
+      assert.deepEqual(h.tables.bookings, beforeReplay);
+    });
+  }
+}
+
+test('Todointheworld preserves an existing commercial reference and prefers incoming external ref', async () => {
+  const h = await todoHarness();
+  await h.send({ ...todoPayload, externalBookingReference: 'COMMERCIAL-123' });
+  assert.equal(h.tables.bookings[0].booking_reference, 'COMMERCIAL-123');
+  const before = structuredClone(h.tables.bookings);
+  assert.equal((await h.send(todoPayload)).body.action, 'unchanged');
+  assert.deepEqual(h.tables.bookings, before);
+});
+
+for (const field of ['productConfirmationCode', 'externalBookingReference']) {
+  test(`Todointheworld does not fill product ref from ${field} without explicit booking_reference`, async () => {
+    const h = await todoHarness();
+    const before = structuredClone(h.tables.bookings);
+    const result = await h.send({ ...todoPayload, booking_reference: undefined, [field]: 'TOD-T147665882' });
+    assert.equal(result.body.action, 'unchanged');
+    assert.deepEqual(h.tables.bookings, before);
+  });
+}
+
+for (const [channel_id, booking_source, bokun_booking_reference, commercialReference] of [
+  [2, 'Viator', 'VIA-103724193', '1446865537'],
+  [3, 'GetYourGuide', 'GET-101955189', 'GYGBLHFXQZ7B'],
+  [5, 'Freedome', 'FREE-123', 'FREE123'],
+  [6, 'Fattoria Madonna della Querce', 'FMDQ-123', 'FMDQ123'],
+  [1, 'Direct', 'DIRECT-123', 'DIRECT123'],
+]) {
+  for (const externalBookingReference of ['', commercialReference]) {
+    test(`${booking_source} ignores TOD-T product ref with external ref ${JSON.stringify(externalBookingReference)}`, async () => {
+      const h = harness();
+      const payload = { channel_id, booking_source, bokun_booking_reference, externalBookingReference };
+      assert.equal((await h.send(payload)).status, 200);
+      const before = structuredClone(h.tables.bookings);
+      const result = await h.send({ ...payload, booking_reference: 'TOD-T147665882' });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.action, 'unchanged');
+      assert.equal(result.body.channel_id, channel_id);
+      assert.deepEqual(h.tables.bookings, before);
+    });
+  }
+}
+
+for (const reference of [null, '', 'COMMERCIAL-123', 'TOD-T147665881']) {
+  test(`Todointheworld cancellation preserves reference ${JSON.stringify(reference)}`, async () => {
+    const h = await todoHarness();
+    h.tables.bookings[0].booking_reference = reference;
+    const before = structuredClone(h.tables.bookings[0]);
+    const result = await h.send({ ...todoPayload, status: 'CANCELLED', action: 'BOOKING_ITEM_CANCELLED' });
+    assert.equal(result.status, 200);
+    assert.equal(h.tables.bookings[0].is_cancelled, true);
+    const { is_cancelled, notes, ...preserved } = h.tables.bookings[0];
+    assert.equal(is_cancelled, true);
+    assert.match(notes, /Prenotazione cancellata/);
+    assert.deepEqual({ ...preserved, is_cancelled: before.is_cancelled, notes: before.notes }, before);
+  });
+}
+
+test('Todointheworld product ref never matches a different cart for modification, cancellation or rebooking', async () => {
+  const h = await todoHarness();
+  await h.send(todoPayload);
+  const before = structuredClone(h.tables.bookings);
+  const newCart = { ...todoPayload, bokun_booking_reference: 'TOD-104921604' };
+  for (const status of ['MODIFIED', 'CANCELLED']) {
+    assert.equal((await h.send({ ...newCart, status, action: `BOOKING_${status}` })).status, 409);
+    assert.deepEqual(h.tables.bookings, before);
+  }
+  assert.equal((await h.send(newCart)).body.action, 'created');
+  assert.equal(h.tables.bookings.length, 2);
+  assert.deepEqual(h.tables.bookings[0], before[0]);
+  assert.equal(h.tables.bookings[1].bokun_booking_reference, 'TOD-104921604');
+  assert.equal(h.tables.bookings[1].booking_reference, null);
+});
+
+test('Todointheworld fills only the matched business unit and refuses product ref as cart identity', async () => {
+  const h = await todoHarness();
+  const other = { ...structuredClone(h.tables.bookings[0]), id: 2241, business_unit_id: 3 };
+  h.tables.bookings.push(other);
+  const otherBefore = structuredClone(other);
+  assert.equal((await h.send(todoPayload)).body.action, 'updated');
+  assert.equal(h.tables.bookings[0].booking_reference, 'TOD-T147665882');
+  assert.deepEqual(h.tables.bookings[1], otherBefore);
+  const before = structuredClone(h.tables.bookings);
+  assert.equal((await h.send({ ...todoPayload, bokun_booking_reference: 'TOD-T147665882' })).status, 409);
+  assert.deepEqual(h.tables.bookings, before);
+});
+
 test('concurrent confirmations create exactly one row; conflict can be retried', async () => {
   const h = harness();
   const results = await Promise.all([h.send(), h.send()]);

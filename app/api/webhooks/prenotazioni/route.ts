@@ -1255,13 +1255,22 @@ export async function POST(req: Request) {
         })
       : {};
 
+    // Display reference only: matching and channel resolution are already complete.
+    const todoProductReference = bokunBookingReference && existing &&
+      channelId === 4 && !isCancelled && !cleanString(existing.booking_reference) &&
+      /^TOD-T\d+$/i.test(cleanString(body.booking_reference))
+      ? cleanString(body.booking_reference)
+      : "";
+
     const bookingData = {
       ...(bokunBookingReference ? {
         bokun_booking_reference: bokunBookingReference,
         // Fill the external reference if an earlier event only had the cart ID.
-        booking_reference: !existing?.booking_reference || existing.booking_reference === bokunBookingReference
-          ? incomingBookingReference || null
-          : existing.booking_reference,
+        booking_reference: todoProductReference
+          ? incomingBookingReference || todoProductReference
+          : !existing?.booking_reference || existing.booking_reference === bokunBookingReference
+            ? incomingBookingReference || null
+            : existing.booking_reference,
       } : {}),
       channel_id: channelId,
       booking_source: bookingSource,
