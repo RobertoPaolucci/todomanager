@@ -6,7 +6,7 @@ import AutoRefreshClient from "@/components/AutoRefreshClient";
 import CognanelloBookingList from "@/components/CognanelloBookingList";
 import { supabaseServer } from "@/lib/supabase-server";
 
-const EXPERIENCE_IDS = [1, 8, 9];
+const EXPERIENCE_IDS = [1, 8, 9, 27];
 const PAST_START_DATE = "2026-01-01";
 
 type SearchParams = Promise<{

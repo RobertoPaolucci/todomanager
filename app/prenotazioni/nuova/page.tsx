@@ -2,6 +2,7 @@ import AppShell from "@/components/AppShell";
 import BookingForm from "@/components/BookingForm";
 import { getChannels, getExperiences } from "@/lib/queries";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getCognanelloExperienceLine } from "@/lib/supplier-whatsapp";
 
 type PageProps = {
   searchParams: Promise<{
@@ -43,7 +44,7 @@ export default async function NuovaPrenotazionePage({ searchParams }: PageProps)
   if (saved && bookingId) {
     const { data } = await supabaseServer
       .from("bookings")
-      .select("*, suppliers(phone), channels(name)")
+      .select("*, suppliers(name, phone), channels(name)")
       .eq("id", bookingId)
       .single();
 
@@ -60,7 +61,7 @@ export default async function NuovaPrenotazionePage({ searchParams }: PageProps)
       const wChannel = bookingChannelName || "N/A";
       const wRef = savedBooking.booking_reference || "N/A";
       const wName = savedBooking.customer_name || "N/A";
-      const waText = `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+      const waText = getCognanelloExperienceLine(savedBooking) + `${wPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
 
       const rawSupplier = savedBooking.suppliers;
       let rawPhone = "";

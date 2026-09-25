@@ -9,6 +9,7 @@ import BookingDateRangeFilter from "@/components/BookingDateRangeFilter";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 import { getBookingDisplayNotes } from "@/lib/booking-display-notes";
+import { getCognanelloExperienceLine } from "@/lib/supplier-whatsapp";
 import { cancelBooking, restoreBooking, clearAlert } from "./actions";
 
 function formatEuro(value: number) {
@@ -992,7 +993,7 @@ export default async function PrenotazioniPage({ searchParams }: PageProps) {
                     const wChannel = bookingChannelName || "N/A";
                     const wRef = booking.booking_reference || "N/A";
                     const wName = booking.customer_name || "N/A";
-                    const waText = `${payingPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+                    const waText = getCognanelloExperienceLine(booking) + `${payingPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
 
                     const rawSupplier = booking.suppliers;
                     let rawPhone = "";

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { cancelBooking, clearAlert } from "@/app/prenotazioni/actions";
 import { getBookingDisplayNotes } from "@/lib/booking-display-notes";
+import { getCognanelloExperienceLine } from "@/lib/supplier-whatsapp";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -113,7 +114,7 @@ export default function MobileBookingCard({
   const wChannel = bookingChannelName || "N/A";
   const wRef = booking.booking_reference || "-";
   const wName = booking.customer_name || "N/A";
-  const waText = `${payingPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
+  const waText = getCognanelloExperienceLine(booking) + `${payingPax} da te ${wDate} ore ${wTime} ${wChannel} ${wRef} ${wName}`;
 
   const rawSupplier = booking.suppliers;
   let rawPhone = "";

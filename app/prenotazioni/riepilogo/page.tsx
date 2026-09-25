@@ -4,6 +4,7 @@ import Link from "next/link";
 import PrintPdfButton from "@/components/PrintPdfButton";
 import SendSummaryWhatsAppButton from "@/components/SendSummaryWhatsAppButton";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getCognanelloExperienceLine } from "@/lib/supplier-whatsapp";
 
 type PageProps = {
   searchParams: Promise<{
@@ -264,10 +265,11 @@ export default async function RiepilogoPrenotazioniPage({
       const reference = booking.booking_reference || "-";
       const channel = getChannelName(booking) || "-";
       const experience = booking.experience_name || "-";
+      const experienceLine = getCognanelloExperienceLine(booking);
       const bookingCreated = formatDate(booking.booking_created_at);
       const peopleSummary = getPeopleSummaryForWhatsapp(booking);
 
-      return `${peopleSummary} | ${date} ore ${time} | ${customer} | ${reference} | ${channel} | ${experience} | prenotata il ${bookingCreated}`;
+      return `${experienceLine}${peopleSummary} | ${date} ore ${time} | ${customer} | ${reference} | ${channel}${experienceLine ? "" : ` | ${experience}`} | prenotata il ${bookingCreated}`;
     }),
     "",
     `Numero di prenotazioni: ${totalBookings}`,
