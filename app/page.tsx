@@ -5,6 +5,7 @@ import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import NotificationCenter from "@/components/NotificationCenter";
 import CognanelloAvailabilityNotifications from "@/components/CognanelloAvailabilityNotifications";
+import { buildDashboardAgenda } from "@/lib/dashboard-agenda";
 import { getDashboardStats } from "@/lib/dashboard";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
@@ -568,9 +569,6 @@ export default async function Home({ searchParams }: PageProps) {
   const lastDayOfMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
   const todayStr = today.toISOString().split("T")[0];
-  const tenDaysFromNow = new Date(today);
-  tenDaysFromNow.setDate(today.getDate() + 10);
-  const tenDaysFromNowStr = tenDaysFromNow.toISOString().split("T")[0];
 
   const { data: bookings, error } = await loadAllDashboardBookings();
 
@@ -887,7 +885,7 @@ export default async function Home({ searchParams }: PageProps) {
     currentRomeDay
   );
 
-  const prossimePrenotazioni: any[] = [];
+  const agendaDays = buildDashboardAgenda(activeBookings, today);
 
   const expPaxCounts: Record<string, number> = {};
   let experienceStartDate: string | null = null;
@@ -933,10 +931,6 @@ export default async function Home({ searchParams }: PageProps) {
         } else {
           addAmounts(meseAltro, amounts);
         }
-      }
-
-      if (b.booking_date >= todayStr && b.booking_date <= tenDaysFromNowStr) {
-        prossimePrenotazioni.push(b);
       }
     }
   });
@@ -1671,185 +1665,154 @@ export default async function Home({ searchParams }: PageProps) {
           </div>
 
           <div className="order-4 md:order-none">
-          <SectionCard title="Agenda (Prossimi 10 giorni)">
-            <>
-              <div className="space-y-3 md:hidden">
-                {prossimePrenotazioni.map((booking) => {
-                  const isToday = booking.booking_date === todayStr;
-
-                  return (
-                    <div
-                      key={booking.id}
-                      className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div
-                            className={`text-xs font-black uppercase tracking-wide ${
-                              isToday ? "text-slate-900" : "text-zinc-900"
-                            }`}
-                          >
-                            {isToday ? "OGGI" : formatDate(booking.booking_date)}
-                          </div>
-                          <div className="mt-0.5 text-xs text-zinc-500">
-                            {booking.booking_time
-                              ? booking.booking_time.slice(0, 5)
-                              : "-"}
-                          </div>
-                        </div>
-
-                        <Link
-                          href={`/prenotazioni/${booking.id}/modifica`}
-                          className={`rounded-lg px-2.5 py-1 text-[10px] font-bold uppercase ${
-                            booking.customer_payment_status === "paid"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-red-100 text-red-700"
-                          }`}
-                        >
-                          {booking.customer_payment_status === "paid"
-                            ? "Pagato"
-                            : "Incassa"}
-                        </Link>
-                      </div>
-
-                      <div className="mt-3 space-y-1">
-                        <Link
-                          href={`/prenotazioni?highlight=${booking.id}`}
-                          className="block text-sm font-bold text-zinc-900"
-                        >
-                          {booking.customer_name || "Cliente senza nome"}
-                        </Link>
-
-                        <div className="text-xs text-zinc-500">
-                          {booking.experience_name || "Esperienza"}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200">
-                          {booking.total_people || 0} pax
-                        </span>
-
-                        {booking.booking_source ? (
-                          <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-tight text-slate-900">
-                            {booking.booking_source}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {prossimePrenotazioni.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-5 text-center text-sm text-zinc-500">
-                    Nessun arrivo in programma nei prossimi 10 giorni.
-                  </div>
-                )}
-              </div>
-
-              <div className="hidden overflow-hidden md:block">
-                <table className="w-full table-fixed text-left text-sm">
-                  <colgroup>
-                    <col className="w-[50px]" />
-                    <col className="w-[30px]" />
-                    <col className="w-auto" />
-                    <col className="w-[60px]" />
-                  </colgroup>
-                  <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
-                    <tr>
-                      <th className="py-2">Data</th>
-                      <th className="py-2 text-center">Pax</th>
-                      <th className="py-2">Cliente</th>
-                      <th className="py-2 text-right">Stato</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100">
-                    {prossimePrenotazioni.map((booking) => {
-                      const isToday = booking.booking_date === todayStr;
-
-                      return (
-                        <tr
-                          key={booking.id}
-                          className="group transition-colors hover:bg-zinc-50"
-                        >
-                          <td className="py-3 pr-1 align-top">
+          <SectionCard title="Agenda (Prossimi 3 giorni)">
+            <div className="space-y-5">
+              {agendaDays.map((day) => (
+                <div key={day.date} className="min-w-0 space-y-3">
+                  <h3 className="border-b border-zinc-200 pb-1 text-xs font-black uppercase tracking-wide text-zinc-900">
+                    {day.label} &mdash; {formatDate(day.date)}
+                  </h3>
+                  {day.experiences.length === 0 && (
+                    <p className="text-xs text-zinc-500">Nessun arrivo in programma.</p>
+                  )}
+                  {day.experiences.map((experience) => (
+                    <div key={experience.key} className="min-w-0 space-y-2">
+                      <h4 className="break-words text-xs font-bold text-zinc-700">{experience.name}</h4>
+                      <div className="space-y-3 md:hidden">
+                        {experience.bookings.map((booking) => {
+                          return (
                             <div
-                              className={`text-xs font-bold ${
-                                isToday ? "text-slate-900" : "text-zinc-900"
-                              }`}
+                              key={booking.id}
+                              className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-3"
                             >
-                              {isToday
-                                ? "OGGI"
-                                : formatDate(booking.booking_date)}
-                            </div>
-                            <div className="mt-0.5 text-[10px] text-zinc-500">
-                              {booking.booking_time
-                                ? booking.booking_time.slice(0, 5)
-                                : "-"}
-                            </div>
-                          </td>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="mt-0.5 text-xs text-zinc-500">
+                                    {booking.booking_time
+                                      ? booking.booking_time.slice(0, 5)
+                                      : "-"}
+                                  </div>
+                                </div>
 
-                          <td className="py-3 pr-1 text-center align-top">
-                            <div className="text-xs font-bold text-zinc-700">
-                              {booking.total_people}
-                            </div>
-                          </td>
+                                <Link
+                                  href={`/prenotazioni/${booking.id}/modifica`}
+                                  className={`rounded-lg px-2.5 py-1 text-[10px] font-bold uppercase ${
+                                    booking.customer_payment_status === "paid"
+                                      ? "bg-green-100 text-green-700"
+                                      : "bg-red-100 text-red-700"
+                                  }`}
+                                >
+                                  {booking.customer_payment_status === "paid"
+                                    ? "Pagato"
+                                    : "Incassa"}
+                                </Link>
+                              </div>
 
-                          <td className="py-3 pr-2 align-top">
-                            <div className="flex min-w-0 flex-col">
-                              <Link
-                                href={`/prenotazioni?highlight=${booking.id}`}
-                                className="truncate text-[13px] font-bold text-zinc-900 hover:underline"
-                              >
-                                {booking.customer_name}
-                              </Link>
+                              <div className="mt-3 space-y-1">
+                                <Link
+                                  href={`/prenotazioni?highlight=${booking.id}`}
+                                  className="block text-sm font-bold text-zinc-900"
+                                >
+                                  {booking.customer_name || "Cliente senza nome"}
+                                </Link>
+                              </div>
 
-                              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                                <span className="max-w-full truncate text-[11px] text-zinc-500">
-                                  {booking.experience_name}
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-200">
+                                  {booking.total_people || 0} pax
                                 </span>
 
-                                {booking.booking_source && (
-                                  <span className="inline-block shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-tight text-slate-900">
+                                {booking.booking_source ? (
+                                  <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-tight text-slate-900">
                                     {booking.booking_source}
                                   </span>
-                                )}
+                                ) : null}
                               </div>
                             </div>
-                          </td>
+                          );
+                        })}
+                      </div>
 
-                          <td className="py-3 text-right align-top">
-                            <Link
-                              href={`/prenotazioni/${booking.id}/modifica`}
-                              className={`inline-block rounded-lg px-2 py-1 text-[9px] font-bold uppercase transition hover:scale-105 ${
-                                booking.customer_payment_status === "paid"
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-red-100 text-red-700"
-                              }`}
-                            >
-                              {booking.customer_payment_status === "paid"
-                                ? "Pagato"
-                                : "Incassa"}
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                      <div className="hidden overflow-hidden md:block">
+                        <table className="w-full table-fixed text-left text-sm">
+                          <colgroup>
+                            <col className="w-[50px]" />
+                            <col className="w-[30px]" />
+                            <col className="w-auto" />
+                            <col className="w-[60px]" />
+                          </colgroup>
+                          <thead className="border-b border-zinc-200 text-[10px] font-bold uppercase text-zinc-500">
+                            <tr>
+                              <th className="py-2">Ora</th>
+                              <th className="py-2 text-center">Pax</th>
+                              <th className="py-2">Cliente</th>
+                              <th className="py-2 text-right">Stato</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100">
+                            {experience.bookings.map((booking) => {
+                              return (
+                                <tr
+                                  key={booking.id}
+                                  className="group transition-colors hover:bg-zinc-50"
+                                >
+                                  <td className="py-3 pr-1 align-top">
+                                    <div className="mt-0.5 text-[10px] text-zinc-500">
+                                      {booking.booking_time
+                                        ? booking.booking_time.slice(0, 5)
+                                        : "-"}
+                                    </div>
+                                  </td>
 
-                    {prossimePrenotazioni.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={4}
-                          className="py-6 text-center text-xs text-zinc-500"
-                        >
-                          Nessun arrivo in programma nei prossimi 10 giorni.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                                  <td className="py-3 pr-1 text-center align-top">
+                                    <div className="text-xs font-bold text-zinc-700">
+                                      {booking.total_people}
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3 pr-2 align-top">
+                                    <div className="flex min-w-0 flex-col">
+                                      <Link
+                                        href={`/prenotazioni?highlight=${booking.id}`}
+                                        className="truncate text-[13px] font-bold text-zinc-900 hover:underline"
+                                      >
+                                        {booking.customer_name}
+                                      </Link>
+                                      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                                        {booking.booking_source && (
+                                          <span className="inline-block shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-tight text-slate-900">
+                                            {booking.booking_source}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3 text-right align-top">
+                                    <Link
+                                      href={`/prenotazioni/${booking.id}/modifica`}
+                                      className={`inline-block rounded-lg px-2 py-1 text-[9px] font-bold uppercase transition hover:scale-105 ${
+                                        booking.customer_payment_status === "paid"
+                                          ? "bg-green-100 text-green-700"
+                                          : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {booking.customer_payment_status === "paid"
+                                        ? "Pagato"
+                                        : "Incassa"}
+                                    </Link>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
           </SectionCard>
           </div>
         </div>
