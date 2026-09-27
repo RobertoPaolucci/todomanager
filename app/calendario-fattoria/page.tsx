@@ -2,6 +2,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
+import { FattoriaPrintSelection, FattoriaPrintCheckbox } from "@/components/FattoriaPrintSelection";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ type Booking = {
   infants: number | null;
   non_paying_adults: number | null;
   customer_name: string | null;
+  notes: string | null;
   customer_phone: string | null;
   booking_source: string | null;
   channels: { name: string | null } | { name: string | null }[] | null;
@@ -98,7 +100,7 @@ async function loadCurrentBookings() {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabaseServer
       .from("bookings")
-      .select("id, booking_reference, bokun_booking_reference, business_unit_id, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, channels(name)")
+      .select("id, booking_reference, bokun_booking_reference, business_unit_id, booking_date, booking_time, experience_id, experience_name, channel_id, is_cancelled, total_people, adults, children, infants, non_paying_adults, customer_name, customer_phone, booking_source, notes, channels(name)")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
@@ -193,7 +195,13 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
             Impossibile caricare il calendario. Ricarica la pagina per riprovare.
           </p>
         ) : (
-          <>
+          <FattoriaPrintSelection key={month} entries={Array.from(bookingsByDay.entries()).flatMap(([date, rows]) =>
+            rows.map(({ booking, label }) => ({
+              id: booking.id, date, service: label,
+              people: `${peopleCount(booking)} persone`, detail: tooltipPeople(booking),
+              customer: booking.customer_name || "", channel: tooltipChannel(booking), notes: booking.notes,
+            }))
+          )}>
             <div className="grid grid-cols-7 border-t border-zinc-200 bg-zinc-50">
               {["lun", "mar", "mer", "gio", "ven", "sab", "dom"].map((day) => (
                 <div key={day} className="py-3 text-center text-xs font-bold text-zinc-600 sm:text-sm">{day}</div>
@@ -232,9 +240,10 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
                     <ul className="space-y-1.5">
                       {dayBookings.map(({ booking, label, color }) => (
                         <li key={booking.id} className="group/booking relative">
+                          <FattoriaPrintCheckbox id={booking.id} date={key} label={`${peopleCount(booking)} ${label}`} />
                           <Link href={`/prenotazioni/${booking.id}/modifica`} prefetch={false}
                             aria-describedby={`booking-tooltip-${booking.id}`}
-                            className={`peer block rounded-md border px-0.5 py-2 text-[10px] font-semibold leading-snug whitespace-normal [overflow-wrap:anywhere] transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-900 sm:px-1.5 sm:text-xs ${color}`}>
+                            className={`peer block rounded-md border pl-5 pr-0.5 py-2 text-[10px] font-semibold leading-snug whitespace-normal [overflow-wrap:anywhere] transition hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-zinc-900 sm:pl-6 sm:pr-1.5 sm:text-xs ${color}`}>
                             {peopleCount(booking)} {label}
                           </Link>
                           <div
@@ -271,7 +280,7 @@ export default async function CalendarioFattoriaPage({ searchParams }: {
             {bookingsByDay.size === 0 && (
               <p className="border-t border-zinc-200 p-4 text-center text-sm text-zinc-500">Nessuna prenotazione per le esperienze selezionate nel periodo visualizzato.</p>
             )}
-          </>
+          </FattoriaPrintSelection>
         )}
       </section>
     </AppShell>
