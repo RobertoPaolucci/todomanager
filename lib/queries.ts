@@ -1,9 +1,10 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 
 export async function getChannels() {
   const { data, error } = await supabaseServer
     .from("channels")
-    .select("id, name, type")
+    .select("id, name, type, fattura_mensile_fmdq")
     .order("name", { ascending: true });
 
   if (error) {
@@ -21,6 +22,7 @@ export async function getExperiences() {
       name,
       bokun_id,
       supplier_id,
+      business_unit_id,
       supplier_unit_cost,
       notes,
       active,
@@ -33,7 +35,11 @@ export async function getExperiences() {
         id,
         channel_id,
         your_unit_price,
+        your_child_unit_price,
         public_unit_price,
+        public_child_unit_price,
+        supplier_adult_unit_cost,
+        supplier_child_unit_cost,
         currency
       )
     `)
@@ -43,7 +49,11 @@ export async function getExperiences() {
     throw new Error(`Errore caricamento esperienze: ${error.message}`);
   }
 
-  return data;
+  const fmdqKeys = await getFmdqInternalSupplierKeys();
+  return (data || []).map(experience => ({
+    ...experience,
+    is_fmdq_internal_supplier: fmdqKeys.has(`${experience.business_unit_id}:${experience.supplier_id}`),
+  }));
 }
 
 export async function getSuppliers() {

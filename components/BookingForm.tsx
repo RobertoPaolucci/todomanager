@@ -2,11 +2,13 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { createBooking, updateBooking } from "@/app/prenotazioni/actions";
+import { applyBookingAgreement, parseAgreedUnitPrice, assertFmdqAgreementRates, isDirectFmdqAgreementContext, roundBookingMoney } from "@/lib/booking-pricing";
 
 type Channel = {
   id: number;
   name: string;
   type: string;
+  fattura_mensile_fmdq?: boolean | null;
 };
 
 type ExperiencePrice = {
@@ -14,6 +16,10 @@ type ExperiencePrice = {
   channel_id: number;
   your_unit_price: number;
   public_unit_price: number;
+  your_child_unit_price?: number | null;
+  public_child_unit_price?: number | null;
+  supplier_adult_unit_cost?: number | null;
+  supplier_child_unit_cost?: number | null;
   currency: string;
 };
 
@@ -23,6 +29,7 @@ type Experience = {
   supplier_id: number | null;
   supplier_unit_cost: number;
   is_group_pricing: boolean;
+  is_fmdq_internal_supplier?: boolean;
   experience_channel_prices: ExperiencePrice[];
 };
 
@@ -35,19 +42,6 @@ type BookingFormProps = {
   viewOnly?: boolean;
   returnTo?: string;
 };
-
-const PAYMENT_METHOD_OPTIONS = [
-  "Bonifico Bancario",
-  "Carta di Credito",
-  "Contanti",
-  "POS",
-  "PayPal",
-  "Stripe",
-  "Satispay",
-  "Assegno",
-  "Compensazione",
-  "Altro",
-];
 
 function normalizeText(value?: string | null) {
   return String(value ?? "").trim().toLowerCase();
@@ -141,15 +135,15 @@ export default function BookingForm({
   const [manualYourPrice, setManualYourPrice] = useState(0);
   const [manualPublicPrice, setManualPublicPrice] = useState(0);
 
-  const [supplierPaymentStatus, setSupplierPaymentStatus] = useState(
-    initialData?.supplier_payment_status ?? "pending"
-  );
-  const [supplierAmountPaid, setSupplierAmountPaid] = useState(
-    String(initialData?.supplier_amount_paid ?? 0)
-  );
-  const [supplierPaymentMethod, setSupplierPaymentMethod] = useState(
-    initialData?.supplier_payment_method ?? "Bonifico Bancario"
-  );
+  const [agreedPrice, setAgreedPrice] = useState(String(initialData?.agreed_unit_price ?? ""));
+  const [agreementResetNotice, setAgreementResetNotice] = useState(false);
+  const [agreementConfirmed, setAgreementConfirmed] = useState(false);
+
+  function resetAgreementForContextChange() {
+    if (agreedPrice !== "") setAgreementResetNotice(true);
+    setAgreedPrice("");
+    setAgreementConfirmed(false);
+  }
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -269,7 +263,7 @@ export default function BookingForm({
   const totalCapacity = adults + children + infants + nonPayingAdults;
   const pricingPax = adults + children;
 
-  const yourUnitPrice = selectedPrice
+  const automaticYourPrice = selectedPrice
     ? Number(selectedPrice.your_unit_price)
     : manualYourPrice;
 
@@ -277,7 +271,7 @@ export default function BookingForm({
     ? Number(selectedPrice.public_unit_price)
     : manualPublicPrice;
 
-  const supplierUnitCost = Number(selectedExperience?.supplier_unit_cost || 0);
+  const automaticSupplierCost = Number(selectedExperience?.supplier_unit_cost || 0);
   const isGroupPricing = selectedExperience?.is_group_pricing === true;
   const isQuadExperience = normalizeText(selectedExperience?.name).includes("quad");
 
@@ -287,23 +281,49 @@ export default function BookingForm({
       : 1
     : pricingPax;
 
-  const totalToYou = yourUnitPrice * groupPricingUnits;
-
-  const totalCustomer = publicUnitPrice * groupPricingUnits;
-
-  const totalSupplierCost = supplierUnitCost * groupPricingUnits;
-
-  const marginTotal = totalToYou - totalSupplierCost;
-
-  const supplierAmountPaidNumber = Number(
-    String(supplierAmountPaid || "0").replace(",", ".")
-  );
-
-  const showSupplierPaymentMethod =
-    supplierPaymentStatus !== "pending" || supplierAmountPaidNumber > 0;
+  const yourChildPrice = Number(selectedPrice?.your_child_unit_price ?? automaticYourPrice);
+  const publicChildPrice = Number(selectedPrice?.public_child_unit_price ?? publicUnitPrice);
+  const supplierChildCost = Number(selectedPrice?.supplier_child_unit_cost ?? automaticSupplierCost);
+  const directFmdq = isDirectFmdqAgreementContext(
+    selectedExperience?.is_fmdq_internal_supplier === true, selectedChannel?.fattura_mensile_fmdq);
+  const automatic = {
+    your_unit_price: automaticYourPrice,
+    supplier_unit_cost: automaticSupplierCost,
+    total_to_you: roundBookingMoney(isGroupPricing ? automaticYourPrice * groupPricingUnits : adults * automaticYourPrice + children * yourChildPrice),
+    total_supplier_cost: roundBookingMoney(isGroupPricing ? automaticSupplierCost * groupPricingUnits : adults * automaticSupplierCost + children * supplierChildCost),
+    margin_total: 0,
+  };
+  automatic.margin_total = roundBookingMoney(automatic.total_to_you - automatic.total_supplier_cost);
+  let effective = automatic;
+  let agreementError: string | null = null;
+  let agreement: number | null = null;
+  try {
+    agreement = parseAgreedUnitPrice(agreedPrice);
+    if (agreement !== null && !selectedPrice) throw new Error("Configura prima il listino del canale.");
+    if (agreement !== null && directFmdq) assertFmdqAgreementRates({
+      yourAdult: automaticYourPrice, yourChild: yourChildPrice,
+      supplierAdult: automaticSupplierCost, supplierChild: supplierChildCost,
+      invoiceAdult: Number(selectedPrice?.supplier_adult_unit_cost ?? automaticSupplierCost),
+      invoiceChild: Number(selectedPrice?.supplier_child_unit_cost ?? selectedPrice?.supplier_adult_unit_cost ?? automaticSupplierCost),
+    });
+    effective = applyBookingAgreement(automatic, { price: agreement, adults, children, isGroupPricing, directFmdq });
+  } catch (error) {
+    agreementError = error instanceof Error ? error.message : "Prezzo concordato non valido.";
+  }
+  const yourUnitPrice = effective.your_unit_price;
+  const supplierUnitCost = effective.supplier_unit_cost;
+  const totalToYou = effective.total_to_you;
+  const totalSupplierCost = effective.total_supplier_cost;
+  const marginTotal = effective.margin_total;
+  const totalCustomer = roundBookingMoney(isGroupPricing
+    ? publicUnitPrice * groupPricingUnits : adults * publicUnitPrice + children * publicChildPrice);
 
   async function handleFormAction(formData: FormData) {
     setErrorMessage(null);
+    if (agreementError) {
+      setErrorMessage(agreementError);
+      return;
+    }
 
     const customerName = String(formData.get("customer_name") || "").trim();
 
@@ -332,9 +352,6 @@ export default function BookingForm({
   const inputBaseStyle =
     "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
 
-  const compactInputStyle =
-    "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-[16px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
-
   const dateTimeInputStyle =
     "w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-[15px] sm:text-sm outline-none transition-colors focus:border-zinc-500 disabled:bg-zinc-50";
 
@@ -346,9 +363,6 @@ export default function BookingForm({
 
   const nonPayingInputStyle =
     "w-full rounded-xl border border-amber-200 bg-white px-2 py-2 text-center text-[18px] text-amber-800 sm:px-4 sm:text-sm outline-none focus:border-amber-500";
-
-  const readonlyCompactStyle =
-    "w-full rounded-xl border border-zinc-200 bg-zinc-100/80 px-4 py-2.5 text-[16px] font-bold text-zinc-600 sm:text-sm";
 
   const sectionClass =
     "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5 md:col-span-2";
@@ -406,7 +420,7 @@ export default function BookingForm({
               required
               disabled={viewOnly}
               value={channelId}
-              onChange={(e) => setChannelId(e.target.value)}
+              onChange={(e) => { resetAgreementForContextChange(); setChannelId(e.target.value); }}
               className={inputBaseStyle}
             >
               <option value="">Seleziona canale</option>
@@ -593,7 +607,7 @@ export default function BookingForm({
               required
               disabled={viewOnly}
               value={experienceId}
-              onChange={(e) => setExperienceId(e.target.value)}
+              onChange={(e) => { resetAgreementForContextChange(); setExperienceId(e.target.value); }}
               className={inputBaseStyle}
             >
               <option value="">Seleziona esperienza</option>
@@ -726,108 +740,26 @@ export default function BookingForm({
       </div>
 
       <div className={sectionClass}>
-        <div className="mb-4">
-          <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
-            Pagamenti e calcoli
-          </h3>
-          <p className="mt-1 text-xs text-zinc-500 sm:text-sm">
-            Totali automatici e stato incasso/saldo
-          </p>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <div className="min-w-0">
-            <label className="mb-1 block text-sm font-medium text-zinc-700">
-              Lordo Totale Autom.
-            </label>
-            <input
-              name="total_amount"
-              type="number"
-              step="0.01"
-              value={totalCustomer}
-              readOnly
-              className={readonlyCompactStyle}
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="mb-1 block text-sm font-medium text-zinc-700">
-              Pagamento Agenzia
-            </label>
-            <select
-              name="customer_payment_status"
-              disabled={viewOnly}
-              defaultValue={initialData?.customer_payment_status ?? "pending"}
-              className={compactInputStyle}
-            >
-              <option value="pending">Da incassare</option>
-              <option value="partial">Acconto</option>
-              <option value="paid">Incassato</option>
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="min-w-0">
-              <label className="mb-1 block text-xs font-medium text-zinc-500">
-                Stato Forn.
-              </label>
-              <select
-                name="supplier_payment_status"
-                disabled={viewOnly}
-                value={supplierPaymentStatus}
-                onChange={(e) => setSupplierPaymentStatus(e.target.value)}
-                className={compactInputStyle}
-              >
-                <option value="pending">In attesa</option>
-                <option value="partial">Parziale</option>
-                <option value="paid">Saldato</option>
-              </select>
-            </div>
-
-            <div className="min-w-0">
-              <label className="mb-1 block text-xs font-medium text-zinc-500">
-                Pagato (€)
-              </label>
-              <input
-                name="supplier_amount_paid"
-                type="number"
-                step="0.01"
-                disabled={viewOnly}
-                value={supplierAmountPaid}
-                onChange={(e) => setSupplierAmountPaid(e.target.value)}
-                className={compactInputStyle}
-              />
-            </div>
-          </div>
-        </div>
-
-        {showSupplierPaymentMethod && (
-          <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-            <div className="grid gap-3 md:max-w-sm">
-              <div className="min-w-0">
-                <label className="mb-1 block text-sm font-medium text-zinc-700">
-                  Metodo di pagamento fornitore
-                </label>
-                <select
-                  name="supplier_payment_method"
-                  disabled={viewOnly}
-                  value={supplierPaymentMethod}
-                  onChange={(e) => setSupplierPaymentMethod(e.target.value)}
-                  className={compactInputStyle}
-                >
-                  {PAYMENT_METHOD_OPTIONS.map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1 text-xs text-zinc-500">
-                  Usato per registrare il movimento nello storico pagamenti.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        <label htmlFor="agreed_unit_price" className="mb-1 block text-sm font-medium text-zinc-700">
+          Prezzo concordato per pagante (€)
+        </label>
+        <input id="agreed_unit_price" name="agreed_unit_price" type="number" min="0" max="9999999999.99" step="0.01"
+          value={agreedPrice} disabled={viewOnly || isGroupPricing}
+          onChange={(event) => { setAgreedPrice(event.target.value); setAgreementConfirmed(true); }}
+          aria-describedby="agreed-price-help" className={inputBaseStyle} />
+        {isGroupPricing && <input type="hidden" name="agreed_unit_price" value="" />}
+        <input type="hidden" name="confirm_agreed_price_context" value={agreementConfirmed ? "yes" : "no"} />
+        <p id="agreed-price-help" className="mt-1 text-xs text-zinc-500">
+          {isGroupPricing ? "Non disponibile per esperienze a gruppi o quad." : "Lascia vuoto per usare il prezzo automatico."}
+        </p>
+        {agreementResetNotice && <p role="status" className="mt-2 text-sm text-amber-800">
+          Prezzo concordato rimosso dopo il cambio di esperienza o canale. Per un nuovo accordo, inseriscilo nuovamente.
+        </p>}
+        {agreementError && <p role="alert" className="mt-2 text-sm text-red-700">{agreementError}</p>}
+        {agreement !== null && !agreementError && <p className="mt-2 text-sm font-semibold text-emerald-700">
+          Prezzo concordato attivo: {pricingPax} paganti × €{agreement.toFixed(2)} = €{totalToYou.toFixed(2)}.
+          {directFmdq ? " Tariffa e fatturazione FMDQ incluse." : " Applicato al netto a te; costo fornitore e lordo restano da listino."}
+        </p>}
       </div>
 
       <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2 sm:p-5">

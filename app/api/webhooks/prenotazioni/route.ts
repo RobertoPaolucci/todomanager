@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
+import { applyBookingAgreement, parseAgreedUnitPrice, assertPersonAgreement, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
+import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 import {
   BokunIdentityError,
   findBokunBooking,
@@ -1218,6 +1220,15 @@ export async function POST(req: Request) {
       totalPeople: incomingTotalPeople > 0 ? incomingTotalPeople : null,
     });
     const existing = existingMatch?.booking || null;
+    const agreement = parseAgreedUnitPrice(existing?.agreed_unit_price);
+    if (agreement !== null && !isCancelled && (
+      Number(existing?.experience_id) !== Number(experience.id) ||
+      Number(existing?.channel_id) !== channelId ||
+      Number(existing?.supplier_id) !== Number(experience.supplier_id) ||
+      Number(existing?.business_unit_id) !== businessUnitId
+    )) {
+      throw new BokunIdentityError("Prenotazione con prezzo concordato: cambio di contesto da verificare manualmente.");
+    }
 
     // A cart containing another product must be reviewed, never overwritten.
     if (bokunBookingReference && existing && Number(existing.experience_id) !== Number(experience.id)) {
@@ -1320,7 +1331,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const economicData = priceRule
+    let economicData = priceRule
       ? calculateBookingEconomics({
           priceRule,
           channelId,
@@ -1331,6 +1342,29 @@ export async function POST(req: Request) {
           infants: finalInfants,
         })
       : {};
+
+    if (agreement !== null && !isCancelled) {
+      assertPersonAgreement(agreement, Boolean(experience.is_group_pricing));
+      const [keys, channelResult] = await Promise.all([
+        getFmdqInternalSupplierKeys(),
+        supabaseServer.from("channels").select("fattura_mensile_fmdq").eq("id", channelId).single(),
+      ]);
+      if (channelResult.error || !channelResult.data) throw new Error("Impossibile verificare il canale del prezzo concordato.");
+      if (!priceRule) throw new Error("Listino mancante per la prenotazione con prezzo concordato.");
+      economicData = {
+        ...applyBookingAgreement(calculateBookingEconomics({
+          priceRule, channelId, sourceTotalPrice: body.source_total_price,
+          isGroupPricing: Boolean(experience.is_group_pricing),
+          adults: finalAdults, children: finalChildren, infants: finalInfants,
+        }), {
+          price: agreement, adults: finalAdults, children: finalChildren,
+          isGroupPricing: Boolean(experience.is_group_pricing),
+          directFmdq: isDirectFmdqAgreementContext(keys.has(`${businessUnitId}:${experience.supplier_id}`), channelResult.data.fattura_mensile_fmdq),
+        }),
+        // A manual agreement is not a Bókun source total.
+        total_to_you_source: null,
+      };
+    }
 
     // Display reference only: matching and channel resolution are already complete.
     const todoProductReference = bokunBookingReference && existing &&
@@ -1367,7 +1401,8 @@ export async function POST(req: Request) {
       adults: finalAdults,
       children: finalChildren,
       infants: finalInfants,
-      total_people: finalAdults + finalChildren + finalInfants,
+      total_people: finalAdults + finalChildren + finalInfants +
+        (agreement !== null ? Number(existing?.non_paying_adults || 0) : 0),
 
       is_cancelled: isCancelled,
       ...(isCancelled ? {} : economicData),
@@ -1416,15 +1451,21 @@ export async function POST(req: Request) {
           .from("bookings")
           .update(updatePayload)
           .eq("id", existing.id);
+        // A concurrent manual agreement must not be overwritten by stale economics.
+        updateQuery = existing.agreed_unit_price == null
+          ? updateQuery.is("agreed_unit_price", null)
+          : updateQuery.eq("agreed_unit_price", existing.agreed_unit_price);
         if (bokunBookingReference) {
           updateQuery = updateQuery.eq("business_unit_id", businessUnitId)
             .eq("bokun_booking_reference", bokunBookingReference);
         }
-        const { error: updateError } = await updateQuery;
+        const { data: updated, error: updateError } = await updateQuery.select("id").maybeSingle();
 
         if (updateError) {
           throw new Error(updateError.message);
         }
+        if (!updated) return NextResponse.json({ success: false, retryable: true,
+          error: "Prezzo concordato modificato durante l'aggiornamento: ripetere l'evento." }, { status: 409 });
 
         actionResult = "updated";
       }

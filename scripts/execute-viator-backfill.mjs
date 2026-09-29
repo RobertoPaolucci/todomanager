@@ -23,9 +23,12 @@ const guardFields = ['id', 'booking_reference', 'bokun_booking_reference', 'busi
   'is_cancelled', 'cancelled_at', 'total_to_you_source', 'updated_at'];
 
 export function guardedQuery(before) {
+  if (before.agreed_unit_price != null) throw fail('AGREED_PRICE_PROTECTED');
   if (!Number.isSafeInteger(before.id) || before.id < 1 || before.channel_id !== 2 || before.is_cancelled !== false
     || before.cancelled_at !== null) throw fail('INVALID_PATCH_SCOPE');
   const params = new URLSearchParams({ select: '*' });
+  // Guard even snapshots created before the new column existed. Fail closed if migration is missing.
+  params.set('agreed_unit_price', 'is.null');
   for (const field of guardFields) {
     if (!Object.hasOwn(before, field) || before[field] === undefined || (before[field] !== null && !['string', 'number', 'boolean'].includes(typeof before[field]))) {
       throw fail('MISSING_GUARD_FIELD');

@@ -24,6 +24,7 @@ export async function readCurrent({ url, key, fetchImpl = fetch, fullRows = fals
   }
   const schema = await get('/rest/v1/');
   const sourceColumnPresent = Boolean(schema.definitions?.bookings?.properties?.total_to_you_source);
+  const agreementColumnPresent = Boolean(schema.definitions?.bookings?.properties?.agreed_unit_price);
   const fields = 'id,booking_reference,bokun_booking_reference,business_unit_id,channel_id,experience_id,experience_name,booking_date,adults,children,infants,total_people,total_to_you,total_supplier_cost,margin_total,is_cancelled,cancelled_at';
   async function all(table, select) {
     const rows = []; let lastId = 0;
@@ -38,7 +39,7 @@ export async function readCurrent({ url, key, fetchImpl = fetch, fullRows = fals
   }
   async function capture() {
     const results = await Promise.allSettled([
-      all('bookings', fullRows ? '*' : fields + (sourceColumnPresent ? ',total_to_you_source' : '')),
+      all('bookings', fullRows ? '*' : fields + (sourceColumnPresent ? ',total_to_you_source' : '') + (agreementColumnPresent ? ',agreed_unit_price' : '')),
       all('experiences', 'id,bokun_id'),
     ]);
     if (results.some(r => r.status === 'rejected')) throw new Error('Read-only capture failed');

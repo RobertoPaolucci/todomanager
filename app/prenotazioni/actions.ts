@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
+import { applyBookingAgreement, parseAgreedUnitPrice, assertPersonAgreement, assertFmdqAgreementRates, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
+import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 
 function parseNumber(value: FormDataEntryValue | null, fallback = 0) {
   const raw = String(value ?? "").replace(",", ".").trim();
@@ -335,7 +337,7 @@ export async function createBooking(formData: FormData) {
 
   const { data: channel, error: channelError } = await supabaseServer
     .from("channels")
-    .select("id, name, type")
+    .select("id, name, type, fattura_mensile_fmdq")
     .eq("id", channel_id)
     .single();
 
@@ -350,13 +352,20 @@ export async function createBooking(formData: FormData) {
   const customer_name = raw_customer_name || channel.name;
   const experience_name = String(experience.name || "").trim();
   const isGroupPricing = experience.is_group_pricing === true;
+  let agreed_unit_price: number | null;
+  try {
+    agreed_unit_price = parseAgreedUnitPrice(formData.get("agreed_unit_price"));
+    assertPersonAgreement(agreed_unit_price, isGroupPricing);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Prezzo concordato non valido." };
+  }
   const business_unit_id = Number(experience.business_unit_id);
-  const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
+  let supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
   const { data: priceRowData } = await supabaseServer
     .from("experience_channel_prices")
     .select(
-      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost"
+      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, supplier_adult_unit_cost"
     )
     .eq("experience_id", experience_id)
     .eq("channel_id", channel_id)
@@ -387,6 +396,7 @@ export async function createBooking(formData: FormData) {
       supplier_unit_cost
     );
   } else {
+    if (agreed_unit_price !== null) return { error: "Configura prima il listino: il prezzo concordato non crea né modifica prezzi canale." };
     your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
     public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
 
@@ -428,7 +438,7 @@ export async function createBooking(formData: FormData) {
     pricingPax,
   });
 
-  const total_to_you = isGroupPricing
+  let total_to_you = isGroupPricing
     ? round2(your_unit_price * groupPricingUnits)
     : round2(adults * your_unit_price + children * your_child_unit_price);
 
@@ -436,13 +446,32 @@ export async function createBooking(formData: FormData) {
     ? round2(public_unit_price * groupPricingUnits)
     : round2(adults * public_unit_price + children * public_child_unit_price);
 
-  const total_supplier_cost = isGroupPricing
+  let total_supplier_cost = isGroupPricing
     ? round2(supplier_unit_cost * groupPricingUnits)
     : round2(
         adults * supplier_unit_cost + children * supplier_child_unit_cost
       );
 
-  const margin_total = round2(total_to_you - total_supplier_cost);
+  let margin_total = round2(total_to_you - total_supplier_cost);
+
+  if (agreed_unit_price !== null) {
+    try {
+      const keys = await getFmdqInternalSupplierKeys();
+      const directFmdq = isDirectFmdqAgreementContext(
+        keys.has(`${business_unit_id}:${experience.supplier_id}`), channel.fattura_mensile_fmdq);
+      if (directFmdq) assertFmdqAgreementRates({
+        yourAdult: your_unit_price, yourChild: your_child_unit_price,
+        supplierAdult: supplier_unit_cost, supplierChild: supplier_child_unit_cost,
+        invoiceAdult: Number(priceRowData?.supplier_adult_unit_cost ?? supplier_unit_cost),
+        invoiceChild: Number(priceRowData?.supplier_child_unit_cost ?? priceRowData?.supplier_adult_unit_cost ?? supplier_unit_cost),
+      });
+      const effective = applyBookingAgreement({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total },
+        { price: agreed_unit_price, adults, children, isGroupPricing, directFmdq });
+      ({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total } = effective);
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Impossibile applicare il prezzo concordato." };
+    }
+  }
 
   const shouldAutoGenerateBookingReference =
     isAutoReferenceChannel(channel) && !manual_booking_reference;
@@ -483,6 +512,8 @@ export async function createBooking(formData: FormData) {
         total_people,
         pax: total_people,
         total_amount: total_customer,
+        agreed_unit_price,
+        ...(agreed_unit_price !== null ? { total_to_you_source: null } : {}),
         your_unit_price,
         public_unit_price,
         supplier_unit_cost,
@@ -604,16 +635,16 @@ export async function updateBooking(formData: FormData) {
 
   const total_people = adults + children + infants + non_paying_adults;
 
-  const customer_payment_status = String(
+  let customer_payment_status: string | null = String(
     formData.get("customer_payment_status") || "pending"
   ).trim();
-  const supplier_payment_status = String(
+  let supplier_payment_status: string | null = String(
     formData.get("supplier_payment_status") || "pending"
   ).trim();
   const supplier_payment_method =
     String(formData.get("supplier_payment_method") || "").trim() ||
     "Bonifico Bancario";
-  const supplier_amount_paid = parseNumber(
+  let supplier_amount_paid: number | null = parseNumber(
     formData.get("supplier_amount_paid"),
     0
   );
@@ -625,7 +656,7 @@ export async function updateBooking(formData: FormData) {
     await supabaseServer
       .from("bookings")
       .select(
-        "id, supplier_id, booking_reference, customer_name, total_supplier_cost, supplier_payment_status, supplier_amount_paid, is_cancelled"
+        "id, supplier_id, booking_reference, customer_name, total_supplier_cost, customer_payment_status, supplier_payment_status, supplier_amount_paid, is_cancelled, experience_id, channel_id, agreed_unit_price"
       )
       .eq("id", id)
       .single();
@@ -633,6 +664,12 @@ export async function updateBooking(formData: FormData) {
   if (currentBookingError || !currentBooking) {
     return { error: "Prenotazione non trovata." };
   }
+
+  // Absent payment inputs are not an instruction to reset or resynchronise payments.
+  if (!formData.has("customer_payment_status")) customer_payment_status = currentBooking.customer_payment_status;
+  if (!formData.has("supplier_payment_status")) supplier_payment_status = currentBooking.supplier_payment_status;
+  if (!formData.has("supplier_amount_paid")) supplier_amount_paid = currentBooking.supplier_amount_paid;
+  const paymentEditRequested = formData.has("supplier_payment_status") || formData.has("supplier_amount_paid");
 
   const { data: experience, error: experienceError } = await supabaseServer
     .from("experiences")
@@ -655,7 +692,7 @@ export async function updateBooking(formData: FormData) {
 
   const { data: channel, error: channelError } = await supabaseServer
     .from("channels")
-    .select("id, name, type")
+    .select("id, name, type, fattura_mensile_fmdq")
     .eq("id", channel_id)
     .single();
 
@@ -670,13 +707,25 @@ export async function updateBooking(formData: FormData) {
   const customer_name = raw_customer_name || channel.name;
   const experience_name = String(experience.name || "").trim();
   const isGroupPricing = experience.is_group_pricing === true;
+  let agreed_unit_price: number | null;
+  try {
+    agreed_unit_price = parseAgreedUnitPrice(formData.has("agreed_unit_price")
+      ? formData.get("agreed_unit_price") : currentBooking.agreed_unit_price);
+    const contextChanged = Number(currentBooking.experience_id) !== experience_id || Number(currentBooking.channel_id) !== channel_id;
+    if (contextChanged && agreed_unit_price !== null && formData.get("confirm_agreed_price_context") !== "yes") {
+      return { error: "Esperienza o canale cambiati: rimuovi il prezzo concordato o confermalo esplicitamente per la nuova selezione." };
+    }
+    assertPersonAgreement(agreed_unit_price, isGroupPricing);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Prezzo concordato non valido." };
+  }
   const business_unit_id = Number(experience.business_unit_id);
-  const supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
+  let supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
   const { data: priceRow } = await supabaseServer
     .from("experience_channel_prices")
     .select(
-      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost"
+      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, supplier_adult_unit_cost"
     )
     .eq("experience_id", experience_id)
     .eq("channel_id", channel_id)
@@ -707,6 +756,7 @@ export async function updateBooking(formData: FormData) {
       supplier_unit_cost
     );
   } else {
+    if (agreed_unit_price !== null) return { error: "Configura prima il listino: il prezzo concordato non crea né modifica prezzi canale." };
     your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
     public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
 
@@ -748,7 +798,7 @@ export async function updateBooking(formData: FormData) {
     pricingPax,
   });
 
-  const total_to_you = isGroupPricing
+  let total_to_you = isGroupPricing
     ? round2(your_unit_price * groupPricingUnits)
     : round2(adults * your_unit_price + children * your_child_unit_price);
 
@@ -756,13 +806,32 @@ export async function updateBooking(formData: FormData) {
     ? round2(public_unit_price * groupPricingUnits)
     : round2(adults * public_unit_price + children * public_child_unit_price);
 
-  const total_supplier_cost = isGroupPricing
+  let total_supplier_cost = isGroupPricing
     ? round2(supplier_unit_cost * groupPricingUnits)
     : round2(
         adults * supplier_unit_cost + children * supplier_child_unit_cost
       );
 
-  const margin_total = round2(total_to_you - total_supplier_cost);
+  let margin_total = round2(total_to_you - total_supplier_cost);
+
+  if (agreed_unit_price !== null) {
+    try {
+      const keys = await getFmdqInternalSupplierKeys();
+      const directFmdq = isDirectFmdqAgreementContext(
+        keys.has(`${business_unit_id}:${experience.supplier_id}`), channel.fattura_mensile_fmdq);
+      if (directFmdq) assertFmdqAgreementRates({
+        yourAdult: your_unit_price, yourChild: your_child_unit_price,
+        supplierAdult: supplier_unit_cost, supplierChild: supplier_child_unit_cost,
+        invoiceAdult: Number(priceRow?.supplier_adult_unit_cost ?? supplier_unit_cost),
+        invoiceChild: Number(priceRow?.supplier_child_unit_cost ?? priceRow?.supplier_adult_unit_cost ?? supplier_unit_cost),
+      });
+      const effective = applyBookingAgreement({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total },
+        { price: agreed_unit_price, adults, children, isGroupPricing, directFmdq });
+      ({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total } = effective);
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Impossibile applicare il prezzo concordato." };
+    }
+  }
 
   const oldPaidAmount = getEffectiveSupplierPaid({
     is_cancelled: currentBooking.is_cancelled,
@@ -794,7 +863,7 @@ export async function updateBooking(formData: FormData) {
       rawReference: raw_booking_reference,
     });
 
-    const { error } = await supabaseServer
+    let updateQuery = supabaseServer
       .from("bookings")
       .update({
         business_unit_id,
@@ -817,6 +886,9 @@ export async function updateBooking(formData: FormData) {
         total_people,
         pax: total_people,
         total_amount: total_customer,
+        agreed_unit_price,
+        ...(agreed_unit_price !== null || currentBooking.agreed_unit_price != null
+          ? { total_to_you_source: null } : {}),
         your_unit_price,
         public_unit_price,
         supplier_unit_cost,
@@ -824,12 +896,20 @@ export async function updateBooking(formData: FormData) {
         total_customer,
         total_supplier_cost,
         margin_total,
-        customer_payment_status,
-        supplier_payment_status,
-        supplier_amount_paid,
+        ...(formData.has("customer_payment_status") ? { customer_payment_status } : {}),
+        ...(formData.has("supplier_payment_status") ? { supplier_payment_status } : {}),
+        ...(formData.has("supplier_amount_paid") ? { supplier_amount_paid } : {}),
         notes,
       })
       .eq("id", id);
+
+    updateQuery = currentBooking.agreed_unit_price == null
+      ? updateQuery.is("agreed_unit_price", null)
+      : updateQuery.eq("agreed_unit_price", currentBooking.agreed_unit_price);
+    const { data: updated, error } = await updateQuery.select("id").maybeSingle();
+    if (!error && !updated) {
+      return { error: "Il prezzo concordato è cambiato durante il salvataggio. Ricarica la prenotazione prima di riprovare." };
+    }
 
     if (!error) {
       finalBookingReference = booking_reference;
@@ -860,7 +940,7 @@ export async function updateBooking(formData: FormData) {
     return { error: `Errore durante la modifica: ${updateError.message}` };
   }
 
-  await syncSupplierPaymentsFromBookingChange({
+  if (paymentEditRequested) await syncSupplierPaymentsFromBookingChange({
     bookingId: id,
     bookingReference:
       finalBookingReference ?? currentBooking.booking_reference ?? null,
@@ -885,6 +965,11 @@ export async function updateBooking(formData: FormData) {
     revalidatePath(`/pagamenti/${newSupplierId}`);
   }
 
+  revalidatePath("/");
+  revalidatePath("/report");
+  revalidatePath("/fatturazione-fmdq");
+  if (newSupplierId) revalidatePath(`/fornitori/${newSupplierId}/report`);
+  if (oldSupplierId && oldSupplierId !== newSupplierId) revalidatePath(`/fornitori/${oldSupplierId}/report`);
   redirect(returnTo);
 }
 

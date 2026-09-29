@@ -78,6 +78,8 @@ function harness(seed = []) {
       if (name === 'next/cache') return { revalidatePath() {} };
       if (name === 'next/server') return { NextResponse: { json: Response.json } };
       if (name === '@/lib/bokun-booking-identity') return load(resolve('lib/bokun-booking-identity.ts'));
+      if (name === '@/lib/booking-pricing') return load(resolve('lib/booking-pricing.ts'));
+      if (name === '@/lib/booking-pricing-server') return load(resolve('lib/booking-pricing-server.ts'));
       throw new Error(`Unexpected dependency: ${name}`);
     };
     vm.runInNewContext(outputText, {

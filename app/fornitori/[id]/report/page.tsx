@@ -4,6 +4,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
+import { agreedTotal, parseAgreedUnitPrice, reportPayingAdults } from "@/lib/booking-pricing";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -26,6 +27,7 @@ type BookingRow = {
 };
 
 type EconomicBookingRow = BookingRow & {
+  agreed_unit_price: number | null;
   experience_id: number | null;
   channel_id: number | null;
   booking_time: string | null;
@@ -159,10 +161,7 @@ function getPayingPeopleCount(booking: BookingRow) {
 }
 
 function getPayingAdultCount(booking: BookingRow) {
-  return Math.max(
-    Number(booking.adults || 0) - Number(booking.non_paying_adults || 0),
-    0
-  );
+  return reportPayingAdults(booking);
 }
 
 function isGroupPricingBooking(booking: EconomicBookingRow) {
@@ -176,6 +175,8 @@ function isGroupPricingBooking(booking: EconomicBookingRow) {
 }
 
 function getBookingIncome(booking: EconomicBookingWithChannelPrice) {
+  const agreement = parseAgreedUnitPrice(booking.agreed_unit_price);
+  if (agreement !== null) return agreedTotal(getPayingAdultCount(booking), Number(booking.children || 0), agreement);
   if (isGroupPricingBooking(booking)) {
     return moneyValue(booking.total_to_you);
   }
@@ -782,7 +783,7 @@ export default async function SupplierReportPage({
     supabaseServer
       .from("bookings")
       .select(
-        "id, experience_id, channel_id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled, experience:experiences(is_group_pricing)"
+        "id, agreed_unit_price, experience_id, channel_id, booking_date, booking_time, customer_name, experience_name, booking_reference, booking_source, total_people, adults, children, infants, non_paying_adults, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, supplier_amount_paid, customer_payment_status, supplier_payment_status, is_cancelled, experience:experiences(is_group_pricing)"
       )
       .eq("supplier_id", supplierId)
       .gte("booking_date", economicMonthStart)

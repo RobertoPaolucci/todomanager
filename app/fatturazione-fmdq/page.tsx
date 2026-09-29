@@ -7,6 +7,8 @@ import InvoiceReportButton, {
 } from "@/components/InvoiceReportButton";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
+import { effectiveFmdqInvoiceRates, parseAgreedUnitPrice, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
+import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 import { saveFmdqInvoice } from "./actions";
 
@@ -454,7 +456,7 @@ export default async function FatturazioneFmdqPage({
       supabaseServer
         .from("experiences")
         .select(
-          "id, name, supplier_unit_cost"
+          "id, name, supplier_unit_cost, is_group_pricing"
         ),
     ]);
 
@@ -484,6 +486,8 @@ export default async function FatturazioneFmdqPage({
 
   const bookings =
     bookingsRes.data || [];
+  const fmdqKeys = bookings.some(booking => booking.agreed_unit_price != null)
+    ? await getFmdqInternalSupplierKeys() : new Set<string>();
 
   const invoices =
     invoicesRes.data || [];
@@ -591,7 +595,7 @@ export default async function FatturazioneFmdqPage({
               0
           );
 
-        const adultUnitCost =
+        let adultUnitCost =
           specificAdultCost ??
           baseAdultCost;
 
@@ -600,9 +604,19 @@ export default async function FatturazioneFmdqPage({
             channelPrice?.supplier_child_unit_cost
           );
 
-        const childUnitCost =
+        let childUnitCost =
           specificChildCost ??
           adultUnitCost;
+        const effectiveRates = effectiveFmdqInvoiceRates({
+          price: parseAgreedUnitPrice(booking.agreed_unit_price),
+          directFmdq: isDirectFmdqAgreementContext(
+            fmdqKeys.has(`${booking.business_unit_id}:${booking.supplier_id}`), channel?.fattura_mensile_fmdq),
+          isGroupPricing: experience?.is_group_pricing === true,
+          adult: adultUnitCost, child: childUnitCost,
+        });
+        adultUnitCost = effectiveRates.adult;
+        childUnitCost = effectiveRates.child;
+
 
         const adults =
           getAdults(booking);
