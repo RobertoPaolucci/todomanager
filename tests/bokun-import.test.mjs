@@ -21,6 +21,8 @@ function harness(seed = []) {
     import_logs: [], payment_reconciliation_imports: [],
   };
   let forcedInsertError = null;
+  let experienceError = null;
+  const errors = [];
   let emptyUpdate = false;
   const db = { from(table) {
     let predicates = [], maximum = Infinity, sorting = null, operation = 'select', payload;
@@ -42,6 +44,7 @@ function harness(seed = []) {
       then(ok, fail) { return Promise.resolve().then(() => execute(false)).then(ok, fail); },
     };
     function execute(single) {
+      if (table === 'experiences' && experienceError) return { data: null, error: experienceError };
       if (operation === 'update' && emptyUpdate) return { data: single ? null : [], error: null };
       let rows = tables[table].filter(row => predicates.every(p => p(row)));
       if (sorting) rows.sort((a, b) => (a[sorting[0]] - b[sorting[0]]) * (sorting[1] ? 1 : -1));
@@ -79,14 +82,15 @@ function harness(seed = []) {
     };
     vm.runInNewContext(outputText, {
       exports: loadedModule.exports, module: loadedModule, require: requireMock,
-      console: { log() {}, error() {} }, Date, Set, Map, Error,
+      console: { log() {}, error(...args) { errors.push(args); } }, Date, Set, Map, Error,
     }, { filename: path });
     cache.set(path, loadedModule.exports);
     return loadedModule.exports;
   }
   const route = load(resolve(routeFile));
   return {
-    tables, load,
+    tables, load, errors,
+    failExperience(error) { experienceError = error; },
     failInsert(error) { forcedInsertError = error; },
     returnEmptyUpdate() { emptyUpdate = true; },
     async send(overrides = {}) {
@@ -104,6 +108,166 @@ function harness(seed = []) {
     },
   };
 }
+
+for (const action of ['BOOKING_CONFIRMED', 'BOOKING_MODIFIED', 'BOOKING_CANCELLED']) {
+  test(`experience diagnostics distinguish absent, technical and duplicate: ${action}`, async () => {
+    for (const kind of ['absent', 'technical', 'duplicate']) {
+      const h = harness();
+      if (kind === 'absent') h.tables.experiences.length = 0;
+      if (kind === 'technical') h.failExperience({ code: 'XX123', message: 'internal detail', details: 'private detail', hint: 'private hint' });
+      if (kind === 'duplicate') h.tables.experiences.push({ ...h.tables.experiences[0], id: 99, business_unit_id: 1 });
+      const before = structuredClone(h.tables);
+      const result = await h.send({ action });
+      assert.equal(result.status, kind === 'absent' ? 404 : 500);
+      if (kind === 'absent') assert.deepEqual(result.body, {
+        error: 'Esperienza non trovata', bokun_id_ricevuto: '100', bokun_id_risolto: '100',
+      });
+      else assert.notEqual(result.body.error, 'Esperienza non trovata');
+      assert.doesNotMatch(JSON.stringify(result.body), /XX123|internal detail|private/);
+      assert.ok(h.errors.length > 0);
+      if (kind === 'technical') assert.match(JSON.stringify(h.errors), /XX123.*internal detail.*private detail.*private hint/);
+      if (kind === 'duplicate') assert.match(JSON.stringify(h.errors), /CARDINALITY/);
+      assert.deepEqual(h.tables, before);
+    }
+  });
+}
+
+test('experience alias retains received/resolved IDs in missing diagnostics', async () => {
+  const h = harness();
+  const result = await h.send({ bokun_id: '115190' });
+  assert.equal(result.status, 404);
+  assert.equal(result.body.bokun_id_ricevuto, '115190');
+  assert.equal(result.body.bokun_id_risolto, '956472');
+});
+
+const widgetPayload = {
+  bokun_channel_id: 'DIRECT_ONLINE_WIDGETS',
+  bokun_booking_reference: 'TOD-104300123', booking_reference: 'TOD-T146861412',
+  externalBookingReference: '', channel_id: null, booking_source: undefined,
+  action: 'BOOKING_CONFIRMED', source_total_price: 90,
+};
+
+for (const [unit, channel] of [[2, 4], [1, 6]]) {
+  for (const incoming of [undefined, null, 1]) {
+    test(`new widget BU${unit} incomplete channel ${incoming} resolves ${channel}`, async () => {
+      const h = harness(); h.tables.experiences[0].business_unit_id = unit;
+      const result = await h.send({ ...widgetPayload, channel_id: incoming });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.channel_id, channel);
+      assert.equal(h.tables.bookings[0].channel_id, channel);
+      assert.notEqual(h.tables.bookings[0].booking_source, 'Direct');
+      assert.equal(h.tables.bookings[0].total_to_you, 40);
+      assert.equal(Object.hasOwn(h.tables.bookings[0], 'bokun_channel_id'), false);
+    });
+  }
+}
+
+for (const [marker, channel] of [['OTA_VIATOR', 2], ['OTA_GETYOURGUIDE', 3], ['OTA_FREEDOME', 5], [undefined, 1]]) {
+  test(`non-widget ${marker} retains explicit channel ${channel}`, async () => {
+    const h = harness();
+    const result = await h.send({ ...widgetPayload, bokun_channel_id: marker, channel_id: channel });
+    assert.equal(result.status, 200);
+    assert.equal(h.tables.bookings[0].channel_id, channel);
+  });
+}
+
+for (const channel of [4, 6]) {
+  test(`existing widget ${channel} survives incomplete events and repeated modifications regardless of BU convention`, async () => {
+    const h = harness();
+    assert.equal((await h.send({ ...widgetPayload, channel_id: channel })).status, 200);
+    for (const incoming of [null, undefined, 1, channel]) {
+      const payload = { ...widgetPayload, channel_id: incoming, action: 'BOOKING_MODIFIED', booking_time: '12:00' };
+      assert.equal((await h.send(payload)).status, 200);
+      assert.equal(h.tables.bookings[0].channel_id, channel);
+      const before = structuredClone(h.tables.bookings);
+      assert.equal((await h.send(payload)).body.action, 'unchanged');
+      assert.deepEqual(h.tables.bookings, before);
+    }
+    const before = structuredClone(h.tables.bookings[0]);
+    const cancelled = await h.send({ ...widgetPayload, action: 'BOOKING_CANCELLED' });
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.matched_booking_id, before.id);
+    const { is_cancelled, notes, ...preserved } = h.tables.bookings[0];
+    assert.equal(is_cancelled, true);
+    assert.match(notes, /Prenotazione cancellata/);
+    assert.deepEqual({ ...preserved, is_cancelled: before.is_cancelled, notes: before.notes }, before);
+    assert.equal((await h.send({ ...widgetPayload, action: 'BOOKING_CANCELLED' })).body.action, 'unchanged');
+  });
+}
+
+for (const action of ['BOOKING_CONFIRMED', 'BOOKING_MODIFIED', 'BOOKING_CANCELLED']) {
+  test(`simulated 2175 Direct widget requires review without writes: ${action}`, async () => {
+    const h = harness();
+    h.tables.experiences[0].bokun_id = '999224';
+    const payload = { ...widgetPayload, bokun_id: 999224 };
+    await h.send({ ...payload, bokun_channel_id: undefined, channel_id: 1 });
+    Object.assign(h.tables.bookings[0], { id: 2175, total_to_you: 0, total_customer: 0, total_supplier_cost: 0, margin_total: 0 });
+    const before = structuredClone(h.tables);
+    for (const channel_id of [null, 1, 4, 6]) {
+      const result = await h.send({ ...payload, channel_id, action });
+      assert.equal(result.status, 409);
+      assert.equal(result.body.reason, 'bokun_channel_conflict');
+      assert.equal(result.body.updated_existing_booking, false);
+      assert.deepEqual(h.tables, before);
+    }
+    assert.match(JSON.stringify(h.errors), /WIDGET CHANNEL CONFLICT/);
+  });
+
+  for (const ota of [2, 3, 5]) {
+    test(`widget explicit or stored OTA ${ota} conflicts before writes: ${action}`, async () => {
+      const h = harness();
+      await h.send(widgetPayload);
+      const before = structuredClone(h.tables);
+      assert.equal((await h.send({ ...widgetPayload, channel_id: ota, action })).status, 409);
+      assert.deepEqual(h.tables, before);
+      h.tables.bookings[0].channel_id = ota;
+      const stored = structuredClone(h.tables);
+      assert.equal((await h.send({ ...widgetPayload, action })).status, 409);
+      assert.deepEqual(h.tables, stored);
+    });
+  }
+}
+
+test('simulated 2240 retains Todointheworld and economics with new widget marker', async () => {
+  const h = await todoHarness();
+  await h.send(todoPayload);
+  const before = structuredClone(h.tables.bookings);
+  for (const action of ['BOOKING_CONFIRMED', 'BOOKING_MODIFIED']) {
+    const result = await h.send({ ...todoPayload, bokun_channel_id: 'DIRECT_ONLINE_WIDGETS', channel_id: null, booking_source: undefined, action });
+    assert.equal(result.body.action, 'unchanged');
+    assert.deepEqual(h.tables.bookings, before);
+  }
+});
+
+test('widget new Bókun identity rebooks separately and old cancellation never touches replacement', async () => {
+  const h = harness(); await h.send(widgetPayload);
+  await h.send({ ...widgetPayload, action: 'BOOKING_CANCELLED' });
+  const old = structuredClone(h.tables.bookings[0]);
+  assert.equal((await h.send({ ...widgetPayload, bokun_booking_reference: 'TOD-NEW' })).body.action, 'created');
+  await h.send({ ...widgetPayload, action: 'BOOKING_CANCELLED' });
+  assert.deepEqual(h.tables.bookings[0], old);
+  assert.equal(h.tables.bookings[1].is_cancelled, false);
+});
+
+test('widget requires canonical identity and rejects unsupported BU without an explicit widget channel', async () => {
+  const h = harness();
+  assert.equal((await h.send({ ...widgetPayload, bokun_booking_reference: '' })).status, 409);
+  h.tables.experiences[0].business_unit_id = 3;
+  assert.equal((await h.send(widgetPayload)).status, 409);
+  assert.equal(h.tables.bookings.length, 0);
+  // Tuscany Horse Trekking's explicit channel remains authoritative in any BU.
+  assert.equal((await h.send({ ...widgetPayload, channel_id: 4 })).status, 200);
+  assert.equal(h.tables.bookings[0].channel_id, 4);
+});
+
+test('widget rejects a conflicting explicit 4/6 and strong OTA source/reference signals', async () => {
+  const h = harness(); await h.send(widgetPayload);
+  const before = structuredClone(h.tables);
+  for (const override of [{ channel_id: 6 }, { booking_source: 'Viator' }, { externalBookingReference: 'GYG123' }]) {
+    assert.equal((await h.send({ ...widgetPayload, ...override })).status, 409);
+    assert.deepEqual(h.tables, before);
+  }
+});
 
 const cancellationPayload = {
   bokun_id: '958091', bokun_booking_reference: '', externalBookingReference: '',

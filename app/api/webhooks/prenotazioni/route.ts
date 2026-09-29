@@ -298,6 +298,65 @@ function resolveChannel(body: any, bookingReference: string) {
   return null;
 }
 
+class BokunChannelError extends Error {}
+
+// This convention belongs only to our Bókun widgets. Legacy/OTA resolution
+// deliberately remains separate, and product references never decide a widget.
+function resolveWidgetChannel(
+  body: Record<string, unknown>,
+  businessUnitId: number,
+  existing: ExistingBooking | null,
+  bokunBookingReference: string,
+) {
+  const incomingId = toOptionalNumber(body.channel_id);
+  const existingId = existing?.channel_id;
+  const fail: (message: string) => never = (message) => {
+    console.error("BOKUN WIDGET CHANNEL CONFLICT", {
+      message, bokun_booking_reference: bokunBookingReference,
+      business_unit_id: businessUnitId, booking_id: existing?.id ?? null,
+      incoming_channel_id: body.channel_id ?? null,
+      existing_channel_id: existingId ?? null,
+      bokun_channel_id: body.bokun_channel_id,
+    });
+    throw new BokunChannelError(message);
+  };
+
+  if (!bokunBookingReference) {
+    fail("Widget Bókun senza identità canonica: inviare bokun_booking_reference.");
+  }
+  const otaIds = [2, 3, 5];
+  const sourceIds = [body.booking_source, body.channel_name, body.seller,
+    body.seller_name, body.source, body.origin, body.vendor, body.channel]
+    .map(value => detectChannelIdFromText(cleanString(value)));
+  const otaReference = [body.externalBookingReference, body.external_booking_reference,
+    body.booking_reference, existing?.booking_reference]
+    .some(value => /^(GYG|VIA)/i.test(cleanString(value)));
+  if (otaIds.includes(incomingId ?? 0) || otaIds.includes(existingId ?? 0) ||
+      sourceIds.some(id => otaIds.includes(id ?? 0)) || otaReference) {
+    fail("DIRECT_ONLINE_WIDGETS in conflitto con un canale OTA: revisione necessaria.");
+  }
+  if (hasValue(body.channel_id) && ![1, 4, 6].includes(incomingId ?? 0)) {
+    fail("Canale interno non valido per DIRECT_ONLINE_WIDGETS: revisione necessaria.");
+  }
+  // A legacy Make fallback of 1 is insufficient evidence only when the new
+  // widget marker is present. Never reinterpret a stored Direct booking.
+  const explicitId = incomingId === 4 || incomingId === 6 ? incomingId : null;
+  if (existing) {
+    if (existingId !== 4 && existingId !== 6) {
+      fail("Canale della booking esistente ambiguo per il widget: revisione necessaria; nessuna correzione automatica.");
+    }
+    if (explicitId !== null && explicitId !== existingId) {
+      fail("Canale widget esplicito diverso dalla booking esistente: revisione necessaria.");
+    }
+    return { channelId: existingId, bookingSource: getBookingSourceFromChannelId(existingId) };
+  }
+  const channelId = explicitId ?? (businessUnitId === 2 ? 4 : businessUnitId === 1 ? 6 : null);
+  if (channelId === null) {
+    fail("Widget senza canale determinabile per questa business unit: revisione necessaria.");
+  }
+  return { channelId, bookingSource: getBookingSourceFromChannelId(channelId) };
+}
+
 async function getExperienceChannelPrice(params: {
   experienceId: number;
   channelId: number;
@@ -986,19 +1045,33 @@ export async function POST(req: Request) {
       });
     }
 
-    const { data: experience, error: experienceError } = await supabaseServer
+    const { data: experiences, error: experienceError } = await supabaseServer
       .from("experiences")
       .select(
         "id, name, supplier_id, is_group_pricing, supplier_unit_cost, business_unit_id"
       )
       .eq("bokun_id", resolvedBokunId)
-      .single();
+      .limit(2);
 
-    if (experienceError || !experience) {
+    if (experienceError) {
+      console.error("BOKUN EXPERIENCE LOOKUP ERROR", {
+        bokun_id_ricevuto: rawBokunId, bokun_id_risolto: resolvedBokunId,
+        error: experienceError,
+      });
+      return NextResponse.json({ error: "Errore tecnico nella risoluzione dell'esperienza" }, { status: 500 });
+    }
+    if (experiences && experiences.length > 1) {
+      console.error("BOKUN EXPERIENCE CARDINALITY ERROR", {
+        bokun_id_ricevuto: rawBokunId, bokun_id_risolto: resolvedBokunId,
+        experiences: experiences.map(item => ({ id: item.id, business_unit_id: item.business_unit_id })),
+      });
+      return NextResponse.json({ error: "Risoluzione dell'esperienza ambigua" }, { status: 500 });
+    }
+    const experience = experiences?.[0];
+    if (!experience) {
       console.error("ESPERIENZA NON TROVATA", {
         bokun_id_ricevuto: rawBokunId,
         bokun_id_risolto: resolvedBokunId,
-        errore_supabase: experienceError?.message || null,
       });
 
       return NextResponse.json(
@@ -1019,6 +1092,7 @@ export async function POST(req: Request) {
     }
 
     const businessUnitId = requireBokunBusinessUnit(experience.business_unit_id);
+    const isWidget = cleanString(body.bokun_channel_id).toUpperCase() === "DIRECT_ONLINE_WIDGETS";
 
     // Cancellation identity is authoritative: never enter legacy/heuristic matching.
     if (isCancelled && bokunBookingReference) {
@@ -1047,6 +1121,7 @@ export async function POST(req: Request) {
         }, { status: 409 });
       }
 
+      if (isWidget) resolveWidgetChannel(body, businessUnitId, booking, bokunBookingReference);
       const unchanged = booking.is_cancelled === true;
       if (!unchanged) {
         const notes = stripSystemAlert(cleanString(booking.notes));
@@ -1089,8 +1164,10 @@ export async function POST(req: Request) {
     const channelReference = hasGetYourGuideReference(identifiedBokunBooking?.booking_reference)
       ? identifiedBokunBooking!.booking_reference!
       : incomingBookingReference;
-    const resolvedChannel = resolveChannel(body, channelReference) ||
-      (identifiedBokunBooking && resolveChannel(identifiedBokunBooking, identifiedBokunBooking.booking_reference || ""));
+    const resolvedChannel = isWidget
+      ? resolveWidgetChannel(body, businessUnitId, identifiedBokunBooking, bokunBookingReference)
+      : resolveChannel(body, channelReference) ||
+        (identifiedBokunBooking && resolveChannel(identifiedBokunBooking, identifiedBokunBooking.booking_reference || ""));
 
     if (!resolvedChannel) {
       console.error(
@@ -1421,6 +1498,12 @@ export async function POST(req: Request) {
           },
     });
   } catch (error: any) {
+    if (error instanceof BokunChannelError) {
+      return NextResponse.json({
+        success: false, updated_existing_booking: false,
+        error: error.message, reason: "bokun_channel_conflict",
+      }, { status: 409 });
+    }
     if (error instanceof BokunIdentityError) {
       return NextResponse.json({ success: false, error: error.message, reason: "bokun_identity_required" }, { status: 409 });
     }
