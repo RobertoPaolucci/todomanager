@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as observation from '../lib/google-calendar-observation.mjs';
+import * as canonicalSync from '../lib/google-calendar-canonical-sync.mjs';
 
 function harness(existing = null) {
   const writes = [];
@@ -49,6 +51,8 @@ function harness(existing = null) {
         if (name === '@supabase/supabase-js') return { createClient: () => db };
         if (name === '@/lib/supabase-server') return { supabaseServer: db };
         if (name === '@/lib/google-calendar-tuscan-escape') return load('lib/google-calendar-tuscan-escape.ts');
+        if (name === '@/lib/google-calendar-observation.mjs') return observation;
+        if (name === '@/lib/google-calendar-canonical-sync.mjs') return canonicalSync;
         throw new Error(`Unexpected import ${name}`);
       },
     });

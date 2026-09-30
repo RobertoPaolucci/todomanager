@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { isTuscanEscapeBlockRow, TUSCAN_ESCAPE_STAGING_DEFAULTS } from "@/lib/google-calendar-tuscan-escape";
+import { normalizeGoogleCalendarObservation } from "@/lib/google-calendar-observation.mjs";
+import { syncGoogleCalendarObservation } from "@/lib/google-calendar-canonical-sync.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -886,6 +888,28 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
+    // Canonical identity comes only from authenticated Google fields, never from
+    // the staging booking-reference fallback. Canonical errors must not stop staging.
+    try {
+      const receivedAt = new Date().toISOString();
+      const googleObservation = normalizeGoogleCalendarObservation(payload, {
+        receivedAt,
+        sourceVerified: true,
+      });
+      const canonical = await syncGoogleCalendarObservation(supabase, {
+        gcal_uid: googleObservation.googleEventId,
+        uid_semantics: "event_id",
+        original_title: title || undefined,
+        event_date: start.isValid ? start.bookingDate : undefined,
+        event_time: start.isValid && !start.isAllDay ? start.bookingTime : undefined,
+        google_observation: googleObservation,
+      });
+      if (canonical.review_reasons.length) {
+        console.warn("Google Calendar canonical sync:", canonical.action, canonical.review_reasons);
+      }
+    } catch {
+      console.error("Google Calendar canonical sync failed; staging continues.");
+    }
     const existingByGcalUid = await getExistingStagingRowByGcalUid(
       supabase,
       gcalUid
