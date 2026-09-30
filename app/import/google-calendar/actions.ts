@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   canRetryTuscanEscapeImport,
-  isTuscanEscapeRow,
+  isTuscanEscapeBlockRow,
   TUSCAN_ESCAPE_NAME,
   TUSCAN_ESCAPE_EXPERIENCE,
   TUSCAN_ESCAPE_STAGING_DEFAULTS,
@@ -157,14 +157,14 @@ function customerMatchKey(value: string | null | undefined) {
 }
 
 function getResolvedCustomerName(row: StagingRow) {
-  if (isTuscanEscapeRow(row)) return TUSCAN_ESCAPE_NAME;
+  if (isTuscanEscapeBlockRow(row)) return TUSCAN_ESCAPE_NAME;
   if (isItalyOnABudgetRow(row)) return "Italy";
   if (isTuscanEscapeGuideRow(row)) return "Tuscan";
   return String(row.customer_name ?? "").trim() || "Da verificare";
 }
 
 function getImportPeople(row: StagingRow) {
-  if (isTuscanEscapeRow(row)) {
+  if (isTuscanEscapeBlockRow(row)) {
     return { adults: 1, children: 0, infants: 0, nonPayingAdults: 0 };
   }
   let adults = Number(row.adults ?? 0);
@@ -226,7 +226,7 @@ async function findExistingByReference(bookingReference: string) {
 
 async function findPossibleDuplicate(row: StagingRow) {
   // Il nome generico del blocco non identifica un cliente: conta il riferimento.
-  if (isTuscanEscapeRow(row)) return null;
+  if (isTuscanEscapeBlockRow(row)) return null;
   const rowTime = normalizeTime(row.booking_time);
   const people = getImportPeople(row);
   const rowCustomerKey = customerMatchKey(getResolvedCustomerName(row));
@@ -314,7 +314,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
   const rows = (rowsData ?? []) as StagingRow[];
 
   for (const row of rows) {
-    const isTuscanEscape = isTuscanEscapeRow(row);
+    const isTuscanEscapeBlock = isTuscanEscapeBlockRow(row);
     if (row.import_status === "gcal_cancelled") {
       continue;
     }
@@ -357,7 +357,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       continue;
     }
 
-    const experience = isTuscanEscape
+    const experience = isTuscanEscapeBlock
       ? {
           id: TUSCAN_ESCAPE_STAGING_DEFAULTS.experience_id,
           name: TUSCAN_ESCAPE_EXPERIENCE,
@@ -366,10 +366,10 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
           is_group_pricing: false,
         }
       : await getExperience(row.experience_id);
-    const channel = isTuscanEscape
+    const channel = isTuscanEscapeBlock
       ? { id: TUSCAN_ESCAPE_STAGING_DEFAULTS.channel_id, name: TUSCAN_ESCAPE_NAME }
       : await getChannel(row.channel_id);
-    const price = isTuscanEscape
+    const price = isTuscanEscapeBlock
       ? { your_unit_price: 0, public_unit_price: 0 }
       : await getPrice(row.experience_id, row.channel_id);
 
@@ -393,8 +393,8 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const yourUnitPrice = toNumber(price.your_unit_price);
     const publicUnitPrice = toNumber(price.public_unit_price);
-    const supplierUnitCost = isTuscanEscape ? 0 : toNumber(experience.supplier_unit_cost);
-    const isGroupPricing = isTuscanEscape ? false : Boolean(experience.is_group_pricing);
+    const supplierUnitCost = isTuscanEscapeBlock ? 0 : toNumber(experience.supplier_unit_cost);
+    const isGroupPricing = isTuscanEscapeBlock ? false : Boolean(experience.is_group_pricing);
 
     const totalToYou = isGroupPricing
       ? yourUnitPrice
@@ -424,7 +424,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         total_amount: totalCustomer,
         customer_payment_status: "pending",
         supplier_payment_status: "pending",
-        booking_source: isTuscanEscape ? TUSCAN_ESCAPE_NAME : channel.name,
+        booking_source: isTuscanEscapeBlock ? TUSCAN_ESCAPE_NAME : channel.name,
         booking_reference: row.booking_reference,
         booking_created_at: new Date().toISOString().slice(0, 10),
         booking_time: normalizeTime(row.booking_time),
@@ -446,7 +446,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         supplier_amount_paid: 0,
         infants,
         was_modified: false,
-        business_unit_id: isTuscanEscape
+        business_unit_id: isTuscanEscapeBlock
           ? TUSCAN_ESCAPE_BUSINESS_UNIT_ID
           : FMDQ_BUSINESS_UNIT_ID,
         non_paying_adults: nonPayingAdults,
@@ -459,7 +459,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       continue;
     }
 
-    if (isTuscanEscape) {
+    if (isTuscanEscapeBlock) {
       const { error } = await supabaseServer
         .from("google_calendar_import_staging")
         .update({

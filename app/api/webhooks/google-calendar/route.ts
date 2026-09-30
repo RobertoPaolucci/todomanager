@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
-import { TUSCAN_ESCAPE_STAGING_DEFAULTS } from "@/lib/google-calendar-tuscan-escape";
+import { isTuscanEscapeBlockRow, TUSCAN_ESCAPE_STAGING_DEFAULTS } from "@/lib/google-calendar-tuscan-escape";
 
 export const dynamic = "force-dynamic";
 
@@ -868,12 +868,10 @@ export async function POST(request: NextRequest) {
 
     const gcalUid = getEventId(payload);
     const title = getTitle(payload);
-    const isTuscanEscape = [
-      payload.title,
-      payload.summary,
-      payload.description,
-      payload.notes,
-    ].some((value) => normalize(value).includes("tuscan escape"));
+    const isTuscanEscapeBlock = isTuscanEscapeBlockRow({
+      original_title: title,
+      notes: payload.notes || payload.description,
+    });
     const status = getStatus(payload);
     const start = parseStart(payload);
     const gcalUpdatedAt = getGoogleCalendarUpdatedAt(payload);
@@ -919,7 +917,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (!title && !isTuscanEscape) {
+    if (!title && !isTuscanEscapeBlock) {
       return NextResponse.json(
         { ok: true, skipped: true, reason: "Titolo vuoto." },
         { status: 200 }
@@ -941,7 +939,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Tuscan Escape puo essere un blocco provvisorio senza partecipanti.
-    const people = isTuscanEscape
+    const people = isTuscanEscapeBlock
       ? { adults: 1, children: 0, infants: 0 }
       : parsePeople(title);
 
@@ -952,26 +950,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const experienceId = isTuscanEscape
+    const experienceId = isTuscanEscapeBlock
       ? TUSCAN_ESCAPE_STAGING_DEFAULTS.experience_id
       : detectExperienceId(title);
 
-    if (!experienceId && !isTuscanEscape) {
+    if (!experienceId && !isTuscanEscapeBlock) {
       return NextResponse.json(
         { ok: true, skipped: true, reason: "Esperienza non riconosciuta." },
         { status: 200 }
       );
     }
 
-    const channels = isTuscanEscape ? [] : await getChannels(supabase);
-    const channelLabel = isTuscanEscape
+    const channels = isTuscanEscapeBlock ? [] : await getChannels(supabase);
+    const channelLabel = isTuscanEscapeBlock
       ? "Tuscan Escape"
       : detectChannelLabel(title);
-    const channelId = isTuscanEscape
+    const channelId = isTuscanEscapeBlock
       ? TUSCAN_ESCAPE_STAGING_DEFAULTS.channel_id
       : await findChannelId({ channels, label: channelLabel });
 
-    if (!channelId && !isTuscanEscape) {
+    if (!channelId && !isTuscanEscapeBlock) {
       return NextResponse.json(
         {
           ok: true,
@@ -982,11 +980,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const customerName = isTuscanEscape
+    const customerName = isTuscanEscapeBlock
       ? "Tuscan Escape"
       : extractCustomerName(title, channelLabel);
     const bookingReference = extractBookingReference(title, gcalUid);
-    const nonPayingAdults = isTuscanEscape ? 0 : extractNonPayingAdults(title);
+    const nonPayingAdults = isTuscanEscapeBlock ? 0 : extractNonPayingAdults(title);
 
     const existingByBookingReference = existingByGcalUid?.id
       ? null
@@ -1014,7 +1012,7 @@ export async function POST(request: NextRequest) {
 
     let importStatus = nextStatusForExisting(existing);
     // Recupera i blocchi falliti prima del mapping, senza riaprire prenotazioni collegate.
-    if (isTuscanEscape && existing?.import_status === "needs_review" &&
+    if (isTuscanEscapeBlock && existing?.import_status === "needs_review" &&
       !existing.imported_booking_id) {
       importStatus = "pending";
     }

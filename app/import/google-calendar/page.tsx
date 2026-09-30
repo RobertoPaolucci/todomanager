@@ -7,7 +7,7 @@ import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   canRetryTuscanEscapeImport,
-  isTuscanEscapeRow,
+  isTuscanEscapeBlockRow,
   TUSCAN_ESCAPE_EXPERIENCE,
   TUSCAN_ESCAPE_NAME,
   TUSCAN_ESCAPE_STAGING_DEFAULTS,
@@ -1575,7 +1575,7 @@ export default async function GoogleCalendarImportPage({
     .order("id", { ascending: true });
 
   const stagingRowsRaw = ((stagingData ?? []) as StagingRow[]).map((row) =>
-    isTuscanEscapeRow(row) ? { ...row, ...TUSCAN_ESCAPE_STAGING_DEFAULTS } : row
+    isTuscanEscapeBlockRow(row) ? { ...row, ...TUSCAN_ESCAPE_STAGING_DEFAULTS } : row
   );
 
   const { data: bookingsData } = await supabaseServer
@@ -1708,7 +1708,7 @@ export default async function GoogleCalendarImportPage({
   }
 
   const rowsWithComputedStatus: ComputedStagingRow[] = stagingRows.map((row) => {
-    const isTuscanEscape = isTuscanEscapeRow(row);
+    const isTuscanEscapeBlock = isTuscanEscapeBlockRow(row);
     const existingByReference = existingReferenceMap.get(row.booking_reference);
     const existingByImportedId = row.imported_booking_id
       ? existingIdMap.get(row.imported_booking_id)
@@ -1769,7 +1769,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stesso riferimento";
     } else if (
       canReevaluateMatching &&
-      !isTuscanEscape &&
+      !isTuscanEscapeBlock &&
       referenceMatchFromGoogleTitle
     ) {
       computedStatus = "already_exists";
@@ -1777,7 +1777,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stesso riferimento trovato nel titolo Google Calendar";
     } else if (
       canReevaluateMatching &&
-      !isTuscanEscape &&
+      !isTuscanEscapeBlock &&
       possibleDuplicate
     ) {
       computedStatus = "possible_duplicate";
@@ -1785,7 +1785,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stessa data, ora, esperienza, canale e persone";
     } else if (
       canReevaluateMatching &&
-      !isTuscanEscape &&
+      !isTuscanEscapeBlock &&
       probableMatch
     ) {
       computedStatus = "probable_match";
@@ -1793,7 +1793,7 @@ export default async function GoogleCalendarImportPage({
       matchReason = "stessa ora, esperienza e canale, ma persone diverse";
     } else if (
       canReevaluateMatching &&
-      !isTuscanEscape &&
+      !isTuscanEscapeBlock &&
       probableNameMatch
     ) {
       computedStatus = "probable_match";
@@ -2036,7 +2036,7 @@ export default async function GoogleCalendarImportPage({
                   const todoBooking = comparisonRow.todoBooking;
 
                   const experienceName =
-                    googleRow && isTuscanEscapeRow(googleRow)
+                    googleRow && isTuscanEscapeBlockRow(googleRow)
                       ? TUSCAN_ESCAPE_EXPERIENCE
                       : googleRow?.experience_id !== null &&
                     googleRow?.experience_id !== undefined
@@ -2045,7 +2045,7 @@ export default async function GoogleCalendarImportPage({
                       : "Da verificare";
 
                   const channelName =
-                    googleRow && isTuscanEscapeRow(googleRow)
+                    googleRow && isTuscanEscapeBlockRow(googleRow)
                       ? TUSCAN_ESCAPE_NAME
                       : googleRow?.channel_id !== null &&
                     googleRow?.channel_id !== undefined

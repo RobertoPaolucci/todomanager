@@ -19,9 +19,11 @@ type TuscanEscapeSource = {
   booking_source?: string | null;
 };
 
-export function isTuscanEscapeRow(row: TuscanEscapeSource) {
-  return [row.original_title, row.notes, row.customer_name, row.booking_source]
-    .some((value) => /tuscan\s+escape/i.test(value ?? ""));
+export function isTuscanEscapeBlockRow(row: TuscanEscapeSource) {
+  // Il titolo originale prevale sulle note; canale e cliente non identificano un blocco.
+  const title = String(row.original_title ?? "").trim();
+  const source = (title || String(row.notes ?? "")).replace(/\s+/g, " ").trim();
+  return /^tuscan\s+escape(?:\s+t|\s*-\s*blocco\s+data)?$/i.test(source);
 }
 
 export function canRetryTuscanEscapeImport(
@@ -30,6 +32,6 @@ export function canRetryTuscanEscapeImport(
     imported_booking_id: number | null;
   }
 ) {
-  return isTuscanEscapeRow(row) &&
+  return isTuscanEscapeBlockRow(row) &&
     row.import_status === "needs_review" && !row.imported_booking_id;
 }
