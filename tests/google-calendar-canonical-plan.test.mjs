@@ -51,8 +51,9 @@ test("move date and preserve ALL historical fields; functions do not mutate inpu
   const before = structuredClone({ current, incoming });
   const result = plan(incoming, [current]);
   assert.equal(result.identity.event_id, 1);
-  assert.equal(result.proposed.event_date, "2026-10-10");
-  assert.equal(result.proposed.effective_total_guests, 8);
+  assert.equal(result.candidate.event_date, "2026-10-10");
+  assert.equal(result.candidate.effective_total_guests, 8);
+  assert.equal(result.proposed.event_date, current.event_date); // unverified chronology blocks it
   for (const field of Object.keys(current).filter(key => key.startsWith("historical_"))) assert.deepEqual(result.proposed[field], current[field]);
   assert.deepEqual({ current, incoming }, before);
 });
@@ -67,7 +68,7 @@ test("verified iCalUID occurrence matches only its immutable scope even when dat
 test("identical replay has no differences, independent of workflow state", () => {
   const input = observation();
   const first = plan(input, [event()]);
-  const replay = plan(input, [first.proposed]);
+  const replay = plan(input, [first.candidate]);
   assert.equal(replay.identity.outcome, "match");
   assert.deepEqual(replay.differences, {});
   assert.deepEqual(first, plan(input, [event()]));
@@ -90,13 +91,14 @@ test("workflow states are never Google confirmation/cancellation; retained histo
 test("explicit payload status and persisted cancellation markers have named provenance", () => {
   for (const value of ["confirmed", "tentative", "cancelled"]) assert.equal(status({ gcal_event_status: value }).value, value);
   assert.equal(status({ gcal_event_status: "canceled" }).value, "cancelled");
-  assert.equal(status({ import_status: "gcal_cancelled" }).value, "cancelled");
+  assert.equal(status({ import_status: "gcal_cancelled" }).value, null);
   assert.equal(status({ import_status: "ignored", notes: "🔴 Evento cancellato da Google Calendar\n4 pranzo" }).value, "cancelled");
   assert.equal(status({ notes: "cliente vuole cancellare" }).certainty, "unproven");
   const minimal = plan({ gcal_uid: plain, gcal_event_status: "cancelled" }, [event()]);
   assert.equal(minimal.proposed.event_date, "2026-09-01");
   assert.equal(minimal.proposed.original_title, "2 pranzo");
-  assert.equal(minimal.proposed.gcal_event_status, "cancelled");
+  assert.equal(minimal.candidate.gcal_event_status, "cancelled");
+  assert.equal(minimal.proposed.gcal_event_status, "unknown");
   assert.equal(minimal.proposed.effective_total_guests, 2);
   assert.equal(minimal.differences.effective_total_guests, undefined);
 });
@@ -104,10 +106,11 @@ test("multiple observations of one identity are flagged, never collapsed by arbi
   const rows = [observation(), observation({ id: 41, gcal_uid: encoded, original_title: "3 pranzo" })];
   const results = planGoogleCalendarSync(rows, [event()], []);
   assert.equal(results.length, 2);
-  assert.ok(results.every(result => result.requires_review && result.review_reasons.includes("multiple_observations_same_identity_no_winner_selected")));
+  assert.ok(results.every(result => result.requires_review && result.precedence.role === "unproven"));
   assert.deepEqual(planGoogleCalendarSync([...rows].reverse(), [event()], []).reverse(), results);
 });
-test("stale observations are labelled and cannot claim a current status", () => {
+test("legacy timestamps alone cannot prove staleness or current status", () => {
   const result = plan(observation({ gcal_updated_at: "2026-09-01T10:00:00Z" }), [event({ gcal_updated_at: "2026-09-02T10:00:00Z" })]);
-  assert.ok(result.review_reasons.includes("observation_freshness_unproven_or_stale"));
+  assert.ok(result.review_reasons.includes("unverified_google_chronology"));
+  assert.deepEqual(result.eligible_differences, {});
 });

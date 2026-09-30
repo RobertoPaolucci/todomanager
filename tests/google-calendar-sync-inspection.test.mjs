@@ -9,7 +9,7 @@ import { buildGoogleCalendarPreview as preview, readGoogleCalendarSnapshot } fro
 const snapshot = { staging: [
   { id: 1, gcal_uid: "a", original_title: "9 pranzo Tuscan Escape", booking_date: "2026-10-01", import_status: "ignored" },
   { id: 2, gcal_uid: "b", original_title: "2 ebike solo noleggio", booking_date: "2026-09-20" },
-  { id: 3, gcal_uid: "c", original_title: "2 pranzo", booking_date: "2026-09-21", import_status: "gcal_cancelled" },
+  { id: 3, gcal_uid: "c", original_title: "2 pranzo", booking_date: "2026-09-21", import_status: "ignored", notes: "🔴 Evento cancellato da Google Calendar\n2 pranzo" },
   { id: 4, original_title: "2 pranzo", booking_date: "2026-09-21" },
 ], events: [{ id: 10, canonical_uid: "a", event_date: "2026-09-01", original_title: "Tuscan Escape",
   event_classification: "operational_block", effective_total_guests: 1 }], aliases: [] };
@@ -25,7 +25,12 @@ test("preview includes moves out of the month; differences, review and status co
   assert.equal(result.counts.date_title_differences, 1);
   assert.equal(result.counts.certain_cancellations, 1);
   assert.equal(result.counts.unproven_google_status, 3);
-  assert.equal(result.rows[0].proposed, 8);
+  assert.equal(result.rows[0].candidate, 8);
+  assert.equal(result.rows[0].proposed, 1);
+  assert.equal(result.decisions.by_observation.needs_review, 2);
+  assert.equal(result.decisions.by_identity.new, 2);
+  assert.equal(result.decisions.eligible_observations, 0);
+  assert.deepEqual(result.google_status, { known: 1, unknown: 3, verified_updated: 0 });
   assert.equal(preview(snapshot, { period: "2026-08" }).counts.staging_analyzed, 0);
   assert.equal(preview(snapshot, { period: "2026" }).counts.staging_analyzed, 4);
   assert.throws(() => preview(snapshot, { period: "2026-13" }));

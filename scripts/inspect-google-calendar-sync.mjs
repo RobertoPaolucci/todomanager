@@ -6,7 +6,7 @@ import { planGoogleCalendarSync } from "../lib/google-calendar-canonical-plan.mj
 import { parseGoogleCalendarAttendance } from "../lib/google-calendar-attendance.mjs";
 
 const TABLES = {
-  staging: ["google_calendar_import_staging", "id,gcal_uid,booking_date,booking_time,original_title,notes,import_status,gcal_updated_at"],
+  staging: ["google_calendar_import_staging", "*"],
   events: ["google_calendar_events", "*"],
   aliases: ["google_calendar_event_aliases", "id,event_id,identity_namespace,occurrence_id,original_uid,canonical_uid,verified"],
 };
@@ -66,7 +66,8 @@ export function buildGoogleCalendarPreview(snapshot, { period, details = false }
     if (plan.differences.event_date || plan.differences.original_title) counts.date_title_differences++;
     if (plan.differences.gcal_event_status) counts.status_differences++;
     if (plan.review_reasons.includes("multiple_observations_same_identity_no_winner_selected")) counts.multiple_observation_rows++;
-    if (plan.review_reasons.includes("observation_freshness_unproven_or_stale")) counts.stale_or_unproven_freshness++;
+    if ((plan.precedence.group_staging_ids?.length ?? 0) > 1) counts.multiple_observation_rows++;
+    if (plan.review_reasons.includes("unverified_google_chronology") || plan.action === "stale_observation") counts.stale_or_unproven_freshness++;
     if (plan.status.value === "cancelled") counts.certain_cancellations++;
     if (plan.status.certainty === "unproven") counts.unproven_google_status++;
     if (plan.requires_review) counts.requires_review++;
@@ -78,8 +79,14 @@ export function buildGoogleCalendarPreview(snapshot, { period, details = false }
       outcome: plan.identity.outcome, identity_reason: plan.identity.reason,
       candidate_ids: plan.identity.candidate_ids, observed: plan.attendance.observed_total_guests,
       historical: current?.historical_total_guests ?? null, before: current?.effective_total_guests ?? null,
+      parsed_effective: plan.attendance.effective_total_guests, candidate: plan.candidate?.effective_total_guests ?? null,
       proposed: plan.proposed?.effective_total_guests ?? null, classification: plan.proposed?.event_classification ?? plan.attendance.event_classification,
       exclusion_reason: plan.attendance.exclusion_reason, status: plan.status, retained_status: plan.retained_status,
+      observation_evidence: Object.fromEntries(["gcal_uid", "gcal_updated_at", "created_at", "updated_at", "received_at", "gcal_received_at", "import_origin", "booking_time", "adults", "children", "infants", "import_status", "booking_reference"].map(field => [field, row[field] ?? null])),
+      canonical_evidence: current ? Object.fromEntries(["canonical_uid", "original_uid", "gcal_updated_at", "gcal_received_at", "created_at", "updated_at", "attendance_source", "attendance_quality", "attendance_parser_version", "historical_total_guests", "observed_total_guests", "effective_total_guests"].map(field => [field, current[field] ?? null])) : null,
+      action: plan.action, eligible_for_sync: plan.eligible_for_sync, timestamp: plan.timestamp,
+      canonical_timestamp: plan.canonical_timestamp, precedence: plan.precedence, protection: plan.protection,
+      protected_differences: plan.protected_differences, eligible_differences: plan.eligible_differences,
       differences: plan.differences, review_reasons: plan.review_reasons });
   }
   counts.distinct_matched_events = new Set(selected.filter(({ plan }) => plan.identity.outcome === "match").map(({ plan }) => String(plan.identity.event_id))).size;
@@ -91,10 +98,35 @@ export function buildGoogleCalendarPreview(snapshot, { period, details = false }
       title_analysis: attendance, stored_status: event.gcal_event_status,
       action: "no_staging_observation_no_sync_proposal" };
   });
+  const emptyActions = () => Object.fromEntries(["safe_update", "new", "manual_override_protected", "needs_review", "ambiguous", "stale_observation", "equal_timestamp_conflict"].map(key => [key, 0]));
+  const byObservation = emptyActions();
+  const identityGroups = new Map();
+  selected.forEach(({ plan }, index) => {
+    byObservation[plan.action]++;
+    const key = plan.identity.event_id != null ? `event:${plan.identity.event_id}`
+      : plan.identity.outcome === "new" ? JSON.stringify([plan.identity.identity_namespace, plan.identity.canonical_uid, plan.identity.occurrence_id]) : `unresolved:${index}`;
+    const group = identityGroups.get(key) ?? [];
+    group.push(plan);
+    identityGroups.set(key, group);
+  });
+  const byIdentity = emptyActions();
+  for (const group of identityGroups.values()) {
+    // An older row is retained in row diagnostics, not counted as another event.
+    const priority = ["ambiguous", "equal_timestamp_conflict", "manual_override_protected", "safe_update", "needs_review", "new", "stale_observation"];
+    byIdentity[priority.find(action => group.some(plan => plan.action === action))]++;
+  }
   return { mode: "read_only", period: period ?? "all", counts,
+    decisions: { by_observation: byObservation, by_identity: byIdentity,
+      eligible_observations: selected.filter(({ plan }) => plan.eligible_for_sync).length },
+    google_status: { known: selected.filter(({ plan }) => plan.status.knowledge === "known").length,
+      unknown: selected.filter(({ plan }) => plan.status.knowledge === "unknown").length,
+      verified_updated: selected.filter(({ plan }) => plan.timestamp.verified).length },
     coverage: { staging_read: staging.length, canonical_read: events.length, aliases_read: aliases.length,
       canonical_without_staging_in_period: canonicalOnly.length },
-    notes: ["Differences count matched rows only; new events are listed separately.",
+    available_staging_fields: Object.keys(staging[0] ?? {}).sort(),
+    notes: ["Differences are diagnostic candidates; only eligible_differences pass the temporal/manual policy.",
+      "new means unseen identity, not permission to insert: inspect eligible_for_sync and review reasons.",
+      "known means explicit status evidence, not necessarily a fresh Google state; legacy updated is unverified.",
       "Unknown Google status retains the existing snapshot status; it does not confirm current activity.",
       "Period includes staging dates and matched canonical dates, including movements across months.",
       "Sequential SELECTs are not a transactional snapshot. No final attendance total is asserted."],
