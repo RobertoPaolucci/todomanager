@@ -106,7 +106,7 @@ function getTitle(payload: WebhookPayload) {
 }
 
 function getStatus(payload: WebhookPayload) {
-  return normalize(payload.status || "confirmed");
+  return normalize(payload.status || "");
 }
 
 function getStartValue(payload: WebhookPayload) {
@@ -137,7 +137,7 @@ function parseDateToIso(value?: string | null) {
 }
 
 function getGoogleCalendarUpdatedAt(payload: WebhookPayload) {
-  return parseDateToIso(payload.updated) || new Date().toISOString();
+  return parseDateToIso(payload.updated);
 }
 
 function getGoogleCalendarHtmlLink(payload: WebhookPayload) {
@@ -753,7 +753,7 @@ async function markGoogleCalendarEventCancelled(params: {
   title: string;
   existing: any;
   start: ParsedStart;
-  gcalUpdatedAt: string;
+  gcalUpdatedAt: string | null;
   gcalHtmlLink: string;
 }) {
   if (!params.existing?.id) {
@@ -811,7 +811,8 @@ async function markGoogleCalendarEventCancelled(params: {
       booking_time: finalBookingTime,
       notes: buildCancellationNotes(finalTitle, params.existing),
       original_title: finalTitle,
-      gcal_updated_at: params.gcalUpdatedAt,
+      gcal_updated_at:
+        params.gcalUpdatedAt ?? params.existing.gcal_updated_at ?? null,
       gcal_html_link:
         params.gcalHtmlLink || params.existing.gcal_html_link || "",
     })
@@ -1055,7 +1056,8 @@ export async function POST(request: NextRequest) {
       import_status: importStatus,
       imported_booking_id: existing?.imported_booking_id ?? null,
       import_origin: "make",
-      gcal_updated_at: gcalUpdatedAt,
+      gcal_updated_at:
+        gcalUpdatedAt ?? existing?.gcal_updated_at ?? null,
       gcal_html_link: gcalHtmlLink,
     };
 
