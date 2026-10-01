@@ -118,6 +118,22 @@ function toLocalDateString(year: number, month: number, day: number) {
   )}`;
 }
 
+function annualPresenceChangeLabel(
+  presence2025: number,
+  presence2026: number,
+  month: number,
+  currentYear: number,
+  currentMonth: number
+) {
+  if (currentYear < 2026 || (currentYear === 2026 && month > currentMonth)) {
+    return null;
+  }
+  if (presence2025 === 0) return "n/d";
+
+  const percent = Math.round(((presence2026 - presence2025) / presence2025) * 100);
+  return `${percent > 0 ? "+" : ""}${percent === 0 ? 0 : percent}%`;
+}
+
 function googleImportStatusLabel(status: string | null) {
   switch (status) {
     case "pending":
@@ -797,6 +813,12 @@ export default async function Home({ searchParams }: PageProps) {
     (sum, value) => sum + value,
     0
   );
+  const annualPresencePercent = annualPresence2025 === 0
+    ? null
+    : Math.round(((annualPresence2026 - annualPresence2025) / annualPresence2025) * 100);
+  const annualPresencePercentLabel = annualPresencePercent === null
+    ? "n/d"
+    : `${annualPresencePercent > 0 ? "+" : ""}${annualPresencePercent === 0 ? 0 : annualPresencePercent}%`;
 
   const comparisonChartData = Array.from({ length: 12 }, (_, index) => ({
     label: getShortMonthName(index),
@@ -1420,13 +1442,21 @@ export default async function Home({ searchParams }: PageProps) {
                   </div>
                 </div>
 
-                <div className="flex h-56 items-end justify-between gap-1 border-b border-zinc-200 px-1 sm:h-64 sm:gap-2">
+                <div className="overflow-x-auto">
+                <div className="flex h-56 min-w-[660px] items-end justify-between gap-1 border-b border-zinc-200 px-1 pt-6 sm:h-64 sm:gap-2">
                   {comparisonChartData.map((row) => {
                     const height2025 =
                       (row.presence2025 / comparisonMaxPresence) * 100;
                     const height2026 =
                       (row.presence2026 / comparisonMaxPresence) * 100;
                     const isSelected = row.month === selectedMonth;
+                    const changeLabel = annualPresenceChangeLabel(
+                      row.presence2025,
+                      row.presence2026,
+                      row.month,
+                      currentRomeYear,
+                      currentRomeMonth
+                    );
 
                     return (
                       <div
@@ -1434,7 +1464,16 @@ export default async function Home({ searchParams }: PageProps) {
                         className="flex h-full min-w-0 flex-1 flex-col justify-end"
                         title={`${row.label} · 2025: ${row.presence2025} presenze · 2026: ${row.presence2026} presenze`}
                       >
-                        <div className="flex flex-1 items-end justify-center gap-0.5 sm:gap-1">
+                        <div className="relative flex min-h-0 flex-1 items-end justify-center gap-0.5 sm:gap-1">
+                          {changeLabel !== null ? (
+                            <span
+                              className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[11px] font-bold leading-4 text-zinc-700"
+                              style={{ bottom: `calc(${Math.max(height2025, height2026)}% + 6px)` }}
+                              aria-label={`${row.label}: variazione presenze 2026 rispetto al 2025 ${changeLabel}`}
+                            >
+                              {changeLabel}
+                            </span>
+                          ) : null}
                           <div
                             className="w-1/2 rounded-t bg-slate-500 transition-all"
                             style={{
@@ -1464,6 +1503,7 @@ export default async function Home({ searchParams }: PageProps) {
                     );
                   })}
                 </div>
+                </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-xl bg-slate-100 px-3 py-3 text-sm text-slate-900">
@@ -1475,7 +1515,13 @@ export default async function Home({ searchParams }: PageProps) {
                   <div className="rounded-xl bg-orange-50 px-3 py-3 text-sm text-orange-900">
                     Totale 2026:{" "}
                     <span className="font-black">{annualPresence2026}</span>{" "}
-                    presenze
+                    presenze{" "}
+                    <span
+                      className="inline-block whitespace-nowrap text-xs font-bold"
+                      aria-label={`Variazione totale 2026 rispetto al 2025: ${annualPresencePercentLabel}`}
+                    >
+                      ({annualPresencePercentLabel})
+                    </span>
                   </div>
                 </div>
 
