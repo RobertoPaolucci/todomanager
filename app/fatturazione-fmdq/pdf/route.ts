@@ -9,6 +9,7 @@ import {
 import { supabaseServer } from "@/lib/supabase-server";
 import { effectiveFmdqInvoiceRates, parseAgreedUnitPrice, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
 import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
+import { getTuscanEscapeInvoiceEvidence } from "@/lib/tuscan-escape-invoice-evidence-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 
 export const dynamic = "force-dynamic";
@@ -460,8 +461,11 @@ export async function GET(
 
   const bookings =
     bookingsRes.data || [];
-  const fmdqKeys = bookings.some(booking => booking.agreed_unit_price != null)
-    ? await getFmdqInternalSupplierKeys() : new Set<string>();
+  const [fmdqKeys, tuscanGuideEvidence] = await Promise.all([
+    bookings.some(booking => booking.agreed_unit_price != null || Number(booking.channel_id) === 7)
+      ? getFmdqInternalSupplierKeys() : Promise.resolve(new Set<string>()),
+    getTuscanEscapeInvoiceEvidence(bookings),
+  ]);
 
   const invoices =
     invoicesRes.data || [];
@@ -611,6 +615,9 @@ export async function GET(
             fmdqKeys.has(`${booking.business_unit_id}:${booking.supplier_id}`), channel?.fattura_mensile_fmdq),
           isGroupPricing: experience?.is_group_pricing === true,
           adult: adultUnitCost, child: childUnitCost,
+          channelId,
+          payingClients: getAdults(booking) + getChildren(booking),
+          guideEvidence: tuscanGuideEvidence.get(String(booking.id)),
         });
         adultUnitCost = effectiveRates.adult;
         childUnitCost = effectiveRates.child;

@@ -24,7 +24,8 @@ export function pricingHarness() {
   const tables = { bookings: [booking], channels: [channel], experiences: [experience], experience_channel_prices: [price],
     supplier_payments: [{ id: 1, supplier_id: 3, amount: 123, notes: 'Existing payment' }],
     business_units: [{ id: 1, code: 'fmdq' }], business_unit_internal_suppliers: [{ business_unit_id: 1, supplier_id: 3 }],
-    fmdq_monthly_invoices: [], suppliers: [booking.suppliers] };
+    fmdq_monthly_invoices: [], suppliers: [booking.suppliers],
+    google_calendar_import_staging: [], google_calendar_events: [], google_calendar_event_aliases: [] };
   const writes = [], pdfTexts = [], hooks = [];
   let hookIndex = 0, beforeUpdate = null;
   const db = { from(table) {
@@ -33,6 +34,7 @@ export function pricingHarness() {
       select() { return q; }, eq(k, v) { predicates.push(row => row[k] === v); return q; },
       is(k, v) { predicates.push(row => (row[k] ?? null) === v); return q; },
       gte(k, v) { predicates.push(row => row[k] >= v); return q; }, lte(k, v) { predicates.push(row => row[k] <= v); return q; },
+      gt(k, v) { predicates.push(row => row[k] > v); return q; },
       in(k, v) { predicates.push(row => v.includes(row[k])); return q; },
       order() { return q; }, limit(n) { limit = n; return q; },
       insert(value) { operation = 'insert'; payload = value; return q; },
@@ -63,7 +65,7 @@ export function pricingHarness() {
       source += '\nexport { getBookingIncome, getBookingGross, getBookingSupplierCost, getPayingPeopleCount };';
     }
     const mod = { exports: {} };
-    const code = ts.transpileModule(source, { fileName: file, compilerOptions: {
+    const code = ts.transpileModule(source, { fileName: file.replace(/\.mjs$/, '.ts'), compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
     } }).outputText;
     const jsx = (type, props) => ({ type, props });
@@ -85,7 +87,8 @@ export function pricingHarness() {
           async save() { return new Uint8Array([37, 80, 68, 70]); },
         }; } } };
       if (name.startsWith('@/components/') || name === 'next/link') return { default: name };
-      if (name.startsWith('@/')) return load(`${name.slice(2)}.ts`);
+      if (name.startsWith('@/')) return load(/\.(ts|mjs)$/.test(name) ? name.slice(2) : `${name.slice(2)}.ts`);
+      if (name.endsWith('.mjs') && name.startsWith('./')) return load(resolve(dirname(file), name));
       if (name === './actions') return load(resolve(dirname(file), 'actions.ts'));
       throw new Error(`Unexpected import ${name}`);
     };

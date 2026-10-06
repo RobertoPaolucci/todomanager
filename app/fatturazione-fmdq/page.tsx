@@ -9,6 +9,7 @@ import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
 import { effectiveFmdqInvoiceRates, parseAgreedUnitPrice, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
 import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
+import { getTuscanEscapeInvoiceEvidence } from "@/lib/tuscan-escape-invoice-evidence-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 import { saveFmdqInvoice } from "./actions";
 
@@ -486,8 +487,11 @@ export default async function FatturazioneFmdqPage({
 
   const bookings =
     bookingsRes.data || [];
-  const fmdqKeys = bookings.some(booking => booking.agreed_unit_price != null)
-    ? await getFmdqInternalSupplierKeys() : new Set<string>();
+  const [fmdqKeys, tuscanGuideEvidence] = await Promise.all([
+    bookings.some(booking => booking.agreed_unit_price != null || Number(booking.channel_id) === 7)
+      ? getFmdqInternalSupplierKeys() : Promise.resolve(new Set<string>()),
+    getTuscanEscapeInvoiceEvidence(bookings),
+  ]);
 
   const invoices =
     invoicesRes.data || [];
@@ -613,6 +617,9 @@ export default async function FatturazioneFmdqPage({
             fmdqKeys.has(`${booking.business_unit_id}:${booking.supplier_id}`), channel?.fattura_mensile_fmdq),
           isGroupPricing: experience?.is_group_pricing === true,
           adult: adultUnitCost, child: childUnitCost,
+          channelId,
+          payingClients: getAdults(booking) + getChildren(booking),
+          guideEvidence: tuscanGuideEvidence.get(String(booking.id)),
         });
         adultUnitCost = effectiveRates.adult;
         childUnitCost = effectiveRates.child;
@@ -1253,6 +1260,12 @@ export default async function FatturazioneFmdqPage({
                       </div>
 
                     </div>
+
+                    {group.channelId === 7 && (
+                      <div className="border-y border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold leading-relaxed text-amber-950">
+                        Promemoria Tuscan Escape: per gruppi di 8 clienti + 1 guida, la tariffa è €36 per cliente. Negli altri casi resta €38 per cliente. La guida non viene fatturata.
+                      </div>
+                    )}
 
                     <div className="divide-y divide-zinc-100 md:hidden">
 

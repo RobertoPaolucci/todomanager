@@ -71,14 +71,30 @@ export function applyBookingAgreement<T extends BookingEconomics>(
   };
 }
 
-/** Keep the original invoice fallbacks/precision when there is no agreement. */
+export type TuscanEscapeGuideEvidence = {
+  effective_total_guests: number;
+  excluded_staff: number;
+  attendance_quality: string;
+};
+
+/** Agreements retain precedence; Tuscan rates require independently resolved evidence. */
 export function effectiveFmdqInvoiceRates(params: {
   price: number | null; directFmdq: boolean; isGroupPricing: boolean;
   adult: number; child: number;
+  channelId?: number; payingClients?: number;
+  guideEvidence?: TuscanEscapeGuideEvidence;
 }) {
   assertPersonAgreement(params.price, params.isGroupPricing);
-  if (params.price === null || !params.directFmdq) return { adult: params.adult, child: params.child };
-  return { adult: params.price, child: params.price };
+  if (params.price !== null && params.directFmdq) return { adult: params.price, child: params.price };
+  if (params.channelId === 7 && params.directFmdq && !params.isGroupPricing) {
+    const evidence = params.guideEvidence;
+    const discounted = params.payingClients === 8
+      && evidence?.effective_total_guests === 8
+      && evidence.excluded_staff === 1 && evidence.attendance_quality === "parsed";
+    const rate = discounted ? 36 : 38;
+    return { adult: rate, child: rate };
+  }
+  return { adult: params.adult, child: params.child };
 }
 
 /** Only correct rows whose stored capacity proves that non-payers are separate. */
