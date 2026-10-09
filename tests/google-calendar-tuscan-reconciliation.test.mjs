@@ -141,7 +141,10 @@ test("October offline preparation targets exactly six, preserves money and verif
   }
   const existing = targets.find(t=>t.before.id===2190);
   assert.deepEqual(existing.canonical_after,existing.canonical_before);
-  assert.equal(renderTuscanOctoberSql(targets),readFileSync("supabase/migrations/202610090002_tuscan_escape_october_reviewed.sql","utf8"));
+  assert.equal(
+    renderTuscanOctoberSql(targets).replace(/\r\n/g, "\n"),
+    readFileSync("supabase/migrations/202610090002_tuscan_escape_october_reviewed.sql","utf8").replace(/\r\n/g, "\n"),
+  );
   const cancelled = structuredClone(google); cancelled.events[0].status="cancelled";
   assert.throws(()=>prepareTuscanOctoberTargets(snapshot,cancelled));
 });
