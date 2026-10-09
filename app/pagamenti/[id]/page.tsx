@@ -6,6 +6,8 @@ import Sidebar from "@/components/Sidebar";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
 import { addSupplierPayment } from "../actions";
+import PaymentBulkSelector from "../PaymentBulkSelector";
+import { getSelectableAmount } from "../payment-selection";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -89,6 +91,7 @@ export default async function DettaglioPagamentiFornitorePage({
     paymentsRes,
     internalRulesRes,
     businessUnitsRes,
+    channelsRes,
   ] = await Promise.all([
     supabaseServer.from("suppliers").select("*").eq("id", supplierId).single(),
     supabaseServer
@@ -107,6 +110,7 @@ export default async function DettaglioPagamentiFornitorePage({
       .from("business_unit_internal_suppliers")
       .select("business_unit_id, supplier_id"),
     supabaseServer.from("business_units").select("id, code, name"),
+    supabaseServer.from("channels").select("id, name"),
   ]);
 
   if (supplierRes.error || !supplierRes.data) {
@@ -143,6 +147,8 @@ export default async function DettaglioPagamentiFornitorePage({
   const payments = paymentsRes.data || [];
   const internalRules = internalRulesRes.data || [];
   const businessUnits = businessUnitsRes.data || [];
+  const channels = channelsRes.data || [];
+  const channelMap = new Map(channels.map((channel) => [String(channel.id), channel.name]));
 
   const internalRuleSet = new Set(
     internalRules.map((rule) => `${rule.business_unit_id}:${rule.supplier_id}`)
@@ -197,6 +203,7 @@ export default async function DettaglioPagamentiFornitorePage({
       _is_internal_booking: isInternalBooking,
       _business_unit_code: businessUnit?.code || "",
       _business_unit_name: businessUnit?.name || "",
+      _channel_name: channelMap.get(String(booking.channel_id)) || "",
     };
   });
 
@@ -468,6 +475,30 @@ export default async function DettaglioPagamentiFornitorePage({
               q ? ` – ${displayBookings.length} risultati` : ` – ${displayBookings.length}`
             }`}
           >
+            <PaymentBulkSelector
+              supplierId={supplierId}
+              today={todayStr}
+              returnToPath={returnToPath}
+              initialQuery={q}
+              rows={displayBookings.map((booking) => ({
+                id: Number(booking.id),
+                booking_date: booking.booking_date,
+                customer_name: booking.customer_name,
+                booking_reference: booking.booking_reference,
+                experience_name: booking.experience_name,
+                channel_name: booking._channel_name,
+                business_unit_code: booking._business_unit_code,
+                costo: booking.costo,
+                pagato: booking.pagato,
+                residuo: booking.residuo,
+                stato: booking.stato,
+                isCancelled: booking.isCancelled,
+                isFuture: booking.isFuture,
+                isInternal: booking._is_internal_booking,
+                selectableCents: getSelectableAmount(booking, booking._is_internal_booking, todayStr),
+              }))}
+            />
+            {false && (
             <>
               <div className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                 <form method="GET" className="space-y-3">
@@ -647,6 +678,7 @@ export default async function DettaglioPagamentiFornitorePage({
                 </table>
               </div>
             </>
+            )}
           </SectionCard>
 
           {supplierMode !== "internal" && (

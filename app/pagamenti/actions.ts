@@ -246,3 +246,101 @@ export async function addSupplierPayment(formData: FormData) {
 
   redirect(`/pagamenti/${supplier_id}`);
 }
+
+export async function bulkMarkSupplierPaymentsPaid(formData: FormData) {
+  const supplierId = Number(formData.get("supplier_id"));
+  const paymentDate = String(formData.get("payment_date") || "").trim();
+  const paymentMethod = String(formData.get("payment_method") || "").trim();
+  const notes = String(formData.get("notes") || "").trim();
+  let requestedIds: number[] = [];
+
+  try {
+    const raw = JSON.parse(String(formData.get("booking_ids") || "[]"));
+    requestedIds = Array.isArray(raw)
+      ? Array.from(new Set(raw.map(Number).filter((id) => Number.isInteger(id) && id > 0)))
+      : [];
+  } catch {
+    return { paid: [], failures: [{ id: 0, reason: "Selezione non valida." }] };
+  }
+
+  if (!supplierId || !paymentDate || !paymentMethod || requestedIds.length === 0) {
+    return { paid: [], failures: [{ id: 0, reason: "Seleziona almeno un movimento e completa i dati." }] };
+  }
+
+  const [bookingsRes, internalRulesRes] = await Promise.all([
+    supabaseServer
+      .from("bookings")
+      .select("id, supplier_id, business_unit_id, booking_date, total_supplier_cost, supplier_amount_paid, supplier_payment_status, is_cancelled")
+      .eq("supplier_id", supplierId)
+      .in("id", requestedIds),
+    supabaseServer.from("business_unit_internal_suppliers").select("business_unit_id, supplier_id"),
+  ]);
+
+  if (bookingsRes.error) {
+    return { paid: [], failures: [{ id: 0, reason: `Errore lettura movimenti: ${bookingsRes.error.message}` }] };
+  }
+  if (internalRulesRes.error) {
+    return { paid: [], failures: [{ id: 0, reason: `Errore lettura regole contabili: ${internalRulesRes.error.message}` }] };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const internalRules = new Set(
+    (internalRulesRes.data || []).map((rule) => `${rule.business_unit_id}:${rule.supplier_id}`)
+  );
+  const paid: number[] = [];
+  const failures: { id: number; reason: string }[] = [];
+
+  for (const booking of bookingsRes.data || []) {
+    const id = Number(booking.id);
+    const internal = internalRules.has(`${booking.business_unit_id}:${booking.supplier_id}`);
+    const cost = Number(booking.total_supplier_cost || 0);
+    const currentPaid = getCurrentPaidAmount(booking, internal);
+    const residual = Math.max(0, cost - currentPaid);
+
+    if (booking.is_cancelled) { failures.push({ id, reason: "Prenotazione annullata." }); continue; }
+    if (internal || !booking.business_unit_id) { failures.push({ id, reason: "Movimento non saldabile." }); continue; }
+    if (!booking.booking_date || booking.booking_date > today) { failures.push({ id, reason: "Prenotazione futura." }); continue; }
+    if (booking.supplier_payment_status === "paid" || residual <= 0) { failures.push({ id, reason: "Pagamento già registrato." }); continue; }
+
+    const { data: updated, error: updateError } = await supabaseServer
+      .from("bookings")
+      .update({ supplier_amount_paid: cost, supplier_payment_status: "paid" })
+      .eq("id", id)
+      .eq("supplier_id", supplierId)
+      .eq("supplier_amount_paid", Number(booking.supplier_amount_paid || 0))
+      .neq("supplier_payment_status", "paid")
+      .select("id")
+      .maybeSingle();
+
+    if (updateError || !updated) {
+      failures.push({ id, reason: updateError ? `Errore aggiornamento: ${updateError.message}` : "Movimento modificato durante il salvataggio." });
+      continue;
+    }
+
+    const { error: insertError } = await supabaseServer.from("supplier_payments").insert({
+      supplier_id: supplierId,
+      business_unit_id: booking.business_unit_id,
+      amount: residual,
+      payment_date: paymentDate,
+      payment_method: paymentMethod,
+      notes: notes || `Pagamento massivo prenotazione #${id}`,
+    });
+    if (insertError) {
+      await supabaseServer.from("bookings").update({
+        supplier_amount_paid: booking.supplier_amount_paid || 0,
+        supplier_payment_status: booking.supplier_payment_status || "pending",
+      }).eq("id", id).eq("supplier_payment_status", "paid");
+      failures.push({ id, reason: `Errore registrazione: ${insertError.message}` });
+      continue;
+    }
+    paid.push(id);
+  }
+
+  const foundIds = new Set((bookingsRes.data || []).map((booking) => Number(booking.id)));
+  requestedIds.filter((id) => !foundIds.has(id)).forEach((id) => failures.push({ id, reason: "Movimento non trovato o non appartenente al fornitore." }));
+
+  revalidatePath(`/pagamenti/${supplierId}`);
+  revalidatePath("/pagamenti");
+  revalidatePath("/prenotazioni");
+  return { paid, failures };
+}
