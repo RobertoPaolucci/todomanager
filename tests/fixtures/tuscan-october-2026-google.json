@@ -1,0 +1,61 @@
+{
+  "checked_on": "2026-10-09",
+  "source": "Google Calendar read_event (read only)",
+  "google_updated_available": false,
+  "events": [
+    {
+      "id": "_c4ojadpo69j3gopichh38p1j75gmadj668oj0o9k6hgj4e9jc4q0",
+      "summary": "9 pranzo Tuscan escape",
+      "status": "confirmed",
+      "start": "2026-10-01T13:15:00+02:00",
+      "recurring_event_id": null,
+      "original_start_time": null,
+      "organizer": "calendario.fattoria@gmail.com"
+    },
+    {
+      "id": "_cor36ohn6kq68or5clh38oj675h3id366crm6db571j38cr1c4og",
+      "summary": "9 pranzo Tuscan escape",
+      "status": "confirmed",
+      "start": "2026-10-05T13:15:00+02:00",
+      "recurring_event_id": null,
+      "original_start_time": null,
+      "organizer": "calendario.fattoria@gmail.com"
+    },
+    {
+      "id": "_6srjeopickr6acpkcpj38d1i70s6ceb369i6adr5cdijcp336krg",
+      "summary": "9 pranzo Tuscan escape",
+      "status": "confirmed",
+      "start": "2026-10-08T13:15:00+02:00",
+      "recurring_event_id": null,
+      "original_start_time": null,
+      "organizer": "calendario.fattoria@gmail.com"
+    },
+    {
+      "id": "_cosjapb6chgm6cpi6or38e1g6tgjgoj2cdi3cp1hc8oj4eb36srg",
+      "summary": "6 pranzo Tuscan escape",
+      "status": "confirmed",
+      "start": "2026-10-09T13:15:00+02:00",
+      "recurring_event_id": null,
+      "original_start_time": null,
+      "organizer": "calendario.fattoria@gmail.com"
+    },
+    {
+      "id": "_64ojcopmckpm4c3469i38chlc9gjed1ockq3cob36ks30p9jccog",
+      "summary": "8 pranzo Tuscan escape",
+      "status": "confirmed",
+      "start": "2026-10-11T13:15:00+02:00",
+      "recurring_event_id": null,
+      "original_start_time": null,
+      "organizer": "calendario.fattoria@gmail.com"
+    },
+    {
+      "id": "_60pjepb6ckoj4dph61i38pj565gm2d336ti64cpi6phm4e1l69i0",
+      "summary": "8 pranzo Tuscan escape",
+      "status": "confirmed",
+      "start": "2026-10-22T13:15:00+02:00",
+      "recurring_event_id": null,
+      "original_start_time": null,
+      "organizer": "calendario.fattoria@gmail.com"
+    }
+  ]
+}

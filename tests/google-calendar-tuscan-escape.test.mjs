@@ -5,8 +5,9 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as observation from '../lib/google-calendar-observation.mjs';
 import * as canonicalSync from '../lib/google-calendar-canonical-sync.mjs';
+import * as reconciliation from '../lib/google-calendar-tuscan-reconciliation.mjs';
 
-function harness(existing = null) {
+function harness(existing = null, { standardPrices = false } = {}) {
   const writes = [];
   const db = { from(table) {
     let operation = 'select', payload;
@@ -28,8 +29,8 @@ function harness(existing = null) {
       const rows = {
         google_calendar_import_staging: existing ? [existing] : [],
         bookings: [], channels: [{ id: 7, name: 'Tuscan Escape' }],
-        experiences: [{ id: 7, name: 'PRANZO', supplier_id: 3, supplier_unit_cost: 20, is_group_pricing: false }],
-        experience_channel_prices: [{ your_unit_price: 40, public_unit_price: 50 }],
+        experiences: [{ id: 7, name: 'PRANZO', supplier_id: 3, supplier_unit_cost: standardPrices ? 38 : 20, is_group_pricing: false }],
+        experience_channel_prices: [{ your_unit_price: standardPrices ? 38 : 40, public_unit_price: standardPrices ? 0 : 50 }],
       }[table];
       assert.ok(rows, `Unexpected table ${table}`);
       return { data: single ? rows[0] ?? null : rows, error: null };
@@ -53,6 +54,8 @@ function harness(existing = null) {
         if (name === '@/lib/google-calendar-tuscan-escape') return load('lib/google-calendar-tuscan-escape.ts');
         if (name === '@/lib/google-calendar-observation.mjs') return observation;
         if (name === '@/lib/google-calendar-canonical-sync.mjs') return canonicalSync;
+        if (name === '@/lib/google-calendar-tuscan-reconciliation.mjs') return reconciliation;
+        if (name === '@/lib/booking-pricing') return load('lib/booking-pricing.ts');
         throw new Error(`Unexpected import ${name}`);
       },
     });
@@ -119,4 +122,39 @@ test('channel/customer alone never identify blocks; retry is limited to unlinked
   assert.equal(canRetryTuscanEscapeImport({ ...retry, original_title: '9 pranzo Tuscan Escape', booking_source: 'Tuscan Escape' }), false);
   assert.equal(canRetryTuscanEscapeImport({ ...retry, imported_booking_id: 123 }), false);
   assert.equal(canRetryTuscanEscapeImport({ ...retry, import_status: 'gcal_cancelled' }), false);
+});
+
+test('new standard Tuscan lunches preserve EUR36 for eight paying clients and EUR38 otherwise', async () => {
+  for (const [total, expected] of [[9,288],[8,266],[6,190]]) {
+    const h = harness({ id:1, booking_date:'2026-10-09', booking_time:'13:15', booking_reference:'GCAL-test',
+      original_title:`${total} pranzo Tuscan escape`, notes:`${total} pranzo Tuscan escape`,
+      adults:total-1, children:0, infants:0, channel_id:7, experience_id:7, import_status:'pending', imported_booking_id:null },
+    { standardPrices:true });
+    const form=new FormData(); form.set('row_ids','1');
+    await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form),/redirect/);
+    const booking=h.writes.find(w=>w.table==='bookings').payload;
+    assert.equal(booking.total_to_you,expected); assert.equal(booking.total_supplier_cost,expected);
+    assert.equal(booking.non_paying_adults,1); assert.equal(booking.pax,total-1);
+  }
+});
+
+test('reset/force cannot reinsert linked Tuscan lunches even when their reference changed',async()=>{
+  for (const status of ['pending','rolled_back','needs_review','probable_match']) {
+    const h=harness({ id:1, channel_id:7, import_status:status, imported_booking_id:2142,
+      booking_reference:'GCAL-changed', original_title:'6 pranzo Tuscan escape' });
+    const form=new FormData(); form.set('row_ids','1'); form.set('force_import','true');
+    await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form),/redirect/);
+    assert.equal(h.writes.length,0);
+  }
+});
+
+test('operational block import keeps placeholder, zero economics and block experience',async()=>{
+  const h=harness({ id:1, channel_id:7, import_status:'pending', imported_booking_id:null,
+    booking_date:'2026-10-12', booking_time:'13:15', booking_reference:'GCAL-block',
+    original_title:'Tuscan escape', notes:'Tuscan escape', adults:1,children:0,infants:0 });
+  const form=new FormData(); form.set('row_ids','1');
+  await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form),/redirect/);
+  const booking=h.writes.find(w=>w.table==='bookings').payload;
+  assert.deepEqual([booking.experience_id,booking.adults,booking.non_paying_adults,booking.total_people,booking.pax],[22,1,0,1,1]);
+  assert.equal(booking.total_to_you,0); assert.equal(booking.total_supplier_cost,0);
 });

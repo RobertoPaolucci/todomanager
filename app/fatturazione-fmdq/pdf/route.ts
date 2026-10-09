@@ -10,6 +10,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { effectiveFmdqInvoiceRates, parseAgreedUnitPrice, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
 import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 import { getTuscanEscapeInvoiceEvidence } from "@/lib/tuscan-escape-invoice-evidence-server";
+import { isTuscanEscapeInvoiceBlock } from "@/lib/fmdq-invoice-eligibility";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
 
 export const dynamic = "force-dynamic";
@@ -526,6 +527,7 @@ export async function GET(
     latestBookings
       .filter(
         (booking: any) => {
+          if (isTuscanEscapeInvoiceBlock(booking)) return false;
           if (
             booking.is_cancelled ===
             true

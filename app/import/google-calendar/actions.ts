@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
+import { effectiveFmdqInvoiceRates } from "@/lib/booking-pricing";
 import {
   canRetryTuscanEscapeImport,
   isTuscanEscapeBlockRow,
@@ -318,6 +319,9 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     if (row.import_status === "gcal_cancelled") {
       continue;
     }
+    // Linked Tuscan rows are reconciled transactionally by the webhook, never
+    // reinserted by reset/force-import (including a changed reference).
+    if (row.channel_id === 7 && row.imported_booking_id) continue;
 
     const canProcessNormally =
       row.import_status === "pending" || row.import_status === "rolled_back" ||
@@ -391,10 +395,19 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       1
     );
 
-    const yourUnitPrice = toNumber(price.your_unit_price);
+    let yourUnitPrice = toNumber(price.your_unit_price);
     const publicUnitPrice = toNumber(price.public_unit_price);
-    const supplierUnitCost = isTuscanEscapeBlock ? 0 : toNumber(experience.supplier_unit_cost);
+    let supplierUnitCost = isTuscanEscapeBlock ? 0 : toNumber(experience.supplier_unit_cost);
     const isGroupPricing = isTuscanEscapeBlock ? false : Boolean(experience.is_group_pricing);
+    if (!isTuscanEscapeBlock && row.channel_id === 7 && getTuscanEscapeTotal(row) !== null
+      && experience.id === 7 && experience.supplier_id === 3
+      && !isGroupPricing && yourUnitPrice === 38 && supplierUnitCost === 38 && publicUnitPrice === 0) {
+      const rates = effectiveFmdqInvoiceRates({ price: null, directFmdq: true, isGroupPricing: false,
+        adult: 38, child: 16, channelId: 7, payingClients: payingPax,
+        guideEvidence: { effective_total_guests: adults, excluded_staff: nonPayingAdults, attendance_quality: "parsed" } });
+      yourUnitPrice = rates.adult;
+      supplierUnitCost = rates.adult;
+    }
 
     const totalToYou = isGroupPricing
       ? yourUnitPrice

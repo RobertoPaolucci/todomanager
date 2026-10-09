@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import { isTuscanEscapeBlockRow, TUSCAN_ESCAPE_STAGING_DEFAULTS } from "@/lib/google-calendar-tuscan-escape";
 import { normalizeGoogleCalendarObservation } from "@/lib/google-calendar-observation.mjs";
 import { syncGoogleCalendarObservation } from "@/lib/google-calendar-canonical-sync.mjs";
+import { reconcileTuscanBooking } from "@/lib/google-calendar-tuscan-reconciliation.mjs";
+import { effectiveFmdqInvoiceRates } from "@/lib/booking-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -888,6 +890,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
+    let bookingCanonical: { previous: Record<string, unknown>; current: Record<string, unknown> } | null = null;
     // Canonical identity comes only from authenticated Google fields, never from
     // the staging booking-reference fallback. Canonical errors must not stop staging.
     try {
@@ -904,6 +907,7 @@ export async function POST(request: NextRequest) {
         event_time: start.isValid && !start.isAllDay ? start.bookingTime : undefined,
         google_observation: googleObservation,
       });
+      if ("booking_sync" in canonical && canonical.booking_sync) bookingCanonical = canonical.booking_sync;
       if (canonical.review_reasons.length) {
         console.warn("Google Calendar canonical sync:", canonical.action, canonical.review_reasons);
       }
@@ -1063,6 +1067,8 @@ export async function POST(request: NextRequest) {
       importStatus = "needs_review";
     }
 
+    if (existing?.imported_booking_id && channelId === 7 && !isTuscanEscapeBlock) importStatus = "needs_review";
+
     const rowPayload = {
       gcal_uid: gcalUid,
       booking_date: start.bookingDate,
@@ -1112,6 +1118,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let bookingReconciliation: { action: string; review_reasons?: string[] } | null = null;
+    if (existing?.imported_booking_id && channelId === 7 && !isTuscanEscapeBlock) {
+      const reconciliation = await reconcileTuscanBooking(supabase, {
+        previous: existing, incoming: rowPayload, canonical: bookingCanonical,
+        rateForAttendance: (attendance: { effective_total_guests: number; excluded_staff: number; attendance_quality: string }) =>
+          effectiveFmdqInvoiceRates({ price: null, directFmdq: true, isGroupPricing: false,
+            adult: 38, child: 16, channelId: 7, payingClients: attendance.effective_total_guests,
+            guideEvidence: attendance }).adult,
+      });
+      bookingReconciliation = { action: reconciliation.action,
+        review_reasons: "review_reasons" in reconciliation ? reconciliation.review_reasons : [] };
+      // The RPC atomically marks staging imported on success. Otherwise the
+      // existing link remains available for review; never insert a second booking.
+      if (["updated", "unchanged"].includes(bookingReconciliation.action)) importStatus = "imported";
+      if (bookingReconciliation.action === "updated") {
+        revalidatePath("/calendario-fattoria");
+        revalidatePath("/fatturazione-fmdq");
+      }
+    }
+
     revalidatePath("/import/google-calendar");
     revalidatePath("/prenotazioni");
     revalidatePath("/");
@@ -1130,6 +1156,7 @@ export async function POST(request: NextRequest) {
       customer_name: customerName,
       booking_reference: bookingReference,
       non_paying_adults: nonPayingAdults,
+      booking_reconciliation: bookingReconciliation,
       gcal_updated_at: gcalUpdatedAt,
       gcal_html_link: gcalHtmlLink,
     });
