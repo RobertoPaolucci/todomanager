@@ -338,6 +338,15 @@ export default async function DettaglioPagamentiFornitorePage({
       }, 0)
     : 0;
 
+  const primaEsperienzaDaSaldare = selectedPayBusinessUnitId
+    ? payableBookings.reduce<string | null>((firstDate, booking) => {
+        if (Number(booking.business_unit_id) !== selectedPayBusinessUnitId) return firstDate;
+        const date = booking.booking_date;
+        if (!date || date > todayStr) return firstDate;
+        return !firstDate || date < firstDate ? date : firstDate;
+      }, null)
+    : null;
+
   const payHref = q
     ? `/pagamenti/${supplierId}?pay=true&q=${encodeURIComponent(q)}`
     : `/pagamenti/${supplierId}?pay=true`;
@@ -410,17 +419,28 @@ export default async function DettaglioPagamentiFornitorePage({
                     Gestione contabile interna
                   </div>
                 </div>
+              ) : (canRegisterPayment ? daPagareOggiSelectedBu : daPagareOggi) <= 0 ? (
+                <div className="min-w-[160px] flex-1 rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm">
+                  <span className="block text-sm font-bold text-red-800">
+                    Nessun importo da saldare
+                  </span>
+                </div>
               ) : canRegisterPayment ? (
                 <Link
                   href={payHref}
                   className="group min-w-[160px] flex-1 cursor-pointer rounded-xl border border-red-200 bg-red-50 px-6 py-4 text-right shadow-sm transition hover:border-red-300 hover:bg-red-100"
                 >
                   <span className="block text-sm font-bold text-red-800">
-                    Da Saldare (Scaduti/Oggi)
+                    Da saldare
                   </span>
                   <span className="text-2xl font-black text-red-700">
                     {formatEuro(daPagareOggiSelectedBu)}
                   </span>
+                  {primaEsperienzaDaSaldare && (
+                    <div className="mt-1 text-xs font-medium text-red-700">
+                      Esperienze dal {formatDate(primaEsperienzaDaSaldare)} a oggi
+                    </div>
+                  )}
                   <div className="mt-1 text-xs font-medium text-red-600 group-hover:text-red-800">
                     + Registra Pagamento{" "}
                     {selectedPayBusinessUnit
