@@ -1,3 +1,4 @@
+import * as bookingLink from "../lib/google-calendar-booking-link.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -26,7 +27,7 @@ function harness() {
   };
   const writes = [];
   const logs = [];
-  const db = { beforeWrite: null, readError: null, from(table) {
+  const db = { beforeWrite: null, beforeStagingWrite: null, readError: null, from(table) {
     assert.ok(Object.hasOwn(tables, table), `Unexpected table ${table}`);
     let operation = "select", values, limit = Infinity;
     const filters = [];
@@ -51,6 +52,11 @@ function harness() {
       if (table === "google_calendar_events" && db.beforeWrite) {
         const callback = db.beforeWrite;
         db.beforeWrite = null;
+        callback();
+      }
+      if (table === "google_calendar_import_staging" && db.beforeStagingWrite) {
+        const callback = db.beforeStagingWrite;
+        db.beforeStagingWrite = null;
         callback();
       }
       let affected = [];
@@ -87,6 +93,7 @@ function harness() {
       process: { env: { GOOGLE_CALENDAR_WEBHOOK_SECRET: "test-secret",
         NEXT_PUBLIC_SUPABASE_URL: "test", SUPABASE_SERVICE_ROLE_KEY: "test" } },
       require(name) {
+        if (name === "@/lib/google-calendar-booking-link.mjs") return bookingLink;
         if (name === "next/server") return { NextResponse: { json: Response.json } };
         if (name === "next/cache") return { revalidatePath() {} };
         if (name === "@supabase/supabase-js") return { createClient: () => db };
@@ -310,4 +317,115 @@ test("manual-review protects fields even when approved concurrently with the liv
     assert.equal(h.canonical().exclusion_reason, "manual decision");
     assert.ok(JSON.stringify(h.logs).includes("manual_attendance_approval_required"));
   }
+});
+
+
+test("different Google events sharing a reference never overwrite the old staging/link", async () => {
+  const h=harness();
+  await h.send(payload({ title:"2 pranzo Airbnb HM12ABC345 Francesco" }));
+  const old=h.tables.google_calendar_import_staging[0];
+  Object.assign(old,{ imported_booking_id:2300, import_status:"imported" });
+  const before=clone(old);
+  const result=await (await h.send(payload({ event_id:"different-event", title:"2+1 bambino pranzo Airbnb HM12ABC345 Francesco", updated:newer }))).json();
+  assert.equal(result.reference_collision,true);
+  assert.equal(result.import_status,"needs_review");
+  assert.deepEqual(old,before);
+  assert.equal(h.tables.google_calendar_import_staging.length,2);
+  assert.equal(h.tables.google_calendar_import_staging[1].imported_booking_id,null);
+});
+
+async function reconciledAirbnbHarness() {
+  const h = harness();
+  h.tables.channels.push({ id: 8, name: "Airbnb", type: "ota" });
+  // Synthetic Google observation: the release tests do not need operational snapshots.
+  const body = payload({ title: "2+1 bambino pranzo airbnb Francesco",
+    start: "2026-11-14T12:00:00+01:00" });
+  assert.equal((await h.send(body)).status, 200);
+  const stage = h.tables.google_calendar_import_staging[0];
+  Object.assign(stage, { id: 676, booking_reference: "TA8ZAA5N", customer_name: "FRANCESCO",
+    import_status: "imported", imported_booking_id: 2300 });
+  const booking = { ...stage, id: 2300, is_cancelled: false, was_modified: true,
+    total_to_you: 90, total_customer: 120, total_supplier: 95,
+    payment_status: "pending", supplier_paid_amount: 0 };
+  h.tables.bookings.push(booking);
+  h.writes.length = 0;
+  return { ...h, booking, stage, body };
+}
+
+test("reconciled Airbnb replay keeps TA8ZAA5N and booking 2300 without reopening review", async () => {
+  const h = await reconciledAirbnbHarness();
+  const before = clone(h.booking);
+  for (let i = 0; i < 2; i++) {
+    const result = await (await h.send(h.body)).json();
+    assert.equal(result.import_status, "imported");
+    assert.equal(result.booking_reference, "TA8ZAA5N");
+    assert.equal(result.booking_link_review.compatible, true);
+    assert.equal(h.stage.imported_booking_id, 2300);
+  }
+  assert.deepEqual(h.booking, before);
+  assert.equal(h.canonicalWrites().length, 0);
+  assert.equal(h.writes.filter(w => w.table === "bookings").length, 0);
+});
+
+test("a later identical Airbnb observation stays reconciled but real changes reopen review", async () => {
+  for (const change of [null, { start: "2026-11-21T12:00:00+01:00" },
+    { start: "2026-11-14T13:00:00+01:00" }, { title: "3+1 bambino pranzo airbnb Francesco" },
+    { title: "2+1 bambino pranzo airbnb TA8ZAA5N Francesco aggiornamento" },
+    { title: "2+1 bambino pranzo airbnb AB123456 Francesco" }]) {
+    const h = await reconciledAirbnbHarness();
+    const before = clone(h.booking);
+    const result = await (await h.send({ ...h.body, ...change, updated: "2026-10-11T09:00:00Z" })).json();
+    assert.equal(result.import_status, change ? "needs_review" : "imported");
+    assert.equal(h.stage.imported_booking_id, 2300);
+    if (!change?.title?.includes("AB123456")) assert.equal(h.stage.booking_reference, "TA8ZAA5N");
+    assert.deepEqual(h.booking, before);
+    assert.equal(h.writes.filter(w => w.table === "bookings").length, 0);
+  }
+});
+
+test("Airbnb reschedule before manual reconciliation stays in review and never moves a booking", async () => {
+  const h = await reconciledAirbnbHarness();
+  h.booking.booking_date = "2026-11-07";
+  Object.assign(h.stage, { booking_reference: "FRANCESCO", customer_name: null, import_status: "needs_review" });
+  const before = clone(h.booking);
+  const result = await (await h.send(h.body)).json();
+  assert.equal(result.import_status, "needs_review");
+  assert.deepEqual(h.booking, before);
+  assert.equal(h.stage.imported_booking_id, 2300);
+});
+
+test("a different Google UID with the same name cannot acquire the reconciled Airbnb link", async () => {
+  const h = await reconciledAirbnbHarness();
+  const before = clone(h.stage);
+  await h.send({ ...h.body, event_id: "unrelated-francesco-event", updated: "2026-10-11T09:00:00Z" });
+  assert.deepEqual(h.stage, before);
+  assert.equal(h.tables.google_calendar_import_staging.length, 2);
+  assert.equal(h.tables.google_calendar_import_staging[1].imported_booking_id, null);
+  assert.equal(h.tables.bookings.length, 1);
+});
+
+test("missing chronology, equal-version conflicts and cancellations cannot silently close Airbnb review", async () => {
+  for (const change of [{ updated: undefined }, { status: "tentative" },
+    { title: "3+1 bambino pranzo airbnb Francesco" }, { status: "cancelled", updated: "2026-10-11T09:00:00Z" }]) {
+    const h = await reconciledAirbnbHarness();
+    const before = clone(h.booking);
+    const result = await (await h.send({ ...h.body, ...change })).json();
+    assert.equal(result.import_status, change.status === "cancelled" ? "gcal_cancelled" : "needs_review");
+    assert.equal(h.stage.imported_booking_id, 2300);
+    assert.deepEqual(h.booking, before);
+  }
+});
+
+test("an in-flight Airbnb webhook cannot overwrite a concurrently reconciled staging snapshot", async () => {
+  const h = await reconciledAirbnbHarness();
+  const before = clone(h.booking);
+  let reconciled;
+  h.db.beforeStagingWrite = () => {
+    h.stage.gcal_updated_at = "2026-10-12T09:00:00Z";
+    reconciled = clone(h.stage);
+  };
+  const response = await h.send({ ...h.body, updated: "2026-10-11T09:00:00Z", start: "2026-11-21T12:00:00+01:00" });
+  assert.equal(response.status, 409);
+  assert.deepEqual(h.stage, reconciled);
+  assert.deepEqual(h.booking, before);
 });

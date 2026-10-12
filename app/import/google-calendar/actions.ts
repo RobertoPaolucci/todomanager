@@ -1,5 +1,6 @@
 "use server";
 
+import { inspectBookingLink } from "@/lib/google-calendar-booking-link.mjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
@@ -216,12 +217,14 @@ async function markRow(
 }
 
 async function findExistingByReference(bookingReference: string) {
-  const { data } = await supabaseServer
+  const { data, error } = await supabaseServer
     .from("bookings")
-    .select("id")
+    .select("*")
     .eq("booking_reference", bookingReference)
-    .limit(1);
+    .limit(2);
 
+  if (error) throw new Error("Impossibile verificare il riferimento prenotazione");
+  if (data && data.length > 1) throw new Error("Riferimento prenotazione ambiguo");
   return data?.[0] ?? null;
 }
 
@@ -323,6 +326,16 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     // reinserted by reset/force-import (including a changed reference).
     if (row.channel_id === 7 && row.imported_booking_id) continue;
 
+    if (row.imported_booking_id && !["possible_duplicate", "probable_match"].includes(row.import_status)) {
+      if (row.booking_source === "Airbnb" && ["imported", "already_exists"].includes(row.import_status)) {
+        const { data: linkedBooking, error } = await supabaseServer.from("bookings")
+          .select("*").eq("id", row.imported_booking_id).maybeSingle();
+        if (!error && inspectBookingLink(row, linkedBooking).compatible) continue;
+      }
+      await markRow(row.id, "needs_review", row.imported_booking_id);
+      continue;
+    }
+
     const canProcessNormally =
       row.import_status === "pending" || row.import_status === "rolled_back" ||
       canRetryTuscanEscapeImport(row);
@@ -350,7 +363,8 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     );
 
     if (existingByReference) {
-      await markRow(row.id, "already_exists", existingByReference.id);
+      const inspection = inspectBookingLink({ ...row, ...getImportPeople(row), customer_name: getResolvedCustomerName(row) }, existingByReference);
+      await markRow(row.id, inspection.compatible ? "already_exists" : "needs_review", existingByReference.id);
       continue;
     }
 
@@ -512,6 +526,7 @@ export async function ignoreSelectedGoogleCalendarRows(formData: FormData) {
         imported_booking_id: null,
       })
       .in("id", selectedIds)
+      .is("imported_booking_id", null)
       .in("import_status", [
         "pending",
         "rolled_back",
@@ -538,6 +553,7 @@ export async function resetSelectedGoogleCalendarRows(formData: FormData) {
         imported_booking_id: null,
       })
       .in("id", selectedIds)
+      .is("imported_booking_id", null)
       .in("import_status", [
         "rolled_back",
         "ignored",

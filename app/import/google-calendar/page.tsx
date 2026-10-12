@@ -1,3 +1,4 @@
+import { inspectBookingLink } from "@/lib/google-calendar-booking-link.mjs";
 export const dynamic = "force-dynamic";
 
 import type { ReactNode } from "react";
@@ -51,6 +52,7 @@ type StagingRow = {
 
 type BookingRow = {
   id: number;
+  booking_date: string;
   booking_reference: string | null;
   booking_time: string | null;
   experience_id: number | null;
@@ -971,7 +973,7 @@ function TodoBookingCard({
         <FieldLine label="Data evento GCal" value="—" />
         <FieldLine
           label="Data esperienza"
-          value={formatDateShortIt(selectedDate)}
+          value={formatDateShortIt(booking.booking_date)}
         />
         <FieldLine
           label="Ora esperienza"
@@ -1581,7 +1583,7 @@ export default async function GoogleCalendarImportPage({
   const { data: bookingsData } = await supabaseServer
     .from("bookings")
     .select(
-      "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id, is_cancelled"
+      "id, booking_date, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id, is_cancelled"
     )
     .eq("booking_date", selectedDate)
     .order("booking_time", { ascending: true })
@@ -1606,7 +1608,7 @@ export default async function GoogleCalendarImportPage({
       ? await supabaseServer
           .from("bookings")
           .select(
-            "id, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id, is_cancelled"
+            "id, booking_date, booking_reference, booking_time, experience_id, channel_id, adults, children, infants, customer_name, experience_name, booking_source, notes, business_unit_id, is_cancelled"
           )
           .in("id", linkedBookingIds)
       : { data: [] };
@@ -1808,6 +1810,22 @@ export default async function GoogleCalendarImportPage({
       matchReason = "già importata";
     }
 
+    // Stored links and reference matches remain visible as evidence, but do
+    // not imply that a new event is a date change of the linked booking.
+    if (row.imported_booking_id && !existingByImportedId && row.import_status !== "gcal_cancelled") {
+      computedStatus = "needs_review";
+    }
+    const candidate = existingByImportedId || matchedBooking;
+    if (row.import_status !== "gcal_cancelled" && candidate &&
+      (existingByImportedId || computedStatus === "already_exists")) {
+      const inspection = inspectBookingLink(row, candidate);
+      if (!inspection.compatible) {
+        computedStatus = "needs_review";
+        matchedBooking = candidate;
+        matchReason = "Collegamento da verificare: nuova prenotazione o spostamento da confermare";
+      }
+    }
+
     return {
       ...row,
       computedStatus,
@@ -1833,7 +1851,7 @@ export default async function GoogleCalendarImportPage({
 
   const importedBookingIdsFromGoogle = new Set(
     rowsWithComputedStatus
-      .filter((row) => row.import_status === "imported" && row.imported_booking_id)
+      .filter((row) => row.computedStatus === "imported" && row.imported_booking_id)
       .map((row) => row.imported_booking_id as number)
   );
 

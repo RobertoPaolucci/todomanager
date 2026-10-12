@@ -1,3 +1,4 @@
+import * as bookingLink from "../lib/google-calendar-booking-link.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -7,12 +8,12 @@ import * as observation from '../lib/google-calendar-observation.mjs';
 import * as canonicalSync from '../lib/google-calendar-canonical-sync.mjs';
 import * as reconciliation from '../lib/google-calendar-tuscan-reconciliation.mjs';
 
-function harness(existing = null, { standardPrices = false } = {}) {
+function harness(existing = null, { standardPrices = false, bookings = [], channels = [{ id: 7, name: 'Tuscan Escape' }] } = {}) {
   const writes = [];
   const db = { from(table) {
     let operation = 'select', payload;
     const q = {
-      select() { return q; }, eq() { return q; }, in() { return q; },
+      select() { return q; }, eq() { return q; }, in() { return q; }, is() { return q; },
       order() { return q; }, limit() { return q; },
       update(value) { operation = 'update'; payload = value; return q; },
       insert(value) { operation = 'insert'; payload = value; return q; },
@@ -28,7 +29,7 @@ function harness(existing = null, { standardPrices = false } = {}) {
       }
       const rows = {
         google_calendar_import_staging: existing ? [existing] : [],
-        bookings: [], channels: [{ id: 7, name: 'Tuscan Escape' }],
+        bookings, channels,
         experiences: [{ id: 7, name: 'PRANZO', supplier_id: 3, supplier_unit_cost: standardPrices ? 38 : 20, is_group_pricing: false }],
         experience_channel_prices: [{ your_unit_price: standardPrices ? 38 : 40, public_unit_price: standardPrices ? 0 : 50 }],
       }[table];
@@ -46,6 +47,7 @@ function harness(existing = null, { standardPrices = false } = {}) {
       module: mod, exports: mod.exports, Date, URLSearchParams,
       process: { env: { GOOGLE_CALENDAR_WEBHOOK_SECRET: 'test', NEXT_PUBLIC_SUPABASE_URL: 'test', SUPABASE_SERVICE_ROLE_KEY: 'test' } },
       require(name) {
+        if (name === '@/lib/google-calendar-booking-link.mjs') return bookingLink;
         if (name === 'next/server') return { NextResponse: { json: Response.json } };
         if (name === 'next/cache') return { revalidatePath() {} };
         if (name === 'next/navigation') return { redirect() { throw new Error('redirect'); } };
@@ -157,4 +159,51 @@ test('operational block import keeps placeholder, zero economics and block exper
   const booking=h.writes.find(w=>w.table==='bookings').payload;
   assert.deepEqual([booking.experience_id,booking.adults,booking.non_paying_adults,booking.total_people,booking.pax],[22,1,0,1,1]);
   assert.equal(booking.total_to_you,0); assert.equal(booking.total_supplier_cost,0);
+});
+
+
+test('Airbnb webhook corrects Francesco and reviews the incompatible stored booking link', async () => {
+  const h = harness({ id:676, gcal_uid:'test-event', imported_booking_id:2300, import_status:'already_exists' }, {
+    channels:[{ id:12, name:'Airbnb' }],
+    bookings:[{ id:2300, customer_name:'Francesco', booking_reference:'FRANCESCO', booking_date:'2026-11-07',
+      booking_time:'12:00', adults:2, children:0, infants:0, channel_id:12, experience_id:7, is_cancelled:false }],
+  });
+  const response = await h.load('app/api/webhooks/google-calendar/route.ts').POST(request('2+1 bambino pranzo Airbnb Francesco', { start:'2026-11-14T12:00:00+01:00' }));
+  assert.equal(response.status,200);
+  const result = await response.json();
+  assert.equal(result.customer_name,'Francesco');
+  assert.equal(result.booking_reference,'GCAL-test-event');
+  assert.equal(result.import_status,'needs_review');
+  assert.equal(result.booking_link_review.compatible,false);
+  assert.equal(h.writes[0].payload.imported_booking_id,2300);
+  assert.equal(h.writes.filter(w=>w.table==='bookings').length,0);
+});
+
+test('bulk import refuses incompatible references and linked bookings even with force', async () => {
+  const row = { id:676, gcal_uid:'test-event', booking_date:'2026-11-14', booking_time:'12:00',
+    customer_name:'Francesco', booking_reference:'FRANCESCO', adults:2, children:1, infants:0,
+    experience_id:7, channel_id:12, import_status:'pending', imported_booking_id:null };
+  for (const linked of [null,2300]) {
+    const h=harness({ ...row, imported_booking_id:linked }, { bookings:[{ ...row, id:2300, booking_date:'2026-11-07', is_cancelled:false }] });
+    const form=new FormData(); form.set('row_ids','676'); form.set('force_import','true');
+    await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form),/redirect/);
+    assert.equal(h.writes.filter(w=>w.table==='bookings').length,0);
+    assert.equal(h.writes[0].payload.import_status,'needs_review');
+    assert.equal(h.writes[0].payload.imported_booking_id,2300);
+  }
+});
+
+test('bulk import preserves an already reconciled Airbnb link and reviews a later mismatch', async () => {
+  for (const mismatch of [false, true]) {
+    const row = { id:676, gcal_uid:'same-event', booking_date:'2026-11-14', booking_time:'12:00',
+      customer_name:'FRANCESCO', booking_reference:'TA8ZAA5N', adults:2, children:1, infants:0,
+      experience_id:7, channel_id:8, booking_source:'Airbnb', import_status:'imported', imported_booking_id:2300 };
+    const h = harness(row, { bookings:[{ ...row, id:2300, is_cancelled:false,
+      booking_date: mismatch ? '2026-11-07' : '2026-11-14' }] });
+    const form = new FormData(); form.set('row_ids','676'); form.set('force_import','true');
+    await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form), /redirect/);
+    assert.equal(h.writes.filter(w => w.table === 'bookings').length, 0);
+    assert.equal(h.writes.length, mismatch ? 1 : 0);
+    if (mismatch) assert.equal(h.writes[0].payload.import_status, 'needs_review');
+  }
 });

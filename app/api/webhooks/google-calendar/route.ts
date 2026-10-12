@@ -1,3 +1,4 @@
+import { extractAirbnbBookingData, inspectBookingLink, preserveAirbnbStagingLink } from "@/lib/google-calendar-booking-link.mjs";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
@@ -495,27 +496,6 @@ function extractAnastasiyaPranzoCustomer(title: string) {
       .trim() || null
   );
 }
-
-function extractAirbnbBookingData(title: string) {
-  const text = cleanSpaces(title);
-  const match = text.match(/\bairbnb\s+([A-Z0-9]{6,20})\b(?:\s+(.+))?$/i);
-
-  if (!match) {
-    return {
-      bookingReference: null,
-      customerName: null,
-    };
-  }
-
-  const bookingReference = String(match[1] || "").toUpperCase();
-  const customerName = cleanSpaces(match[2] || "") || null;
-
-  return {
-    bookingReference,
-    customerName,
-  };
-}
-
 
 function extractGenericCustomerName(title: string) {
   const text = cleanSpaces(title);
@@ -1022,7 +1002,10 @@ export async function POST(request: NextRequest) {
           bookingReference
         );
 
-    const existing = existingByGcalUid || existingByBookingReference;
+    // A reference collision across Google events must not overwrite the old
+    // observation or inherit its booking. Keep both events for manual review.
+    const referenceCollision = existingByBookingReference && existingByBookingReference.gcal_uid !== gcalUid;
+    const existing = existingByGcalUid || (referenceCollision ? null : existingByBookingReference);
 
     if (
       existing?.id &&
@@ -1069,7 +1052,7 @@ export async function POST(request: NextRequest) {
 
     if (existing?.imported_booking_id && channelId === 7 && !isTuscanEscapeBlock) importStatus = "needs_review";
 
-    const rowPayload = {
+    let rowPayload = {
       gcal_uid: gcalUid,
       booking_date: start.bookingDate,
       booking_time: start.bookingTime,
@@ -1091,17 +1074,39 @@ export async function POST(request: NextRequest) {
       gcal_html_link: gcalHtmlLink,
     };
 
+    let linkInspection = null;
+    if (existing?.imported_booking_id && channelId !== 7) {
+      const { data: linkedBooking, error: linkError } = await supabase.from("bookings")
+        .select("*").eq("id", existing.imported_booking_id).maybeSingle();
+      rowPayload = preserveAirbnbStagingLink(rowPayload, linkError ? null : linkedBooking, existing, bookingCanonical?.current);
+      importStatus = rowPayload.import_status;
+      linkInspection = inspectBookingLink(rowPayload, linkError ? null : linkedBooking, existing);
+      if (!linkInspection.compatible) rowPayload.import_status = importStatus = "needs_review";
+    }
+    if (referenceCollision) rowPayload.import_status = importStatus = "needs_review";
+
     if (existing?.id) {
-      const { error: updateError } = await supabase
+      let stagingUpdate = supabase
         .from("google_calendar_import_staging")
         .update(rowPayload)
         .eq("id", existing.id);
+      if (existing.imported_booking_id && existing.booking_source === "Airbnb") {
+        // A webhook read before a manual reconciliation must not overwrite it
+        // after waiting for the transaction's row/table locks.
+        for (const [field, value] of Object.entries(existing)) {
+          stagingUpdate = value === null ? stagingUpdate.is(field, null) : stagingUpdate.eq(field, value);
+        }
+      }
+      const { data: updatedStaging, error: updateError } = await stagingUpdate.select("id");
 
       if (updateError) {
         return NextResponse.json(
           { ok: false, error: updateError.message },
           { status: 500 }
         );
+      }
+      if (existing.imported_booking_id && existing.booking_source === "Airbnb" && updatedStaging?.length !== 1) {
+        return NextResponse.json({ ok: false, error: "Staging modificato durante la verifica; rileggere prima di riprovare." }, { status: 409 });
       }
     } else {
       const { error: upsertError } = await supabase
@@ -1154,9 +1159,11 @@ export async function POST(request: NextRequest) {
       channel_id: channelId,
       channel: channelLabel,
       customer_name: customerName,
-      booking_reference: bookingReference,
+      booking_reference: rowPayload.booking_reference,
       non_paying_adults: nonPayingAdults,
       booking_reconciliation: bookingReconciliation,
+      booking_link_review: linkInspection,
+      reference_collision: Boolean(referenceCollision),
       gcal_updated_at: gcalUpdatedAt,
       gcal_html_link: gcalHtmlLink,
     });
