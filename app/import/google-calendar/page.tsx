@@ -48,6 +48,11 @@ type StagingRow = {
   imported_booking_id: number | null;
   gcal_updated_at: string | null;
   gcal_html_link: string | null;
+  cancellation_reconciled: boolean;
+  cancellation_review_required: boolean;
+  cancellation_history: { state: string; actor: string; reason: string; recorded_at: string }[];
+  observed_google_status: string | null;
+  google_observation_verified: boolean | null;
 };
 
 type BookingRow = {
@@ -206,6 +211,8 @@ function statusLabel(status: string) {
       return "Da verificare";
     case "gcal_cancelled":
       return "Cancellata da Google Calendar";
+    case "cancellation_reconciled":
+      return "Cancellazione riconciliata";
     default:
       return status;
   }
@@ -817,6 +824,9 @@ function GoogleCalendarCard({
           strong
         />
         <FieldLine label="Stato" value={statusLabel(row.computedStatus)} />
+        {row.cancellation_history.length > 0 ? (
+          <FieldLine label="Stato Google" value={`${row.observed_google_status || "unknown"} · ${row.google_observation_verified ? "osservazione verificata" : "osservazione non verificata"}`} />
+        ) : null}
         <FieldLine
           label="Data esperienza"
           value={formatDateShortIt(row.booking_date)}
@@ -848,6 +858,18 @@ function GoogleCalendarCard({
       </div>
 
       <div className="mt-4 space-y-3">
+        {row.cancellation_history.length > 0 ? (
+          <NotesBox tone={row.cancellation_reconciled ? "green" : "amber"}>
+            {row.cancellation_reconciled
+              ? "Annullamento operativo riconciliato. Stato Google conservato separatamente."
+              : "Riconciliazione da rivedere. Consultare lo storico della decisione."}
+            {row.cancellation_history.map((entry, index) => (
+              <div key={index} className="mt-2 break-words">
+                {formatDateTimeIt(entry.recorded_at)} · {entry.state} · {entry.actor}: {entry.reason}
+              </div>
+            ))}
+          </NotesBox>
+        ) : null}
         {row.matchReason && row.matchedBooking ? (
           <NotesBox tone="amber">
             Collegamento rilevato:{" "}
@@ -1115,10 +1137,11 @@ function RowActions({
 
   const canImportNormal = status ? isImportable(status) : false;
   const canForceImportRow = status ? isForceImportable(status) : false;
-  const canIgnoreRow = status
+  const hasReconciliation = Boolean(googleRow?.cancellation_reconciled || googleRow?.cancellation_review_required);
+  const canIgnoreRow = status && !hasReconciliation
     ? canIgnore(status) && isActionSelectable(status)
     : false;
-  const canResetRow = status ? canReset(status) : false;
+  const canResetRow = status && !hasReconciliation ? canReset(status) : false;
   const canModifyBooking = Boolean(todoBooking);
   const canCancelBooking = Boolean(todoBooking && !todoBooking.is_cancelled);
   const canRestoreBooking = Boolean(todoBooking && todoBooking.is_cancelled);
@@ -1568,9 +1591,9 @@ export default async function GoogleCalendarImportPage({
   const excludeHorseback = isEnabledParam(params.excludeHorseback);
 
   const { data: stagingData, error: stagingError } = await supabaseServer
-    .from("google_calendar_import_staging")
+    .from("google_calendar_import_review")
     .select(
-      "id, booking_date, booking_time, booking_reference, customer_name, adults, children, infants, experience_id, channel_id, booking_source, notes, gcal_uid, original_title, import_status, imported_booking_id, gcal_updated_at, gcal_html_link"
+      "id, booking_date, booking_time, booking_reference, customer_name, adults, children, infants, experience_id, channel_id, booking_source, notes, gcal_uid, original_title, import_status, imported_booking_id, gcal_updated_at, gcal_html_link, cancellation_reconciled, cancellation_review_required, cancellation_history, observed_google_status, google_observation_verified"
     )
     .eq("booking_date", selectedDate)
     .order("booking_time", { ascending: true })
@@ -1756,7 +1779,11 @@ export default async function GoogleCalendarImportPage({
       computedStatus = "pending";
     }
 
-    if (row.import_status === "gcal_cancelled") {
+    if (row.cancellation_reconciled || row.cancellation_review_required) {
+      computedStatus = row.cancellation_reconciled ? "cancellation_reconciled" : "needs_review";
+      matchedBooking = existingByImportedId;
+      matchReason = "collegamento approvato nella riconciliazione";
+    } else if (row.import_status === "gcal_cancelled") {
       computedStatus = "gcal_cancelled";
       matchedBooking = existingByImportedId;
       matchReason = existingByImportedId

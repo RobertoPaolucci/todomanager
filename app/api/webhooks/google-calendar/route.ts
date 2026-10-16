@@ -891,7 +891,10 @@ export async function POST(request: NextRequest) {
       if (canonical.review_reasons.length) {
         console.warn("Google Calendar canonical sync:", canonical.action, canonical.review_reasons);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "cancellation_reconciliation_unavailable") {
+        return NextResponse.json({ ok: false, error: "Revisione cancellazione non disponibile; riprovare." }, { status: 503 });
+      }
       console.error("Google Calendar canonical sync failed; staging continues.");
     }
     const existingByGcalUid = await getExistingStagingRowByGcalUid(

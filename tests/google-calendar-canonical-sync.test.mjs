@@ -33,8 +33,12 @@ function harness() {
     const filters = [];
     const query = {
       select() { return query; },
-      eq(field, value) { filters.push(row => row[field] === value); return query; },
-      is(field, value) { filters.push(row => (row[field] ?? null) === value); return query; },
+      eq(field, value) { filters.push(row => typeof row[field] === "object" && row[field] !== null
+        ? JSON.stringify(row[field]) === value : row[field] === value); return query; },
+      is(field, value) { filters.push(row => {
+        const [column, index] = field.split("->");
+        return ((index === undefined ? row[column] : row[column]?.[Number(index)]) ?? null) === value;
+      }); return query; },
       gt(field, value) { filters.push(row => row[field] > value); return query; },
       order() { return query; }, limit(value) { limit = value; return query; },
       insert(value) { operation = "insert"; values = clone(value); return query; },
@@ -88,7 +92,7 @@ function harness() {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
     vm.runInNewContext(code, {
-      module: mod, exports: mod.exports, Date,
+      module: mod, exports: mod.exports, Date, Error,
       console: { warn: (...args) => logs.push(args), error: (...args) => logs.push(args) },
       process: { env: { GOOGLE_CALENDAR_WEBHOOK_SECRET: "test-secret",
         NEXT_PUBLIC_SUPABASE_URL: "test", SUPABASE_SERVICE_ROLE_KEY: "test" } },
@@ -428,4 +432,60 @@ test("an in-flight Airbnb webhook cannot overwrite a concurrently reconciled sta
   assert.equal(response.status, 409);
   assert.deepEqual(h.stage, reconciled);
   assert.deepEqual(h.booking, before);
+});
+test("reconciled webhook observes aliases and minimal reactivation before staging skips; failures request retry without staging writes", async () => {
+  const h = harness();
+  await h.send(payload());
+  const approved = [{ state: "approved", decision_id: "test", staging_id: 1, booking_id: 2051 }];
+  h.canonical().cancellation_reconciliation_history = approved;
+  h.canonical().gcal_observation_verified = false;
+  h.canonical().gcal_event_status = "unknown";
+  h.tables.google_calendar_import_staging[0].import_status = "gcal_cancelled";
+  h.tables.google_calendar_import_staging[0].imported_booking_id = 2051;
+  h.tables.google_calendar_event_aliases.push({ id: 1, event_id: h.canonical().id,
+    identity_namespace: "legacy_unscoped", occurrence_id: null,
+    original_uid: "alternate", canonical_uid: plain, verified: true });
+  let calls = 0;
+  h.db.rpc = async (name, args) => {
+    calls++;
+    assert.equal(name, "observe_reconciled_google_cancellation");
+    assert.equal(args.event_id, h.canonical().id);
+    assert.equal(args.observation.status, "confirmed");
+    return { data: [...approved, { state: "reopened" }], error: null };
+  };
+  const response = await h.send({ event_id: "alternate", status: "confirmed", updated: newer });
+  assert.equal(response.status, 200);
+  assert.equal(calls, 1);
+  assert.equal(h.canonical().gcal_event_status, "unknown");
+  assert.equal(h.tables.google_calendar_import_staging.length, 1);
+  for (const failure of [async () => ({ data: null, error: { code: "PGRST202" } }),
+    async () => { throw new Error("network failure"); }]) {
+    h.db.rpc = failure;
+    const count = h.writes.length;
+    assert.equal((await h.send(payload({ updated: newer }))).status, 503);
+    assert.equal(h.writes.length, count);
+  }
+});
+
+test("concurrent approval defeats canonical CAS; replan preserves append-only audit without audit snapshots in filters", async () => {
+  const h = harness();
+  await h.send(payload());
+  h.canonical().cancellation_reconciliation_history = [];
+  h.db.beforeWrite = () => {
+    h.canonical().cancellation_reconciliation_history = [{ state: "approved", decision_id: "concurrent" }];
+  };
+  let calls = 0;
+  h.db.rpc = async () => {
+    calls++;
+    if (h.canonical().cancellation_reconciliation_history.length === 1) {
+      h.canonical().cancellation_reconciliation_history.push({ state: "reopened", decision_id: "concurrent" });
+    }
+    return { data: clone(h.canonical().cancellation_reconciliation_history), error: null };
+  };
+  await h.send(payload({ title: "4 pranzo", updated: newer }));
+  assert.equal(calls, 1);
+  assert.equal(h.canonical().effective_total_guests, 4);
+  assert.equal(h.canonical().cancellation_reconciliation_history.length, 2);
+  assert.equal(h.canonicalWrites().length, 2);
+  assert.ok(h.canonicalWrites().every(write => !("cancellation_reconciliation_history" in write.values)));
 });

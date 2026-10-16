@@ -1353,7 +1353,12 @@ begin
     public.google_calendar_events, public.google_calendar_event_aliases,
     public.fmdq_monthly_invoices, public.experiences in share row exclusive mode;
   if exists (select 1 from pg_trigger where tgrelid in ('public.bookings'::regclass,'public.google_calendar_events'::regclass)
-    and not tgisinternal and tgenabled <> 'D' and (tgtype::integer & 16) <> 0)
+    and not tgisinternal and tgenabled <> 'D' and (tgtype::integer & 16) <> 0
+    -- Only the audited BEFORE ROW guard; it remains enabled and preserves audit.
+    and not (tgrelid='public.google_calendar_events'::regclass
+      and tgname='guard_google_cancellation_history'
+      and tgfoid is not distinct from to_regprocedure('public.guard_google_cancellation_history()')
+      and tgtype=19 and tgnargs=0 and tgqual is null))
     or exists (select 1 from pg_rewrite where ev_class in ('public.bookings'::regclass,'public.google_calendar_events'::regclass)
     and ev_type = '2' and ev_enabled <> 'D') then raise exception 'Review UPDATE hooks first'; end if;
   -- Complete preflight before ANY update; fail closed on manual edits, cancellation,
@@ -1364,8 +1369,8 @@ begin
     select to_jsonb(row) into e from public.google_calendar_events row where id=(t->'canonical_before'->>'id')::bigint;
     before_b := to_jsonb(jsonb_populate_record(null::public.bookings,t->'before'));
     after_b := to_jsonb(jsonb_populate_record(null::public.bookings,t->'after'));
-    before_e := to_jsonb(jsonb_populate_record(null::public.google_calendar_events,t->'canonical_before'));
-    after_e := to_jsonb(jsonb_populate_record(null::public.google_calendar_events,t->'canonical_after'));
+    before_e := to_jsonb(jsonb_populate_record(null::public.google_calendar_events,jsonb_build_object('cancellation_reconciliation_history','[]'::jsonb) || (t->'canonical_before')));
+    after_e := to_jsonb(jsonb_populate_record(null::public.google_calendar_events,jsonb_build_object('cancellation_reconciliation_history','[]'::jsonb) || (t->'canonical_after')));
     if b is null or e is null or s is distinct from to_jsonb(jsonb_populate_record(null::public.google_calendar_import_staging,t->'staging'))
       or not ((b=before_b and e=before_e) or (b=after_b and e=after_e)) then
       raise exception 'October correction: snapshot/manual/cancellation mismatch for %', t->'before'->>'id';
@@ -1412,7 +1417,7 @@ begin
     if (select to_jsonb(row) from public.bookings row where id=(t->'before'->>'id')::bigint)
         is distinct from to_jsonb(jsonb_populate_record(null::public.bookings,t->'after'))
       or (select to_jsonb(row) from public.google_calendar_events row where id=(t->'canonical_before'->>'id')::bigint)
-        is distinct from to_jsonb(jsonb_populate_record(null::public.google_calendar_events,t->'canonical_after')) then
+        is distinct from to_jsonb(jsonb_populate_record(null::public.google_calendar_events,jsonb_build_object('cancellation_reconciliation_history','[]'::jsonb) || (t->'canonical_after'))) then
       raise exception 'October correction postcondition failed';
     end if;
   end loop;

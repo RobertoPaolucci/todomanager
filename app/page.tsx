@@ -268,6 +268,7 @@ type GoogleCalendarImportRow = {
   import_origin: string | null;
   gcal_updated_at: string | null;
   gcal_html_link: string | null;
+  cancellation_review_required: boolean;
 };
 
 
@@ -506,6 +507,7 @@ function isGoogleCalendarRowAlreadyManaged(
   bookings: DashboardBookingForMatch[],
   referenceCodeMap: Map<string, DashboardBookingForMatch[]>
 ) {
+  if (row.cancellation_review_required) return false;
   if (row.import_status === "gcal_cancelled") {
     return false;
   }
@@ -549,7 +551,7 @@ async function loadCanonicalAnnualPresence() {
 
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabaseServer
-      .from("google_calendar_events")
+      .from("google_calendar_operational_events")
       .select("id, event_date, effective_total_guests")
       .gte("event_date", "2025-01-01")
       .lt("event_date", "2027-01-01")
@@ -628,13 +630,13 @@ export default async function Home({ searchParams }: PageProps) {
 
   const { data: googleCalendarImportData, error: googleCalendarImportError } =
     await supabaseServer
-      .from("google_calendar_import_staging")
+      .from("google_calendar_import_review")
       .select(
-        "id, booking_reference, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link"
+        "id, booking_reference, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link, cancellation_review_required"
       )
+      .eq("cancellation_reconciled", false)
       .eq("import_origin", "make")
-      .in("import_status", googleImportStatusesToShow)
-      .gte("booking_date", todayStr)
+      .or(`and(import_status.in.(${googleImportStatusesToShow.join(",")}),booking_date.gte.${todayStr}),cancellation_review_required.eq.true`)
       .order("id", { ascending: false })
       .limit(200);
 
@@ -854,7 +856,8 @@ export default async function Home({ searchParams }: PageProps) {
   }
 
   const googleCalendarImportsRaw =
-    (googleCalendarImportData || []) as GoogleCalendarImportRow[];
+    ((googleCalendarImportData || []) as GoogleCalendarImportRow[]).map(row =>
+      row.cancellation_review_required ? { ...row, import_status: "needs_review" } : row);
 
   const googleCalendarImports = googleCalendarImportsRaw
     .filter((row) => {

@@ -175,9 +175,12 @@ async function database() {
   await db.exec(readFileSync("supabase/migrations/202609170001_google_calendar_canonical_phase1.sql","utf8"));
   await db.exec(readFileSync("supabase/migrations/202609300001_google_calendar_verified_observation.sql","utf8"));
   await db.exec(readFileSync("supabase/migrations/202610090001_tuscan_google_booking_reconciliation.sql","utf8"));
+  // The cancellation guard must not disable the existing Tuscan transaction.
+  await db.exec(readFileSync("supabase/migrations/202610120001_google_calendar_cancellation_reconciliation.sql","utf8"));
   return db;
 }
 async function insert(db, table, row) {
+  if (table === "google_calendar_events") row = { cancellation_reconciliation_history: [], ...row };
   await db.query(`insert into public.${table} overriding system value select * from jsonb_populate_record(null::public.${table},$1::jsonb)`,[JSON.stringify(row)]);
 }
 async function get(db, table, id) {
@@ -278,6 +281,43 @@ test("historical SQL aborts all six on manual edits, cancellations, duplicate re
       await assert.rejects(db.exec(body)); await db.exec("rollback");
       assert.equal((await get(db,"bookings",2145)).adults,1);
       assert.equal((await get(db,"google_calendar_events",1291)).event_classification,"operational_block");
+    }
+  } finally { await db.close(); }
+});
+
+
+test("hook exceptions reject impersonation and historical repair preserves nonempty audit",sqlOptions,async()=>{
+  const db=await database();
+  try {
+    await seedOctober(db);
+    const before=(await db.query("select to_jsonb(r) as value from bookings r order by id")).rows;
+    const body=historicalSql.slice(historicalSql.indexOf("do $correction$"),historicalSql.lastIndexOf("commit;"));
+    for (const mutation of [
+      "create function public.unreviewed() returns trigger language plpgsql as 'begin return new; end'; create trigger extra before update on google_calendar_events for each row execute function public.unreviewed()",
+      "create function public.unreviewed() returns trigger language plpgsql as 'begin return new; end'; drop trigger guard_google_cancellation_history on google_calendar_events; create trigger guard_google_cancellation_history before update on google_calendar_events for each row execute function public.unreviewed()",
+      "update google_calendar_events set cancellation_reconciliation_history=jsonb_build_array(jsonb_build_object('state','reopened','decision_id','existing')) where id=1291",
+    ]) {
+      await db.exec("begin"); await db.exec(mutation);
+      await assert.rejects(db.exec(body),/Review UPDATE hooks|snapshot.manual.cancellation mismatch/);
+      await db.exec("rollback");
+      assert.deepEqual((await db.query("select to_jsonb(r) as value from bookings r order by id")).rows,before);
+    }
+  } finally { await db.close(); }
+});
+
+test("Tuscan RPC rejects guard names on the wrong table or function",sqlOptions,async()=>{
+  const db=await database(), s=scenario(9);
+  try {
+    await seedScenario(db,s);
+    const before=await get(db,"bookings",s.booking.id);
+    for (const mutation of [
+      "create trigger guard_reconciled_google_staging before update on bookings for each row execute function public.guard_reconciled_google_staging()",
+      "create function public.unreviewed() returns trigger language plpgsql as 'begin return new; end'; drop trigger guard_reconciled_google_staging on google_calendar_import_staging; create trigger guard_reconciled_google_staging before update on google_calendar_import_staging for each row execute function public.unreviewed()",
+    ]) {
+      await db.exec("begin"); await db.exec(mutation);
+      await assert.rejects((await call(db,s,plan(s).values)).run(),/Review UPDATE hooks/);
+      await db.exec("rollback");
+      assert.deepEqual(await get(db,"bookings",s.booking.id),before);
     }
   } finally { await db.close(); }
 });
