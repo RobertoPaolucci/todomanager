@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 // Real application modules, with only framework/database/PDF drawing boundaries replaced.
-export function pricingHarness() {
+export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
   const channel = { id: 22, name: 'Test agency', type: 'agency', fattura_mensile_fmdq: true };
   const experience = { id: 7, name: 'Tour della Cinta Senese con pranzo', supplier_id: 3,
     business_unit_id: 1, supplier_unit_cost: 38, is_group_pricing: false, bokun_id: '956472' };
@@ -26,12 +26,18 @@ export function pricingHarness() {
     business_units: [{ id: 1, code: 'fmdq' }], business_unit_internal_suppliers: [{ business_unit_id: 1, supplier_id: 3 }],
     fmdq_monthly_invoices: [], suppliers: [booking.suppliers],
     google_calendar_import_staging: [], google_calendar_events: [], google_calendar_event_aliases: [] };
-  const writes = [], pdfTexts = [], hooks = [];
+  const writes = [], pdfTexts = [], hooks = [], effects = [];
   let hookIndex = 0, beforeUpdate = null;
   const db = { from(table) {
     let predicates = [], operation = 'select', payload, limit = Infinity;
     const q = {
       select() { return q; }, eq(k, v) { predicates.push(row => row[k] === v); return q; },
+      ilike(k, pattern) {
+        // Reference allocation queries use a literal prefix followed by %.
+        if (!/^[A-Z]+-%$/i.test(pattern)) throw new Error(`Unexpected ilike pattern ${pattern}`);
+        predicates.push(row => String(row[k] ?? '').toLowerCase().startsWith(pattern.slice(0, -1).toLowerCase()));
+        return q;
+      },
       is(k, v) { predicates.push(row => (row[k] ?? null) === v); return q; },
       gte(k, v) { predicates.push(row => row[k] >= v); return q; }, lte(k, v) { predicates.push(row => row[k] <= v); return q; },
       gt(k, v) { predicates.push(row => row[k] > v); return q; },
@@ -75,7 +81,7 @@ export function pricingHarness() {
       if (name === 'next/navigation') return { redirect(path) { throw new Error(`REDIRECT:${path}`); } };
       if (name === 'next/server') return { NextResponse: { json: Response.json } };
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
-      if (name === 'react') return { useMemo: fn => fn(), useEffect() {}, useState(initial) {
+      if (name === 'react') return { useMemo: fn => fn(), useEffect(effect) { if (runEffects) effects.push(effect); }, useState(initial) {
         const i = hookIndex++;
         if (!(i in hooks)) hooks[i] = initial;
         return [hooks[i], value => { hooks[i] = typeof value === 'function' ? value(hooks[i]) : value; }];
@@ -93,7 +99,7 @@ export function pricingHarness() {
       throw new Error(`Unexpected import ${name}`);
     };
     vm.runInNewContext(code, { module: mod, exports: mod.exports, require: requireMock,
-      console: { log() {}, error() {} }, Date, Set, Map, Error, Response, Request, URL, Buffer, Uint8Array }, { filename: file });
+      console: { log() {}, error() {} }, fetch: fetchMock, Date, Set, Map, Error, Response, Request, URL, Buffer, Uint8Array }, { filename: file });
     cache.set(file, mod.exports);
     return mod.exports;
   }
@@ -119,14 +125,15 @@ export function pricingHarness() {
     }));
     return { status: response.status, body: await response.json() };
   }
-  function renderForm() {
+  function renderForm(props = {}) {
     hookIndex = 0;
     return load('components/BookingForm.tsx').default({ channels: tables.channels,
       experiences: tables.experiences.map(item => ({ ...item, is_fmdq_internal_supplier: true,
         experience_channel_prices: tables.experience_channel_prices.filter(p => p.experience_id === item.id) })),
-      today: '2026-09-29', initialData: booking, isEditing: true });
+      today: '2026-09-29', initialData: booking, isEditing: true, ...props });
   }
   return { tables, booking, experience, channel, price, writes, pdfTexts, load, form, save, webhook, renderForm,
+    flushEffects() { for (const effect of effects.splice(0)) effect(); },
     beforeUpdate(callback) { beforeUpdate = callback; } };
 }
 

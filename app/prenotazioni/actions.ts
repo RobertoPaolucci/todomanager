@@ -615,9 +615,7 @@ export async function updateBooking(formData: FormData) {
   const experience_id = Number(formData.get("experience_id") || 0);
 
   const raw_booking_reference = formData.get("booking_reference");
-  const manual_booking_reference = normalizeBookingReference(
-    raw_booking_reference
-  );
+  const submittedBookingReference = normalizeBookingReference(raw_booking_reference);
 
   const booking_created_at = String(
     formData.get("booking_created_at") || ""
@@ -850,94 +848,65 @@ export async function updateBooking(formData: FormData) {
   const oldSupplierId = Number(currentBooking.supplier_id || 0);
   const newSupplierId = Number(experience.supplier_id || 0);
 
-  const shouldAutoGenerateBookingReference =
-    isAutoReferenceChannel(channel) && !manual_booking_reference;
+  // Editing an existing booking must never allocate a new reference.
+  // Omit untouched references, including NULL, from the update payload.
+  const referenceChanged = formData.has("booking_reference") &&
+    String(raw_booking_reference ?? "") !== String(currentBooking.booking_reference ?? "");
+  const channelChanged = channel_id !== Number(currentBooking.channel_id);
+  const finalBookingReference = referenceChanged ? submittedBookingReference : currentBooking.booking_reference;
 
-  let updateError: any = null;
-  let finalBookingReference: string | null = null;
-  const maxAttempts = shouldAutoGenerateBookingReference ? 5 : 1;
+  let updateQuery = supabaseServer
+    .from("bookings")
+    .update({
+      business_unit_id,
+      ...(channelChanged ? { channel_id, booking_source: channel.name } : {}),
+      experience_id,
+      supplier_id: experience.supplier_id,
+      ...(referenceChanged ? { booking_reference: submittedBookingReference } : {}),
+      booking_created_at,
+      customer_name,
+      customer_phone,
+      customer_email,
+      experience_name: experience.name,
+      booking_date,
+      booking_time,
+      adults,
+      children,
+      infants,
+      non_paying_adults,
+      total_people,
+      pax: total_people,
+      total_amount: total_customer,
+      agreed_unit_price,
+      ...(agreed_unit_price !== null || currentBooking.agreed_unit_price != null
+        ? { total_to_you_source: null } : {}),
+      your_unit_price,
+      public_unit_price,
+      supplier_unit_cost,
+      total_to_you,
+      total_customer,
+      total_supplier_cost,
+      margin_total,
+      ...(formData.has("customer_payment_status") ? { customer_payment_status } : {}),
+      ...(formData.has("supplier_payment_status") ? { supplier_payment_status } : {}),
+      ...(formData.has("supplier_amount_paid") ? { supplier_amount_paid } : {}),
+      notes,
+    })
+    .eq("id", id);
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const booking_reference = await resolveBookingReference({
-      channel,
-      rawReference: raw_booking_reference,
-    });
-
-    let updateQuery = supabaseServer
-      .from("bookings")
-      .update({
-        business_unit_id,
-        channel_id,
-        booking_source: channel.name,
-        experience_id,
-        supplier_id: experience.supplier_id,
-        booking_reference,
-        booking_created_at,
-        customer_name,
-        customer_phone,
-        customer_email,
-        experience_name: experience.name,
-        booking_date,
-        booking_time,
-        adults,
-        children,
-        infants,
-        non_paying_adults,
-        total_people,
-        pax: total_people,
-        total_amount: total_customer,
-        agreed_unit_price,
-        ...(agreed_unit_price !== null || currentBooking.agreed_unit_price != null
-          ? { total_to_you_source: null } : {}),
-        your_unit_price,
-        public_unit_price,
-        supplier_unit_cost,
-        total_to_you,
-        total_customer,
-        total_supplier_cost,
-        margin_total,
-        ...(formData.has("customer_payment_status") ? { customer_payment_status } : {}),
-        ...(formData.has("supplier_payment_status") ? { supplier_payment_status } : {}),
-        ...(formData.has("supplier_amount_paid") ? { supplier_amount_paid } : {}),
-        notes,
-      })
-      .eq("id", id);
-
-    updateQuery = currentBooking.agreed_unit_price == null
-      ? updateQuery.is("agreed_unit_price", null)
-      : updateQuery.eq("agreed_unit_price", currentBooking.agreed_unit_price);
-    const { data: updated, error } = await updateQuery.select("id").maybeSingle();
-    if (!error && !updated) {
-      return { error: "Il prezzo concordato è cambiato durante il salvataggio. Ricarica la prenotazione prima di riprovare." };
-    }
-
-    if (!error) {
-      finalBookingReference = booking_reference;
-      updateError = null;
-      break;
-    }
-
-    if (
-      shouldAutoGenerateBookingReference &&
-      isDuplicateBookingReferenceError(error)
-    ) {
-      updateError = error;
-      continue;
-    }
-
-    updateError = error;
-    break;
+  updateQuery = currentBooking.agreed_unit_price == null
+    ? updateQuery.is("agreed_unit_price", null)
+    : updateQuery.eq("agreed_unit_price", currentBooking.agreed_unit_price);
+  const { data: updated, error } = await updateQuery.select("id").maybeSingle();
+  if (!error && !updated) {
+    return { error: "Il prezzo concordato è cambiato durante il salvataggio. Ricarica la prenotazione prima di riprovare." };
   }
 
-  if (updateError) {
-    if (isDuplicateBookingReferenceError(updateError)) {
-      return {
-        error:
-          "⚠️ Attenzione: Questo Numero di Riferimento è già usato da un'altra prenotazione.",
-      };
+  if (error) {
+    if (isDuplicateBookingReferenceError(error)) {
+      return { error: "⚠️ Attenzione: Questo Numero di Riferimento è già usato da un'altra prenotazione." };
     }
-
-    return { error: `Errore durante la modifica: ${updateError.message}` };
+    return { error: `Errore durante la modifica: ${error.message}` };
   }
 
   if (paymentEditRequested) await syncSupplierPaymentsFromBookingChange({
