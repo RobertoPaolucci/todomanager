@@ -9,6 +9,7 @@ import { buildDashboardAgenda } from "@/lib/dashboard-agenda";
 import { getDashboardStats } from "@/lib/dashboard";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBookingHistoryIdentity } from "@/lib/bokun-booking-identity";
+import GoogleCalendarAlertReadButton from "@/components/GoogleCalendarAlertReadButton";
 
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
@@ -269,6 +270,7 @@ type GoogleCalendarImportRow = {
   gcal_updated_at: string | null;
   gcal_html_link: string | null;
   cancellation_review_required: boolean;
+  dashboard_event_version?: string;
 };
 
 
@@ -628,17 +630,26 @@ export default async function Home({ searchParams }: PageProps) {
     "gcal_cancelled",
   ];
 
-  const { data: googleCalendarImportData, error: googleCalendarImportError } =
-    await supabaseServer
-      .from("google_calendar_import_review")
-      .select(
-        "id, booking_reference, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link, cancellation_review_required"
-      )
+  function loadGoogleCalendarImports(withReadReceipts: boolean) {
+    let query = supabaseServer
+      .from(withReadReceipts ? "google_calendar_dashboard_alerts" : "google_calendar_import_review")
+      .select("id, booking_reference, booking_date, booking_time, customer_name, adults, children, infants, experience_id, channel_id, booking_source, import_status, original_title, notes, import_origin, gcal_updated_at, gcal_html_link, cancellation_review_required" +
+        (withReadReceipts ? ", dashboard_event_version" : ""));
+    if (withReadReceipts) query = query.eq("dashboard_acknowledged", false);
+    return query
       .eq("cancellation_reconciled", false)
       .eq("import_origin", "make")
       .or(`and(import_status.in.(${googleImportStatusesToShow.join(",")}),booking_date.gte.${todayStr}),cancellation_review_required.eq.true`)
       .order("id", { ascending: false })
-      .limit(200);
+      .limit(200).returns<GoogleCalendarImportRow[]>();
+  }
+
+  let { data: googleCalendarImportData, error: googleCalendarImportError } = await loadGoogleCalendarImports(true);
+  const readReceiptsUnavailable = Boolean(googleCalendarImportError);
+  if (readReceiptsUnavailable) {
+    // Before the prepared migration is applied, keep all existing alerts visible.
+    ({ data: googleCalendarImportData, error: googleCalendarImportError } = await loadGoogleCalendarImports(false));
+  }
 
   if (googleCalendarImportError) {
     console.error(
@@ -1601,6 +1612,11 @@ export default async function Home({ searchParams }: PageProps) {
           <div id="google-calendar-imports" className="order-1 md:order-none">
           <SectionCard title="📥 Nuove da Google Calendar">
             <div className="space-y-3">
+              {readReceiptsUnavailable && (
+                <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800">
+                  Presa visione temporaneamente non disponibile. Gli avvisi restano visibili.
+                </p>
+              )}
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -1673,13 +1689,16 @@ export default async function Home({ searchParams }: PageProps) {
                             : ""}
                         </div>
 
-                        <div className="mt-2">
+                        <div className="mt-2 flex flex-wrap items-start gap-2">
                           <Link
                             href={importDateHref}
                             className="inline-flex rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-zinc-800 shadow-sm transition hover:bg-zinc-100"
                           >
                             Apri import del giorno
                           </Link>
+                          {!readReceiptsUnavailable && row.dashboard_event_version && (
+                            <GoogleCalendarAlertReadButton alertId={row.id} eventVersion={row.dashboard_event_version} />
+                          )}
                         </div>
                       </div>
                     );

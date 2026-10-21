@@ -62,7 +62,7 @@ test('dashboard consumes all pages, deduplicates and preserves agenda links, pax
     row(1006, '2026-09-26'));
   const ranges = [];
   const db = { from(table) {
-    const query = { select() { return query; }, order() { return query; }, gte() { return query; }, lt() { return query; },
+    const query = { select() { return query; }, returns() { return query; }, order() { return query; }, gte() { return query; }, lt() { return query; },
       neq() { return query; }, not() { return query; }, eq() { return query; }, in() { return query; }, or() { return query; }, limit() { return query; },
       range(from, to) { if (table === 'bookings') ranges.push([from, to]); return Promise.resolve({ data: table === 'bookings' ? rows.slice(from, to + 1) : [], error: null }); },
       then(ok, fail) { return Promise.resolve({ data: [], error: null }).then(ok, fail); },
@@ -76,6 +76,7 @@ test('dashboard consumes all pages, deduplicates and preserves agenda links, pax
     '@/components/SectionCard': { default: ({ title, children }) => createElement('section', null, createElement('h2', null, title), children) },
     '@/components/NotificationCenter': { default: () => null },
     '@/components/CognanelloAvailabilityNotifications': { default: () => null },
+    '@/components/GoogleCalendarAlertReadButton': { default: () => null },
   }, { Date: FixedDate }).default;
   const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve({}) }));
   const agenda = html.slice(html.indexOf('<h2>Agenda'));
