@@ -12,8 +12,23 @@ const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
 
-async function render(rows) {
+const listModule = { exports: {} };
+vm.runInNewContext(ts.transpileModule(readFileSync('components/NotificationCenterList.tsx', 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+}).outputText, {
+  module: listModule, exports: listModule.exports,
+  require(name) {
+    if (name === 'next/link') return { default: 'a' };
+    if (name === 'next/navigation') return { useRouter: () => ({ refresh() {} }) };
+    if (name === '@/app/booking-cancellation-alert-actions') return {};
+    if (name === 'react' || name === 'react/jsx-runtime') return require(name);
+    throw new Error(`Unexpected client dependency: ${name}`);
+  },
+});
+
+async function render(rows, { viewError = false, bookingError = false } = {}) {
   const before = structuredClone(rows);
+  let table;
   const query = {
     select(fields) {
       const selected = fields.split(',').map(s => s.trim());
@@ -22,15 +37,31 @@ async function render(rows) {
       return query;
     },
     not() { return query; },
-    async order() { return { data: structuredClone(rows), error: null }; },
+    async order() {
+      if ((table === 'booking_dashboard_alerts' && viewError) || (table === 'bookings' && bookingError)) {
+        return { data: null, error: { message: 'Unavailable' } };
+      }
+      return { data: structuredClone(rows).map(row => {
+        if (table === 'bookings') {
+          delete row.dashboard_event_version;
+          delete row.dashboard_acknowledged;
+        }
+        return row;
+      }), error: null };
+    },
   };
   const loadedModule = { exports: {} };
   vm.runInNewContext(outputText, {
     module: loadedModule, exports: loadedModule.exports,
     require(name) {
       if (name === 'next/link') return { default: 'a' };
+      if (name === '@/components/NotificationCenterList') return listModule.exports;
       if (name === '@/lib/supabase-server') return {
-        supabaseServer: { from(table) { assert.equal(table, 'bookings'); return query; } },
+        supabaseServer: { from(name) {
+          assert.ok(['bookings', 'booking_dashboard_alerts'].includes(name));
+          table = name;
+          return query;
+        } },
       };
       if (name === 'react/jsx-runtime') return require(name);
       throw new Error(`Unexpected dependency: ${name}`);
@@ -53,6 +84,36 @@ test('Eva restored is hidden, actual cancellation remains and distinct Valer boo
   assert.ok(!html.includes('href="/prenotazioni?highlight=2100"'));
   for (const id of [1717, 2106, 2107]) assert.ok(html.includes(`href="/prenotazioni?highlight=${id}"`));
   assert.ok(html.includes('3 Avvisi'));
+});
+
+test('persisted read receipts hide only one version and refresh the counter on every server render', async () => {
+  const rows = [1717, 1718].map(id => ({ id, notes: '🔴 Prenotazione cancellata', is_cancelled: true,
+    dashboard_event_version: `v1:${'a'.repeat(32)}`, dashboard_acknowledged: false }));
+  assert.match(await render(rows), /2 Avvisi/);
+  rows[0].dashboard_acknowledged = true;
+  for (let reload = 0; reload < 3; reload++) {
+    const html = await render(rows);
+    assert.match(html, /1 Avviso/);
+    assert.doesNotMatch(html, /highlight=1717/);
+    assert.match(html, /highlight=1718/);
+    assert.match(html, /Apri prenotazione/);
+    assert.equal((html.match(/Letto · Nascondi avviso/g) || []).length, 1);
+    assert.doesNotMatch(html, /<a\b[^>]*>[\s\S]*?<button[\s\S]*?<\/a>/);
+  }
+});
+
+test('missing migration keeps cancellation visible without read button and shows an accessible error', async () => {
+  const html = await render([{ id: 1717, notes: '🔴 Prenotazione cancellata', is_cancelled: true }], { viewError: true });
+  assert.match(html, /highlight=1717/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Presa visione temporaneamente non disponibile/);
+  assert.doesNotMatch(html, /Letto · Nascondi avviso/);
+});
+
+test('booking read failure never claims there are no alerts to read', async () => {
+  const html = await render([], { viewError: true, bookingError: true });
+  assert.match(html, /Impossibile caricare gli avvisi/);
+  assert.doesNotMatch(html, /Nessun avviso da leggere/);
 });
 
 test('cancelled green and unknown-state red/green alerts are hidden; yellow remains', async () => {
