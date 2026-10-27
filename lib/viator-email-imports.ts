@@ -52,7 +52,7 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     ...(bookingId !== null ? { booking_id: bookingId, action } : {}),
   });
   if (!["archived", "processing", "processing_failed"].includes(row.status)) return response(row.status, 200, false,
-    ["create_booking", "cancel_booking"].includes(row.parsed_data?.classification?.action) ? row.booking_id : null,
+    ["create_booking", "cancel_booking", "reconcile_google_booking"].includes(row.parsed_data?.classification?.action) ? row.booking_id : null,
     row.parsed_data?.classification?.action);
   if (row.status === "processing" && Date.now() - Date.parse(row.processing_started_at) < LEASE_MS) return response("processing", 503, true);
 
@@ -110,7 +110,27 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
         }
       }
     }
-    let classification = classifyViatorEmail(parsed, bookings, mappings, payload.subject ?? "");
+    let classification: ReturnType<typeof classifyViatorEmail> & {
+      candidate_staging_ids?: number[]; candidate_booking_ids?: number[];
+    } = classifyViatorEmail(parsed, bookings, mappings, payload.subject ?? "");
+    // A numeric reference in a Google title is evidence to review, not a new
+    // commercial booking. Query across dates so reschedules cannot hide it.
+    if (parsed.event_type === "confirmed" && parsed.booking_reference && !parsed.warnings.length) {
+      const google = await db.from("google_calendar_import_staging")
+        .select("id, original_title, imported_booking_id")
+        .in("channel_id", [2, 6]).ilike("original_title", `%${parsed.booking_reference.slice(3)}%`).limit(101);
+      if (google.error) throw new Error("google_booking_lookup_failed");
+      const number = parsed.booking_reference.slice(3);
+      const candidates = (google.data ?? []).filter(s =>
+        new RegExp(`(^|[^A-Z0-9])(?:BR-)?${number}([^A-Z0-9]|$)`, "i").test(s.original_title ?? ""));
+      if (candidates.length || google.data?.length === 101) {
+        classification = { ...classification, status: "needs_review", would_do: "none",
+          reason: google.data?.length === 101 ? "google_candidate_limit_exceeded" : "google_reference_requires_reconciliation",
+          candidate_staging_ids: candidates.map(s => s.id),
+          candidate_booking_ids: candidates.map(s => s.imported_booking_id).filter(Boolean),
+        };
+      }
+    }
     // Envelope scope never overrides the fixed FMDQ scope. In live mode a
     // contradictory scope is reviewed rather than silently used for a write.
     if (processingRequested && ((payload.business_unit_id != null && payload.business_unit_id !== 1) ||
@@ -119,7 +139,8 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     }
     const parsedData = {
       ...parsed, classification, processing_requested: processingRequested,
-      processing_mode: "dry_run", booking_writes_blocked_reason: "phase_1_historical_transition_pending",
+      processing_mode: "dry_run", booking_writes_blocked_reason: processingRequested
+        ? classification.reason : "processing_disabled",
       transport_warnings: received && !receivedAt ? ["invalid_received_at"] : [],
     };
     if (processingRequested && parsed.event_type === "confirmed" && classification.status === "ready" &&
@@ -166,7 +187,7 @@ export async function archiveAndClassifyViatorEmail(db: SupabaseClient, payload:
     return response(classification.status);
   } catch (error) {
     // Store only controlled error codes; never database messages, raw emails or secrets in HTTP/logs.
-    const allowed = ["booking_lookup_failed", "mapping_lookup_failed", "mapping_business_unit_mismatch", "classification_save_failed", "booking_creation_failed", "booking_cancellation_failed"];
+    const allowed = ["booking_lookup_failed", "google_booking_lookup_failed", "mapping_lookup_failed", "mapping_business_unit_mismatch", "classification_save_failed", "booking_creation_failed", "booking_cancellation_failed"];
     const code = error instanceof Error && allowed.includes(error.message) ? error.message : "email_processing_failed";
     const saved = await save({
       ...parsingColumns(), parsed_data: parsed ?? {}, status: "processing_failed",

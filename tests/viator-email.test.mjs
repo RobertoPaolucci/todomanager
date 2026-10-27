@@ -9,10 +9,11 @@ import { confirmed, cancelled, modified, changeText, duplicatedHtml } from "./fi
 
 // Real route/parser/repository, with DB and environment isolated in memory.
 // No .env access, network requests or production data.
-function harness({ bookings = [], mappings = [], imports = [], env = {} } = {}) {
+function harness({ bookings = [], mappings = [], imports = [], staging = [], env = {} } = {}) {
   const tables = {
     bookings: structuredClone(bookings), viator_product_mappings: structuredClone(mappings),
     viator_email_imports: structuredClone(imports), experiences: [{ id: 999, business_unit_id: 1 }],
+    google_calendar_import_staging: structuredClone(staging),
   };
   const operations = [];
   const failures = [];
@@ -25,6 +26,7 @@ function harness({ bookings = [], mappings = [], imports = [], env = {} } = {}) 
       eq(key, value) { predicates.push(row => row[key] === value); return query; },
       is(key, value) { predicates.push(row => (row[key] ?? null) === value); return query; },
       in(key, values) { predicates.push(row => values.includes(row[key])); return query; },
+      ilike(key, value) { predicates.push(row => String(row[key] ?? "").toLowerCase().includes(value.replaceAll("%", "").toLowerCase())); return query; },
       lt(key, value) { predicates.push(row => row[key] < value); return query; },
       limit(value) { maximum = value; return query; },
       order(key, options) { sorting = [key, options.ascending]; return query; },
@@ -264,6 +266,29 @@ test("first persistence is raw email; missing mapping archives needs_mapping", a
   assert.equal(h.operations[0].table, "viator_email_imports"); assert.equal(h.operations[0].operation, "insert");
   assert.equal(h.operations[0].payload.raw_body, confirmed); assert.equal(h.operations[0].payload.status, "archived");
   assert.equal(h.tables.bookings.length, 0);
+});
+
+test('dry_run diagnoses missing mapping separately from disabled processing',async()=>{
+  for (const flag of ['true','false']) {
+    const h=harness({env:{VIATOR_EMAIL_PROCESS_BOOKINGS:flag}});
+    await h.send();
+    const p=h.tables.viator_email_imports[0].parsed_data;
+    assert.equal(p.processing_requested,flag==='true'); assert.equal(p.processing_mode,'dry_run');
+    assert.equal(p.booking_writes_blocked_reason,flag==='true'?'exact_product_mapping_missing':'processing_disabled');
+  }
+});
+
+test('Google numeric reference blocks confirmation, never name-only or substring matches',async()=>{
+  for (const [title,blocked] of [['1 noleggio 1449799117 Amber',true],['1 noleggio br-1449799117 Amber',true],
+    ['1 noleggio 91449799117 Amber',false],['1 noleggio 14497991170 Amber',false],
+    ['1 noleggio Amber De Clercq',false],['1 noleggio X1449799117 Amber',false]]) {
+    const h=harness({mappings:[mapping],staging:[{id:716,channel_id:6,original_title:title,imported_booking_id:2402}]});
+    assert.equal((await h.send()).body.status,blocked?'needs_review':'ready');
+    if(blocked) assert.deepEqual(h.tables.viator_email_imports[0].parsed_data.classification.candidate_booking_ids,[2402]);
+    assert.equal(h.tables.bookings.length,0);
+  }
+  const unavailable=harness(); unavailable.fail('google_calendar_import_staging','select');
+  assert.equal((await unavailable.send()).status,503);
 });
 test("same message_id twice and concurrent redelivery yield one archive and one processing attempt", async () => {
   const h = harness();

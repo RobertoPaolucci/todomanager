@@ -49,6 +49,12 @@ async function database() {
       customer_payment_status text not null default 'pending', supplier_payment_status text not null default 'pending',
       supplier_amount_paid numeric default 0, is_cancelled boolean not null default false, cancelled_at timestamptz,
       was_modified boolean not null default false, created_at timestamptz default now(), updated_at timestamptz default now());
+    alter table bookings add column agreed_unit_price numeric, add column recovery_tag text;
+    create table google_calendar_import_staging(id bigint primary key, booking_date date, booking_time time,
+      booking_reference text, customer_name text, adults int, children int, infants int,
+      experience_id bigint, channel_id bigint, booking_source text, notes text, gcal_uid text,
+      original_title text, import_status text, imported_booking_id bigint, gcal_updated_at timestamptz);
+    create table fmdq_monthly_invoices(id bigint primary key, channel_id bigint, invoice_month date);
     insert into business_units values (1), (2); insert into channels values (2, 'Viator'), (3, 'Other');
     insert into experiences(id,business_unit_id,name) values (8,1,'Test experience'), (9,2,'Other unit');
   `);
@@ -56,6 +62,11 @@ async function database() {
   await pg.exec(readFileSync("supabase/migrations/202609220001_viator_email_phase1.sql", "utf8"));
   await pg.exec(migration);
   await pg.exec(readFileSync("supabase/migrations/202609240002_viator_email_cancel_booking.sql", "utf8"));
+  await pg.exec(readFileSync("supabase/migrations/202609170001_google_calendar_canonical_phase1.sql", "utf8"));
+  await pg.exec(readFileSync("supabase/migrations/202609300001_google_calendar_verified_observation.sql", "utf8"));
+  await pg.exec(readFileSync("supabase/migrations/202610120001_google_calendar_cancellation_reconciliation.sql", "utf8"));
+  await pg.exec(readFileSync("supabase/migrations/20261023181507_booking_cancellation_dashboard_acknowledgements.sql", "utf8"));
+  await pg.exec(readFileSync("supabase/migrations/20261027174815_viator_google_reconciliation.sql", "utf8"));
   return pg;
 }
 
@@ -66,7 +77,7 @@ function harness(pg, flag = "true") {
   const faults = {};
   const db = {
     from(table) {
-      assert.ok(["bookings", "experiences", "viator_product_mappings", "viator_email_imports"].includes(table));
+      assert.ok(["bookings", "experiences", "viator_product_mappings", "viator_email_imports", "google_calendar_import_staging"].includes(table));
       let operation = "select", payload, columns = "*", maximum, single = false;
       const filters = [];
       const q = {
@@ -76,6 +87,7 @@ function harness(pg, flag = "true") {
         eq(key, value) { filters.push([key, value]); return q; },
         is(key, value) { filters.push([key, value]); return q; },
         in(key, value) { filters.push([key, value, "in"]); return q; },
+        ilike(key, value) { filters.push([key, value, "ilike"]); return q; },
         limit(value) { maximum = value; return q; },
         single() { single = true; return q; },
         maybeSingle() { single = true; return q; },
@@ -90,7 +102,7 @@ function harness(pg, flag = "true") {
             } else if (operation === "update") {
               sql = `update ${table} set ${Object.entries(payload).map(([k, v]) => `${k}=${param(v)}`).join(",")}`;
             } else sql = `select ${columns} from ${table}`;
-            if (filters.length) sql += ` where ${filters.map(([k, v, op]) => op === "in" ? `${k} in (${v.map(param).join(",")})` : v === null ? `${k} is null` : `${k}=${param(v)}`).join(" and ")}`;
+            if (filters.length) sql += ` where ${filters.map(([k, v, op]) => op === "in" ? `${k} in (${v.map(param).join(",")})` : op === "ilike" ? `${k} ilike ${param(v)}` : v === null ? `${k} is null` : `${k}=${param(v)}`).join(" and ")}`;
             if (operation !== "select") sql += ` returning ${columns}`;
             else if (maximum) sql += ` limit ${Number(maximum)}`;
             const { rows } = await pg.query(sql, values);
@@ -149,7 +161,8 @@ test("Viator Phase 2 transactional integration", options, async t => {
   const pg = await database();
   const rows = async table => (await pg.query(`select * from ${table} order by id`)).rows;
   async function reset() {
-    await pg.exec(`truncate bookings, viator_email_imports, viator_product_mappings, experience_channel_prices restart identity;
+    await pg.exec(`truncate bookings, viator_email_imports, viator_product_mappings, experience_channel_prices,
+      google_calendar_import_staging,google_calendar_events,google_calendar_event_aliases,fmdq_monthly_invoices restart identity cascade;
       update experiences set active=true, is_group_pricing=false;
       insert into viator_product_mappings(business_unit_id,viator_product_code,viator_tour_grade_code,experience_id)
         values (1,'200401P10','TG1~12:00',8);
@@ -459,6 +472,167 @@ test("Viator Phase 2 transactional integration", options, async t => {
       await pg.exec("set role service_role");
       assert.equal((await harness(pg).send()).body.action, "create_booking");
       await pg.exec("reset role");
+    });
+    const uid = '_ccrm4cr474sm8cr2cks38c9i74sm8c1hc5i66ohhcgr62dpn6kqg';
+    const title = '1 e-bike noleggio 1460201663 Anita Dreise';
+    const anita = confirmed.replaceAll('1449799117','1460201663').replace('200401P10','200401P11')
+      .replace('TG1~12:00','TG1').replace('Wed, Sep 23, 2026','2026-10-28')
+      .replace('Amber De Clercq','Anita Dreise').replace('2 Adulti','1 Adulto').replace('40,32','50,70');
+    const repair = readFileSync('scripts/sql/reconcile-viator-anita-2402.sql','utf8');
+    const rollback = readFileSync('scripts/sql/rollback-viator-anita-2402.sql','utf8');
+    const commitLocally = sql => sql.replace(/rollback;\s*$/,'commit;');
+    const snapshot = async (table,id) => (await pg.query(`select to_jsonb(x) as row from ${table} x where id=$1`,[id])).rows[0].row;
+    async function seedAnita() {
+      await pg.exec(`insert into channels values(6,'Fattoria Madonna della Querce') on conflict do nothing;
+        insert into suppliers values(3) on conflict do nothing;
+        insert into experiences(id,business_unit_id,name,supplier_id,supplier_unit_cost)
+          values(15,1,'E-Bike solo noleggio',3,60) on conflict do nothing;
+        insert into bookings(id,business_unit_id,channel_id,booking_reference,customer_name,experience_id,experience_name,
+          supplier_id,booking_date,booking_time,adults,children,infants,total_people,pax,
+          total_amount,total_customer,total_to_you,total_supplier_cost,margin_total,your_unit_price,public_unit_price,
+          supplier_unit_cost,booking_source,notes) overriding system value
+          values(2402,1,6,'GCAL-${uid.slice(0,48)}','Da verificare',15,'E-Bike solo noleggio',3,'2026-10-28','09:30',
+          1,0,0,1,1,65,65,60,60,0,60,65,60,'Fattoria Madonna della Querce','${title}');
+        insert into google_calendar_import_staging values(716,'2026-10-28','09:30','GCAL-${uid.slice(0,48)}',null,
+          1,0,0,15,6,'Fattoria Madonna della Querce','${title}','${uid}','${title}','imported',2402,'2026-10-27T17:25:43Z');
+        insert into google_calendar_events(id,canonical_uid,original_uid,gcal_event_id,uid_kind,uid_semantics,event_date,event_time,
+          original_title,gcal_event_status,gcal_updated_at,gcal_observation_verified,last_observation_source,
+          observed_total_guests,effective_total_guests,exclusion_reason) overriding system value
+          values(1363,'c7b3d99d3be841299d01adcb1d6a7755','${uid}','${uid}','google','event_id','2026-10-28','09:30',
+          '${title}','confirmed','2026-10-27T17:25:43Z',true,'google_calendar',1,0,'offsite_rental_only');
+        select setval('viator_email_imports_id_seq',60,true);`);
+      const h = harness(pg);
+      assert.equal((await h.send({body:anita})).body.status,'needs_review');
+      assert.equal((await rows('bookings')).length,1);
+      return h;
+    }
+    async function reconciliationArgs() {
+      return Promise.all([snapshot('viator_email_imports',61),snapshot('bookings',2402),
+        snapshot('google_calendar_import_staging',716),snapshot('google_calendar_events',1363)]);
+    }
+    const reconcile = args => pg.query('select reconcile_viator_google_booking($1,$2,$3,$4) as result',args.map(JSON.stringify));
+    await scenario('Anita: actual repair rehearses, keeps 2402/716/canonical/financials, replays and rolls back', async () => {
+      const h = await seedAnita();
+      // Reconstruct the real chronology: email 61 was classified before Google
+      // staging arrived. Keep that historical mode/reason in the audit.
+      await pg.exec(`update viator_email_imports set status='needs_mapping',parsed_data=parsed_data ||
+        jsonb_build_object('booking_writes_blocked_reason','phase_1_historical_transition_pending',
+          'classification',jsonb_build_object('status','needs_mapping','reason','exact_product_mapping_missing',
+            'business_unit_id',1,'channel_id',2,'would_do','none')) where id=61`);
+      const before = await reconciliationArgs();
+      await pg.exec(repair);
+      assert.deepEqual(await reconciliationArgs(),before,'default repair must roll back');
+      await pg.exec(commitLocally(repair));
+      const after = await reconciliationArgs();
+      assert.equal(after[1].customer_name,'Anita Dreise'); assert.equal(after[1].channel_id,2);
+      assert.equal(after[1].booking_reference,'BR-1460201663'); assert.equal(after[1].bokun_booking_reference,null);
+      assert.equal(after[0].booking_id,2402); assert.equal(after[0].status,'needs_review');
+      assert.equal(after[0].parsed_data.google_reconciliation.economics_pending,true);
+      assert.equal(after[0].raw_body,before[0].raw_body);
+      assert.equal(after[2].imported_booking_id,2402); assert.equal(after[2].gcal_uid,uid);
+      assert.deepEqual(after[3],before[3]);
+      const changed = new Set(['customer_name','channel_id','booking_source','booking_reference','notes']);
+      for (const field of Object.keys(before[1])) if (!changed.has(field)) assert.deepEqual(after[1][field],before[1][field],field);
+      const replay = await h.send({body:anita});
+      assert.equal(replay.body.action,'reconcile_google_booking'); assert.equal(replay.body.booking_id,2402);
+      assert.equal((await reconcile(before)).rows[0].result.action,'already_reconciled');
+      await pg.exec(commitLocally(repair));
+      assert.deepEqual(await reconciliationArgs(),after,'repair replay must be a no-op');
+      assert.equal((await rows('bookings')).length,1);
+      const [mapping] = (await rows('viator_product_mappings')).filter(m=>m.viator_product_code==='200401P11');
+      assert.equal(mapping.default_time,null); assert.equal(mapping.experience_id,15); assert.equal(mapping.active,true);
+      await pg.exec(rollback);
+      assert.deepEqual(await reconciliationArgs(),after,'rollback rehearsal must change nothing');
+      await pg.exec(commitLocally(rollback));
+      const reverted = await reconciliationArgs();
+      assert.deepEqual(reverted.slice(1),before.slice(1)); assert.equal(reverted[0].booking_id,null);
+      assert.ok(reverted[0].parsed_data.google_reconciliation_rollback);
+    });
+    await scenario('reconciled booking handles another confirmation and cancellation without losing Google link',async()=>{
+      const h=await seedAnita(); await pg.exec(commitLocally(repair));
+      assert.equal((await h.send({body:anita,message_id:'second-confirmation'})).body.status,'needs_review');
+      assert.equal((await rows('bookings')).length,1);
+      const cancelled=await h.send({message_id:'cancel-anita',subject:'Prenotazione cancellata',
+        body:'Prenotazione cancellata\nRiferimento prenotazione: BR-1460201663'});
+      assert.equal(cancelled.body.action,'cancel_booking'); assert.equal(cancelled.body.booking_id,2402);
+      assert.equal((await snapshot('google_calendar_import_staging',716)).imported_booking_id,2402);
+      assert.equal((await snapshot('google_calendar_events',1363)).effective_total_guests,0);
+      await assert.rejects(pg.exec(commitLocally(rollback))); await pg.exec('rollback');
+    });
+    for (const [name,sql] of [
+      ['date mismatch',"update bookings set booking_date='2026-10-29' where id=2402"],
+      ['wrong unit',"update bookings set business_unit_id=2 where id=2402"],
+      ['Bokun reference',"update bookings set bokun_booking_reference='VIA-123' where id=2402"],
+      ['paid booking',"update bookings set supplier_payment_status='paid' where id=2402"],
+      ['manual price',"update bookings set agreed_unit_price=42 where id=2402"],
+      ['cancellation',"update bookings set is_cancelled=true where id=2402"],
+      ['unverified canonical',"update google_calendar_events set gcal_observation_verified=false where id=1363"],
+      ['invoice',"insert into fmdq_monthly_invoices values(1,2,'2026-10-01')"],
+      ['second staging',"insert into google_calendar_import_staging select 717,booking_date,booking_time,booking_reference,customer_name,adults,children,infants,experience_id,channel_id,booking_source,notes,'another-uid',original_title,import_status,imported_booking_id,gcal_updated_at from google_calendar_import_staging where id=716"],
+      ['normalized duplicate',"insert into bookings(business_unit_id,channel_id,booking_reference,customer_name,experience_name,booking_date) values(1,3,' br-1460201663 ','Other','Other','2026-10-28')"],
+      ['conflicting email',"update viator_email_imports set parsed_data=jsonb_set(parsed_data,'{adults}','2') where id=61"],
+    ]) await scenario(`Anita reconciliation refuses ${name} atomically`,async()=>{
+      await seedAnita();
+      await pg.exec(sql);
+      const before=await reconciliationArgs();
+      await assert.rejects(pg.exec(commitLocally(repair)));
+      await pg.exec('rollback');
+      assert.deepEqual(await reconciliationArgs(),before);
+      assert.equal((await rows('viator_product_mappings')).some(m=>m.viator_product_code==='200401P11'),false);
+    });
+    await scenario('snapshot edits and failed import link roll back booking/staging',async()=>{
+      await seedAnita();
+      await pg.exec("insert into viator_product_mappings(business_unit_id,viator_product_code,viator_tour_grade_code,experience_id) values(1,'200401P11','TG1',15)");
+      const before=await reconciliationArgs();
+      await pg.exec("update bookings set notes='manual' where id=2402");
+      await assert.rejects(reconcile(before),/snapshot_changed/);
+      const changed=await reconciliationArgs();
+      await pg.exec('alter table viator_email_imports add constraint test_reconcile_link_failure check(booking_id is null)');
+      try { await assert.rejects(reconcile(changed)); assert.deepEqual(await reconciliationArgs(),changed); }
+      finally { await pg.exec('alter table viator_email_imports drop constraint test_reconcile_link_failure'); }
+    });
+    await scenario('INSERT guard covers late Google candidate, reverse arrival and old GCAL reference after reconciliation',async()=>{
+      await seedAnita();
+      const insert = (unit,channel,ref,bokun=null) => pg.query(`insert into bookings(business_unit_id,channel_id,booking_reference,
+        bokun_booking_reference,customer_name,experience_name,booking_date) values($1,$2,$3,$4,'Other','Other','2026-10-28')`,[unit,channel,ref,bokun]);
+      for (const ref of ['BR-1460201663','1460201663',' br-1460201663 ']) await assert.rejects(insert(1,2,ref),/reconciliation_required/);
+      await assert.rejects(insert(1,6,`GCAL-${uid.slice(0,48)}`),/reconciliation_required/);
+      assert.equal((await pg.query('select google_has_viator_evidence(716) as blocked')).rows[0].blocked,true);
+      await pg.exec(commitLocally(repair));
+      await assert.rejects(insert(1,6,`GCAL-${uid.slice(0,48)}`),/reconciliation_required/);
+      await insert(2,2,'BR-1460201663','VIA-OTHER'); // Separate Viator account is unaffected.
+      assert.equal((await rows('bookings')).length,2);
+    });
+    await scenario('new Google match arriving after email preflight blocks the real create RPC',async()=>{
+      const h=harness(pg);
+      h.faults.beforeRpc=()=>pg.exec(`insert into google_calendar_import_staging(id,experience_id,channel_id,original_title)
+        values(999,8,6,'2 tour 1449799117 Amber')`);
+      assert.equal((await h.send()).status,503);
+      assert.equal((await rows('bookings')).length,0);
+    });
+    await scenario('reconciliation RPC denied to browser roles, permitted to service_role',async()=>{
+      await seedAnita();
+      await pg.exec("insert into viator_product_mappings(business_unit_id,viator_product_code,viator_tour_grade_code,experience_id) values(1,'200401P11','TG1',15)");
+      const args=await reconciliationArgs();
+      for (const role of ['anon','authenticated']) {
+        await pg.exec(`set role ${role}`);
+        try { await assert.rejects(reconcile(args),e=>e.code==='42501'); }
+        finally { await pg.exec('reset role'); }
+      }
+      await pg.exec('set role service_role');
+      try { assert.equal((await reconcile(args)).rows[0].result.action,'reconciled'); }
+      finally { await pg.exec('reset role'); }
+    });
+    await scenario('mapping conflicts are refused; schema rollback rehearsal preserves data and installed guards',async()=>{
+      await seedAnita();
+      await pg.exec("insert into viator_product_mappings(business_unit_id,viator_product_code,viator_tour_grade_code,experience_id,default_time) values(1,'200401P11','TG1',15,'10:00')");
+      const before=await reconciliationArgs();
+      await assert.rejects(pg.exec(commitLocally(repair)),/Mapping conflicts/); await pg.exec('rollback');
+      assert.deepEqual(await reconciliationArgs(),before);
+      const schemaRollback=readFileSync('scripts/sql/rollback-viator-google-schema.sql','utf8');
+      await pg.exec(schemaRollback);
+      assert.equal((await pg.query("select to_regprocedure('google_has_viator_evidence(bigint)') is not null as installed")).rows[0].installed,true);
+      assert.deepEqual(await reconciliationArgs(),before);
     });
   } finally { await pg.close(); }
 });

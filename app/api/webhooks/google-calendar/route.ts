@@ -1,4 +1,4 @@
-import { extractAirbnbBookingData, inspectBookingLink, preserveAirbnbStagingLink } from "@/lib/google-calendar-booking-link.mjs";
+import { extractAirbnbBookingData, inspectBookingLink, preserveAirbnbStagingLink, preserveViatorStagingLink } from "@/lib/google-calendar-booking-link.mjs";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
@@ -1082,6 +1082,7 @@ export async function POST(request: NextRequest) {
       const { data: linkedBooking, error: linkError } = await supabase.from("bookings")
         .select("*").eq("id", existing.imported_booking_id).maybeSingle();
       rowPayload = preserveAirbnbStagingLink(rowPayload, linkError ? null : linkedBooking, existing, bookingCanonical?.current);
+      rowPayload = preserveViatorStagingLink(rowPayload, linkError ? null : linkedBooking, existing);
       importStatus = rowPayload.import_status;
       linkInspection = inspectBookingLink(rowPayload, linkError ? null : linkedBooking, existing);
       if (!linkInspection.compatible) rowPayload.import_status = importStatus = "needs_review";
@@ -1093,7 +1094,7 @@ export async function POST(request: NextRequest) {
         .from("google_calendar_import_staging")
         .update(rowPayload)
         .eq("id", existing.id);
-      if (existing.imported_booking_id && existing.booking_source === "Airbnb") {
+      if (existing.imported_booking_id && ["Airbnb", "Viator", "Fattoria Madonna della Querce"].includes(existing.booking_source)) {
         // A webhook read before a manual reconciliation must not overwrite it
         // after waiting for the transaction's row/table locks.
         for (const [field, value] of Object.entries(existing)) {
@@ -1108,7 +1109,7 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      if (existing.imported_booking_id && existing.booking_source === "Airbnb" && updatedStaging?.length !== 1) {
+      if (existing.imported_booking_id && ["Airbnb", "Viator", "Fattoria Madonna della Querce"].includes(existing.booking_source) && updatedStaging?.length !== 1) {
         return NextResponse.json({ ok: false, error: "Staging modificato durante la verifica; rileggere prima di riprovare." }, { status: 409 });
       }
     } else {
@@ -1159,9 +1160,9 @@ export async function POST(request: NextRequest) {
       booking_time: start.bookingTime,
       title,
       experience_id: experienceId,
-      channel_id: channelId,
-      channel: channelLabel,
-      customer_name: customerName,
+      channel_id: rowPayload.channel_id,
+      channel: rowPayload.booking_source,
+      customer_name: rowPayload.customer_name,
       booking_reference: rowPayload.booking_reference,
       non_paying_adults: nonPayingAdults,
       booking_reconciliation: bookingReconciliation,

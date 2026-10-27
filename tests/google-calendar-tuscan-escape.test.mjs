@@ -8,7 +8,8 @@ import * as observation from '../lib/google-calendar-observation.mjs';
 import * as canonicalSync from '../lib/google-calendar-canonical-sync.mjs';
 import * as reconciliation from '../lib/google-calendar-tuscan-reconciliation.mjs';
 
-function harness(existing = null, { standardPrices = false, bookings = [], channels = [{ id: 7, name: 'Tuscan Escape' }] } = {}) {
+function harness(existing = null, { standardPrices = false, bookings = [], channels = [{ id: 7, name: 'Tuscan Escape' }],
+  viatorEvidence = false, rpcError = false, staleStaging = false } = {}) {
   const writes = [];
   const db = { from(table) {
     let operation = 'select', payload;
@@ -25,7 +26,7 @@ function harness(existing = null, { standardPrices = false, bookings = [], chann
     function run(single) {
       if (operation !== 'select') {
         writes.push({ table, operation, payload });
-        return { data: { id: 123 }, error: null };
+        return { data: single ? { id: 123 } : staleStaging ? [] : [{ id: 123 }], error: null };
       }
       const rows = {
         google_calendar_import_staging: existing ? [existing] : [],
@@ -37,6 +38,9 @@ function harness(existing = null, { standardPrices = false, bookings = [], chann
       return { data: single ? rows[0] ?? null : rows, error: null };
     }
     return q;
+  }, async rpc(name) {
+    assert.equal(name,'google_has_viator_evidence');
+    return {data:rpcError?null:viatorEvidence,error:rpcError?{code:'unavailable'}:null};
   } };
   function load(file) {
     const mod = { exports: {} };
@@ -205,5 +209,44 @@ test('bulk import preserves an already reconciled Airbnb link and reviews a late
     assert.equal(h.writes.filter(w => w.table === 'bookings').length, 0);
     assert.equal(h.writes.length, mismatch ? 1 : 0);
     if (mismatch) assert.equal(h.writes[0].payload.import_status, 'needs_review');
+  }
+});
+
+test('Viator FMDQ webhook keeps reviewed identity and returns resolved channel; stale staging fails closed',async()=>{
+  const row={id:716,gcal_uid:'test-event',imported_booking_id:2402,import_status:'imported',
+    booking_date:'2026-10-28',booking_time:'09:30',booking_reference:'BR-1460201663',customer_name:'Anita Dreise',
+    experience_id:15,channel_id:2,booking_source:'Viator',adults:1,children:0,infants:0,
+    original_title:'1 e-bike noleggio 1460201663 Anita Dreise'};
+  for(const staleStaging of [false,true]) {
+    const h=harness(row,{staleStaging,channels:[{id:6,name:'Fattoria Madonna della Querce'}],
+      bookings:[{...row,id:2402,business_unit_id:1,bokun_booking_reference:null,is_cancelled:false}]});
+    const response=await h.load('app/api/webhooks/google-calendar/route.ts').POST(request(row.original_title,
+      {start:'2026-10-28T09:30:00+01:00'}));
+    assert.equal(response.status,staleStaging?409:200);
+    if(!staleStaging) {
+      const result=await response.json();
+      assert.equal(result.channel_id,2); assert.equal(result.customer_name,'Anita Dreise');
+      assert.equal(result.booking_reference,'BR-1460201663'); assert.equal(result.import_status,'imported');
+    }
+    assert.equal(h.writes.filter(w=>w.table==='bookings').length,0);
+    assert.equal(h.writes[0].payload.imported_booking_id,2402);
+  }
+});
+
+test('Viator links cannot be force imported; email-first Google rows and failed checks cannot create',async()=>{
+  for(const status of ['pending','rolled_back','needs_review','possible_duplicate','probable_match','imported']) {
+    const h=harness({id:716,channel_id:2,import_status:status,imported_booking_id:2402});
+    const form=new FormData(); form.set('row_ids','716'); form.set('force_import','true');
+    await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form),/redirect/);
+    assert.equal(h.writes.length,0);
+  }
+  for(const rpcError of [false,true]) {
+    const h=harness({id:716,channel_id:6,import_status:'pending',imported_booking_id:null,
+      original_title:'1 e-bike noleggio 1460201663 Anita Dreise'}, {viatorEvidence:true,rpcError});
+    const form=new FormData(); form.set('row_ids','716'); form.set('force_import','true');
+    await assert.rejects(h.load('app/import/google-calendar/actions.ts').importSelectedGoogleCalendarRows(form),
+      rpcError?/Impossibile verificare/:/redirect/);
+    assert.equal(h.writes.filter(w=>w.table==='bookings').length,0);
+    if(!rpcError) assert.equal(h.writes[0].payload.import_status,'needs_review');
   }
 });

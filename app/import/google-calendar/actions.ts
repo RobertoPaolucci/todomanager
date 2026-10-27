@@ -326,6 +326,10 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     // reinserted by reset/force-import (including a changed reference).
     if (row.channel_id === 7 && row.imported_booking_id) continue;
 
+    // Reconciled Viator links cannot be force-imported, even after a later
+    // Google observation changes the operational fields or review status.
+    if (row.channel_id === 2 && row.imported_booking_id) continue;
+
     if (row.imported_booking_id && !["possible_duplicate", "probable_match"].includes(row.import_status)) {
       if (row.booking_source === "Airbnb" && ["imported", "already_exists"].includes(row.import_status)) {
         const { data: linkedBooking, error } = await supabaseServer.from("bookings")
@@ -356,6 +360,15 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         : !(canProcessNormally || canReevaluatePossibleDuplicate)
     ) {
       continue;
+    }
+
+    if ([2, 6].includes(row.channel_id ?? 0) && /\d{6,}/.test(row.original_title ?? "")) {
+      const { data: blocked, error } = await supabaseServer.rpc("google_has_viator_evidence", { p_staging_id: row.id });
+      if (error || typeof blocked !== "boolean") throw new Error("Impossibile verificare il collegamento Viator/Google Calendar");
+      if (blocked) {
+        await markRow(row.id, "needs_review", row.imported_booking_id);
+        continue;
+      }
     }
 
     const existingByReference = await findExistingByReference(
