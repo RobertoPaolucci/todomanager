@@ -12,13 +12,25 @@ export async function acknowledgeGoogleCalendarAlert(alertId: number, eventVersi
   try {
     // Cookie presence alone (the legacy proxy check) is not authorization.
     const token = (await cookies()).get("tm-auth-token")?.value;
-    if (!token) return { error: "Accedi al gestionale per confermare la lettura." };
+    if (!token) return { code: "AUTH_REQUIRED", error: "Accedi al gestionale per confermare la lettura. L'avviso resta visibile." };
     const { data, error: authError } = await supabaseServer.auth.getUser(token);
     const user = data?.user;
     // All non-anonymous Todo Manager login accounts share this operational view.
     // Never trust an actor ID or editable user_metadata supplied by the browser.
-    if (authError || !user || user.role !== "authenticated" || user.is_anonymous) {
-      return { error: "Sessione non valida o scaduta. Accedi nuovamente al gestionale." };
+    if (authError) {
+      if (authError.status === 401 || ["bad_jwt", "session_not_found", "session_expired", "user_not_found"].includes(authError.code ?? "")) {
+        return { code: "AUTH_REQUIRED", error: "Sessione non valida o scaduta. Accedi nuovamente per confermare la lettura. L'avviso resta visibile." };
+      }
+      if (authError.status === 403) {
+        return { code: "FORBIDDEN", error: "Account non autorizzato a confermare la lettura." };
+      }
+      return { code: "AUTH_UNAVAILABLE", error: "Verifica della sessione temporaneamente non disponibile. L'avviso resta visibile. Riprova tra poco." };
+    }
+    if (!user) {
+      return { code: "AUTH_REQUIRED", error: "Sessione non valida o scaduta. Accedi nuovamente per confermare la lettura. L'avviso resta visibile." };
+    }
+    if (user.role !== "authenticated" || user.is_anonymous) {
+      return { code: "FORBIDDEN", error: "Account non autorizzato a confermare la lettura." };
     }
 
     const { data: saved, error } = await supabaseServer.rpc("acknowledge_google_calendar_dashboard_alert", {

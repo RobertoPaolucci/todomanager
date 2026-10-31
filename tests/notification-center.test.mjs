@@ -21,6 +21,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync('components/NotificationCente
     if (name === 'next/link') return { default: 'a' };
     if (name === 'next/navigation') return { useRouter: () => ({ refresh() {} }) };
     if (name === '@/app/booking-cancellation-alert-actions') return {};
+    if (name === '@/lib/dashboard-alert-session') return { withDashboardAlertSession: action => action() };
     if (name === 'react' || name === 'react/jsx-runtime') return require(name);
     throw new Error(`Unexpected client dependency: ${name}`);
   },

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { acknowledgeGoogleCalendarAlert } from "@/app/google-calendar-alert-actions";
+import { withDashboardAlertSession } from "@/lib/dashboard-alert-session";
 
 export default function GoogleCalendarAlertReadButton({ alertId, eventVersion }: {
   alertId: number;
@@ -16,9 +17,9 @@ export default function GoogleCalendarAlertReadButton({ alertId, eventVersion }:
     setError(null);
     startTransition(async () => {
       try {
-        const result = await acknowledgeGoogleCalendarAlert(alertId, eventVersion);
-        if (result.error) {
-          setError(result.error);
+        const result = await withDashboardAlertSession(() => acknowledgeGoogleCalendarAlert(alertId, eventVersion));
+        if (!result.success) {
+          setError(result.error || "Lettura non confermata. Riprova.");
           return;
         }
         // Refresh both the row and its counters only after confirmed persistence.

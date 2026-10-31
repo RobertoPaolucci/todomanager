@@ -85,6 +85,7 @@ function listHarness(action, rows = [1, 2].map(id => ({ id, notes: '🔴 Prenota
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'next/link': { default: 'a' },
     'next/navigation': { useRouter: () => ({ refresh: () => { refreshes++; } }) },
+    '@/lib/dashboard-alert-session': { withDashboardAlertSession: action => action() },
     '@/app/booking-cancellation-alert-actions': { acknowledgeBookingCancellationAlert: action },
     react: { useState, useTransition: () => {
       const [pending, setPending] = useState(false);
@@ -171,3 +172,17 @@ test('unrelated alerts have a booking link but no read action', () => {
   assert.equal(nodes(tree).filter(n => n.type === 'a').length, 3);
 });
 
+
+for (const [authError, expected] of [
+  [{status:401}, 'AUTH_REQUIRED'], [{status:403,code:'bad_jwt'}, 'AUTH_REQUIRED'],
+  [{status:403,code:'session_not_found'}, 'AUTH_REQUIRED'], [{status:403}, 'FORBIDDEN'],
+  [{status:500}, 'AUTH_UNAVAILABLE'], [{status:0}, 'AUTH_UNAVAILABLE'],
+]) {
+  test(`authentication classification ${JSON.stringify(authError)} never writes`, async () => {
+    const h=actionHarness({authError});
+    const result=await h.action(671,version);
+    assert.equal(result.code,expected);
+    assert.ok(h.calls.every(call=>call[0]!=='rpc'));
+    assert.equal(h.refreshed.length,0);
+  });
+}

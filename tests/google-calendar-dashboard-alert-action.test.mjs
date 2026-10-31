@@ -75,6 +75,7 @@ function buttonHarness(action) {
       pending=true;tasks.push(Promise.resolve().then(callback).finally(()=>{pending=false;}));
     }]},
     'next/navigation':{useRouter:()=>({refresh:()=>{refreshes++;}})},
+    '@/lib/dashboard-alert-session': { withDashboardAlertSession: action => action() },
     '@/app/google-calendar-alert-actions':{acknowledgeGoogleCalendarAlert:action},
   }).default;
   return {render:()=>Component({alertId:625,eventVersion:version}),flush:()=>Promise.all(tasks),get refreshes(){return refreshes;}};
@@ -102,5 +103,19 @@ for(const action of [async()=>({error:'Salvataggio fallito'}),async()=>{throw Er
     const tree=h.render();
     assert.equal(nodes(tree).find(n=>n.type==='button').props.disabled,false);
     assert.ok(nodes(tree).some(n=>n.props?.role==='alert' && n.props.children));
+  });
+}
+
+for (const [authError, expected] of [
+  [{status:401}, 'AUTH_REQUIRED'], [{status:403,code:'bad_jwt'}, 'AUTH_REQUIRED'],
+  [{status:403,code:'session_not_found'}, 'AUTH_REQUIRED'], [{status:403}, 'FORBIDDEN'],
+  [{status:500}, 'AUTH_UNAVAILABLE'], [{status:0}, 'AUTH_UNAVAILABLE'],
+]) {
+  test(`authentication classification ${JSON.stringify(authError)} never writes`, async () => {
+    const h=actionHarness({authError});
+    const result=await h.action(671,version);
+    assert.equal(result.code,expected);
+    assert.ok(h.calls.every(call=>call[0]!=='rpc'));
+    assert.equal(h.refreshed.length,0);
   });
 }

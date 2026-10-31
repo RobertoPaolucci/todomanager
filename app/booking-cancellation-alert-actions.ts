@@ -12,12 +12,24 @@ export async function acknowledgeBookingCancellationAlert(alertId: number, event
 
   try {
     const token = (await cookies()).get("tm-auth-token")?.value;
-    if (!token) return { error: "Accedi al gestionale per confermare la lettura." };
+    if (!token) return { code: "AUTH_REQUIRED", error: "Accedi al gestionale per confermare la lettura. L'avviso resta visibile." };
     const { data, error: authError } = await supabaseServer.auth.getUser(token);
     const user = data?.user;
     // Same shared operational access as Google Calendar; never trust a browser actor ID.
-    if (authError || !user || user.role !== "authenticated" || user.is_anonymous) {
-      return { error: "Sessione non valida o scaduta. Accedi nuovamente al gestionale." };
+    if (authError) {
+      if (authError.status === 401 || ["bad_jwt", "session_not_found", "session_expired", "user_not_found"].includes(authError.code ?? "")) {
+        return { code: "AUTH_REQUIRED", error: "Sessione non valida o scaduta. Accedi nuovamente per confermare la lettura. L'avviso resta visibile." };
+      }
+      if (authError.status === 403) {
+        return { code: "FORBIDDEN", error: "Account non autorizzato a confermare la lettura." };
+      }
+      return { code: "AUTH_UNAVAILABLE", error: "Verifica della sessione temporaneamente non disponibile. L'avviso resta visibile. Riprova tra poco." };
+    }
+    if (!user) {
+      return { code: "AUTH_REQUIRED", error: "Sessione non valida o scaduta. Accedi nuovamente per confermare la lettura. L'avviso resta visibile." };
+    }
+    if (user.role !== "authenticated" || user.is_anonymous) {
+      return { code: "FORBIDDEN", error: "Account non autorizzato a confermare la lettura." };
     }
 
     const { data: saved, error } = await supabaseServer.rpc("acknowledge_booking_cancellation_alert", {

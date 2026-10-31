@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { acknowledgeBookingCancellationAlert } from "@/app/booking-cancellation-alert-actions";
+import { withDashboardAlertSession } from "@/lib/dashboard-alert-session";
 
 export type BookingNotification = {
   id: number;
@@ -31,7 +32,7 @@ function CancellationReadButton({ alertId, eventVersion, onAcknowledged }: {
     setError(null);
     startTransition(async () => {
       try {
-        const result = await acknowledgeBookingCancellationAlert(alertId, eventVersion);
+        const result = await withDashboardAlertSession(() => acknowledgeBookingCancellationAlert(alertId, eventVersion));
         if (!result.success) {
           setError(result.error || "Lettura non confermata. Riprova.");
           return;

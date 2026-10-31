@@ -52,6 +52,33 @@ async function setup() {
 }
 const alert = async (db, id=625) => (await db.query('select * from google_calendar_dashboard_alerts where id=$1', [id])).rows[0];
 const ack = async (db, version, id=625, user=actor) => (await db.query('select acknowledge_google_calendar_dashboard_alert($1,$2,$3) as saved', [id,version,user])).rows[0].saved;
+
+sqlTest('671/1315 cancellation acknowledgement records the verified actor without changing operational data', async () => {
+  const db = await setup();
+  try {
+    // Synthetic cancellation with the reported IDs; no production data is read.
+    await db.exec(`insert into google_calendar_import_staging
+      (id,gcal_uid,import_status,original_title,booking_date,booking_time,customer_name,adults,import_origin)
+      values (671,'session-regression-671','gcal_cancelled','Synthetic cancellation','2026-10-31','10:00','Test',2,'make');
+      insert into google_calendar_events(id,canonical_uid,original_uid,uid_kind,last_observation_source,
+        staging_id,original_title,event_date,event_time,gcal_event_status)
+      overriding system value values(1315,'session-regression-671','session-regression-671','google','google_calendar',
+        671,'Synthetic cancellation','2026-10-31','10:00','cancelled');`);
+    const before = await protectedSnapshot(db);
+    const current = await alert(db, 671);
+    await db.exec('set role service_role');
+    assert.equal(await ack(db, current.dashboard_event_version, 671), true);
+    assert.equal(await ack(db, current.dashboard_event_version, 671), true);
+    const receipts = (await db.query('select * from google_calendar_dashboard_acknowledgements where staging_id=671')).rows;
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].acknowledged_by, actor);
+    assert.equal(receipts[0].event_snapshot.canonical[0].id, 1315);
+    assert.equal((await alert(db, 671)).dashboard_acknowledged, true);
+    await db.exec('reset role');
+    assert.deepEqual(await protectedSnapshot(db), before);
+  } finally { await db.close(); }
+});
+
 async function protectedSnapshot(db) {
   const result = {};
   for (const table of ['bookings','google_calendar_import_staging','google_calendar_events','google_calendar_event_aliases']) {
