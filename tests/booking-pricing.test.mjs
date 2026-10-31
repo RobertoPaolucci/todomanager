@@ -175,7 +175,7 @@ test('context change requires clearing agreement or explicit confirmation; UI cl
 });
 
 test('form has no payment inputs; preview matches child pricing and interactive agreement removal', () => {
-  const h = pricingHarness(); Object.assign(h.booking, { adults: 2, children: 3, infants: 4, non_paying_adults: 5 });
+  const h = pricingHarness(); Object.assign(h.booking, { adults: 2, children: 3, infants: 4, non_paying_adults: 5, total_to_you: 124, total_supplier_cost: 124 });
   let tree = h.renderForm();
   const value = (name) => nodes(tree).find(node => node.props?.name === name)?.props.value;
   assert.equal(value('total_to_you'), 124);

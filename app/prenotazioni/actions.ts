@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
-import { applyBookingAgreement, parseAgreedUnitPrice, assertPersonAgreement, assertFmdqAgreementRates, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
+import { resolveParticipantPrice, applyBookingAgreement, parseAgreedUnitPrice, assertPersonAgreement, assertFmdqAgreementRates, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
 import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 
 function parseNumber(value: FormDataEntryValue | null, fallback = 0) {
@@ -362,10 +362,10 @@ export async function createBooking(formData: FormData) {
   const business_unit_id = Number(experience.business_unit_id);
   let supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
-  const { data: priceRowData } = await supabaseServer
+  const { data: storedPriceRowData, error: priceError } = await supabaseServer
     .from("experience_channel_prices")
     .select(
-      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, supplier_adult_unit_cost"
+      "pricing_mode, price_tiers, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, supplier_adult_unit_cost"
     )
     .eq("experience_id", experience_id)
     .eq("channel_id", channel_id)
@@ -377,7 +377,15 @@ export async function createBooking(formData: FormData) {
   let public_child_unit_price = 0;
   let supplier_child_unit_cost = supplier_unit_cost;
 
+  if (priceError && priceError.code !== "PGRST116") return { error: `Errore lettura listino: ${priceError.message}` };
+  let priceRowData = storedPriceRowData;
+  try {
+    if (priceRowData) priceRowData = resolveParticipantPrice(priceRowData, adults, children, isGroupPricing);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Tariffa non disponibile." };
+  }
   if (priceRowData) {
+    if (priceRowData.pricing_mode === "tiered") supplier_unit_cost = Number(priceRowData.supplier_adult_unit_cost);
     your_unit_price = Number(priceRowData.your_unit_price || 0);
     public_unit_price = Number(priceRowData.public_unit_price || 0);
 
@@ -513,6 +521,10 @@ export async function createBooking(formData: FormData) {
         pax: total_people,
         total_amount: total_customer,
         agreed_unit_price,
+        ...(priceRowData?.pricing_mode === "tiered" ? {
+          price_tier_snapshot: priceRowData,
+          total_to_you_source: agreed_unit_price === null ? "configured_price" : null,
+        } : {}),
         ...(agreed_unit_price !== null ? { total_to_you_source: null } : {}),
         your_unit_price,
         public_unit_price,
@@ -654,7 +666,7 @@ export async function updateBooking(formData: FormData) {
     await supabaseServer
       .from("bookings")
       .select(
-        "id, supplier_id, booking_reference, customer_name, total_supplier_cost, customer_payment_status, supplier_payment_status, supplier_amount_paid, is_cancelled, experience_id, channel_id, agreed_unit_price"
+        "id, supplier_id, booking_reference, customer_name, total_supplier_cost, customer_payment_status, supplier_payment_status, supplier_amount_paid, is_cancelled, experience_id, channel_id, agreed_unit_price, adults, children, your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_amount, margin_total, total_to_you_source, price_tier_snapshot"
       )
       .eq("id", id)
       .single();
@@ -720,116 +732,148 @@ export async function updateBooking(formData: FormData) {
   const business_unit_id = Number(experience.business_unit_id);
   let supplier_unit_cost = Number(experience.supplier_unit_cost || 0);
 
-  const { data: priceRow } = await supabaseServer
-    .from("experience_channel_prices")
-    .select(
-      "your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, supplier_adult_unit_cost"
-    )
-    .eq("experience_id", experience_id)
-    .eq("channel_id", channel_id)
-    .single();
+  const preserveEconomics = Number(currentBooking.experience_id) === experience_id
+    && Number(currentBooking.channel_id) === channel_id
+    && Number(currentBooking.adults) === adults && Number(currentBooking.children) === children
+    && agreed_unit_price === (currentBooking.agreed_unit_price ?? null);
+  const calculated = preserveEconomics ? currentBooking : await (async () => {
+    const { data: storedPriceRow, error: priceError } = await supabaseServer
+      .from("experience_channel_prices")
+      .select(
+        "pricing_mode, price_tiers, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_child_unit_cost, supplier_adult_unit_cost"
+      )
+      .eq("experience_id", experience_id)
+      .eq("channel_id", channel_id)
+      .single();
 
-  let your_unit_price = 0;
-  let your_child_unit_price = 0;
-  let public_unit_price = 0;
-  let public_child_unit_price = 0;
-  let supplier_child_unit_cost = supplier_unit_cost;
+    let your_unit_price = 0;
+    let your_child_unit_price = 0;
+    let public_unit_price = 0;
+    let public_child_unit_price = 0;
+    let supplier_child_unit_cost = supplier_unit_cost;
 
-  if (priceRow) {
-    your_unit_price = Number(priceRow.your_unit_price || 0);
-    public_unit_price = Number(priceRow.public_unit_price || 0);
-
-    your_child_unit_price = resolveChildPrice(
-      priceRow.your_child_unit_price,
-      your_unit_price
-    );
-
-    public_child_unit_price = resolveChildPrice(
-      priceRow.public_child_unit_price,
-      public_unit_price
-    );
-
-    supplier_child_unit_cost = resolveChildPrice(
-      priceRow.supplier_child_unit_cost,
-      supplier_unit_cost
-    );
-  } else {
-    if (agreed_unit_price !== null) return { error: "Configura prima il listino: il prezzo concordato non crea né modifica prezzi canale." };
-    your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
-    public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
-
-    const new_your_child_unit_price = parseNullableNumber(
-      formData.get("new_your_child_unit_price")
-    );
-    const new_public_child_unit_price = parseNullableNumber(
-      formData.get("new_public_child_unit_price")
-    );
-    const new_supplier_child_unit_cost = parseNullableNumber(
-      formData.get("new_supplier_child_unit_cost")
-    );
-
-    your_child_unit_price = new_your_child_unit_price ?? your_unit_price;
-    public_child_unit_price =
-      new_public_child_unit_price ?? public_unit_price;
-    supplier_child_unit_cost =
-      new_supplier_child_unit_cost ?? supplier_unit_cost;
-
-    if (your_unit_price > 0) {
-      await supabaseServer.from("experience_channel_prices").insert({
-        experience_id,
-        channel_id,
-        your_unit_price,
-        your_child_unit_price: new_your_child_unit_price,
-        public_unit_price,
-        public_child_unit_price: new_public_child_unit_price,
-        supplier_child_unit_cost: new_supplier_child_unit_cost,
-      });
-    } else {
-      return { error: "⚠️ Prezzo mancante. Inserisci i prezzi per procedere." };
+    if (priceError && priceError.code !== "PGRST116") return { error: `Errore lettura listino: ${priceError.message}` };
+    let priceRow = storedPriceRow;
+    try {
+      if (priceRow) priceRow = resolveParticipantPrice(priceRow, adults, children, isGroupPricing);
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Tariffa non disponibile." };
     }
-  }
+    if (priceRow) {
+      if (priceRow.pricing_mode === "tiered") supplier_unit_cost = Number(priceRow.supplier_adult_unit_cost);
+      your_unit_price = Number(priceRow.your_unit_price || 0);
+      public_unit_price = Number(priceRow.public_unit_price || 0);
 
-  const pricingPax = adults + children;
-  const groupPricingUnits = getGroupPricingUnits({
-    isGroupPricing,
-    experienceName: experience_name,
-    pricingPax,
-  });
-
-  let total_to_you = isGroupPricing
-    ? round2(your_unit_price * groupPricingUnits)
-    : round2(adults * your_unit_price + children * your_child_unit_price);
-
-  const total_customer = isGroupPricing
-    ? round2(public_unit_price * groupPricingUnits)
-    : round2(adults * public_unit_price + children * public_child_unit_price);
-
-  let total_supplier_cost = isGroupPricing
-    ? round2(supplier_unit_cost * groupPricingUnits)
-    : round2(
-        adults * supplier_unit_cost + children * supplier_child_unit_cost
+      your_child_unit_price = resolveChildPrice(
+        priceRow.your_child_unit_price,
+        your_unit_price
       );
 
-  let margin_total = round2(total_to_you - total_supplier_cost);
+      public_child_unit_price = resolveChildPrice(
+        priceRow.public_child_unit_price,
+        public_unit_price
+      );
 
-  if (agreed_unit_price !== null) {
-    try {
-      const keys = await getFmdqInternalSupplierKeys();
-      const directFmdq = isDirectFmdqAgreementContext(
-        keys.has(`${business_unit_id}:${experience.supplier_id}`), channel.fattura_mensile_fmdq);
-      if (directFmdq) assertFmdqAgreementRates({
-        yourAdult: your_unit_price, yourChild: your_child_unit_price,
-        supplierAdult: supplier_unit_cost, supplierChild: supplier_child_unit_cost,
-        invoiceAdult: Number(priceRow?.supplier_adult_unit_cost ?? supplier_unit_cost),
-        invoiceChild: Number(priceRow?.supplier_child_unit_cost ?? priceRow?.supplier_adult_unit_cost ?? supplier_unit_cost),
-      });
-      const effective = applyBookingAgreement({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total },
-        { price: agreed_unit_price, adults, children, isGroupPricing, directFmdq });
-      ({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total } = effective);
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : "Impossibile applicare il prezzo concordato." };
+      supplier_child_unit_cost = resolveChildPrice(
+        priceRow.supplier_child_unit_cost,
+        supplier_unit_cost
+      );
+    } else {
+      if (agreed_unit_price !== null) return { error: "Configura prima il listino: il prezzo concordato non crea né modifica prezzi canale." };
+      your_unit_price = parseNumber(formData.get("new_your_unit_price"), 0);
+      public_unit_price = parseNumber(formData.get("new_public_unit_price"), 0);
+
+      const new_your_child_unit_price = parseNullableNumber(
+        formData.get("new_your_child_unit_price")
+      );
+      const new_public_child_unit_price = parseNullableNumber(
+        formData.get("new_public_child_unit_price")
+      );
+      const new_supplier_child_unit_cost = parseNullableNumber(
+        formData.get("new_supplier_child_unit_cost")
+      );
+
+      your_child_unit_price = new_your_child_unit_price ?? your_unit_price;
+      public_child_unit_price =
+        new_public_child_unit_price ?? public_unit_price;
+      supplier_child_unit_cost =
+        new_supplier_child_unit_cost ?? supplier_unit_cost;
+
+      if (your_unit_price > 0) {
+        await supabaseServer.from("experience_channel_prices").insert({
+          experience_id,
+          channel_id,
+          your_unit_price,
+          your_child_unit_price: new_your_child_unit_price,
+          public_unit_price,
+          public_child_unit_price: new_public_child_unit_price,
+          supplier_child_unit_cost: new_supplier_child_unit_cost,
+        });
+      } else {
+        return { error: "⚠️ Prezzo mancante. Inserisci i prezzi per procedere." };
+      }
     }
-  }
+
+    const pricingPax = adults + children;
+    const groupPricingUnits = getGroupPricingUnits({
+      isGroupPricing,
+      experienceName: experience_name,
+      pricingPax,
+    });
+
+    let total_to_you = isGroupPricing
+      ? round2(your_unit_price * groupPricingUnits)
+      : round2(adults * your_unit_price + children * your_child_unit_price);
+
+    let total_customer = isGroupPricing
+      ? round2(public_unit_price * groupPricingUnits)
+      : round2(adults * public_unit_price + children * public_child_unit_price);
+
+    let total_supplier_cost = isGroupPricing
+      ? round2(supplier_unit_cost * groupPricingUnits)
+      : round2(
+          adults * supplier_unit_cost + children * supplier_child_unit_cost
+        );
+
+    let margin_total = round2(total_to_you - total_supplier_cost);
+
+    if (agreed_unit_price !== null) {
+      try {
+        const keys = await getFmdqInternalSupplierKeys();
+        const directFmdq = isDirectFmdqAgreementContext(
+          keys.has(`${business_unit_id}:${experience.supplier_id}`), channel.fattura_mensile_fmdq);
+        if (directFmdq) assertFmdqAgreementRates({
+          yourAdult: your_unit_price, yourChild: your_child_unit_price,
+          supplierAdult: supplier_unit_cost, supplierChild: supplier_child_unit_cost,
+          invoiceAdult: Number(priceRow?.supplier_adult_unit_cost ?? supplier_unit_cost),
+          invoiceChild: Number(priceRow?.supplier_child_unit_cost ?? priceRow?.supplier_adult_unit_cost ?? supplier_unit_cost),
+        });
+        const effective = applyBookingAgreement({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total },
+          { price: agreed_unit_price, adults, children, isGroupPricing, directFmdq });
+        ({ your_unit_price, supplier_unit_cost, total_to_you, total_supplier_cost, margin_total } = effective);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : "Impossibile applicare il prezzo concordato." };
+      }
+    }
+
+    // A known Bokun total is an actual amount, not an adult price to multiply.
+    if (agreed_unit_price === null && currentBooking.experience_id === experience_id
+      && currentBooking.channel_id === channel_id && ["bokun_webhook", "bokun_api_backfill"].includes(currentBooking.total_to_you_source)) {
+      total_to_you = Number(currentBooking.total_to_you);
+      if (currentBooking.price_tier_snapshot) total_customer = Number(currentBooking.total_customer);
+      margin_total = round2(total_to_you - total_supplier_cost);
+    }
+    return { your_unit_price, public_unit_price, supplier_unit_cost, total_to_you, total_customer, total_supplier_cost, margin_total,
+      price_tier_snapshot: priceRow?.pricing_mode === "tiered" ? priceRow : null,
+      total_to_you_source: agreed_unit_price !== null ? null
+        : currentBooking.experience_id === experience_id && currentBooking.channel_id === channel_id
+          && ["bokun_webhook", "bokun_api_backfill"].includes(currentBooking.total_to_you_source)
+          ? currentBooking.total_to_you_source : priceRow?.pricing_mode === "tiered" ? "configured_price" : null };
+
+  })();
+  if ("error" in calculated) return calculated;
+  const { your_unit_price, public_unit_price, total_to_you, total_customer, total_supplier_cost, margin_total } = calculated;
+  supplier_unit_cost = calculated.supplier_unit_cost;
 
   const oldPaidAmount = getEffectiveSupplierPaid({
     is_cancelled: currentBooking.is_cancelled,
@@ -876,17 +920,13 @@ export async function updateBooking(formData: FormData) {
       non_paying_adults,
       total_people,
       pax: total_people,
-      total_amount: total_customer,
+      ...(!preserveEconomics ? { total_amount: total_customer } : {}),
       agreed_unit_price,
       ...(agreed_unit_price !== null || currentBooking.agreed_unit_price != null
         ? { total_to_you_source: null } : {}),
-      your_unit_price,
-      public_unit_price,
-      supplier_unit_cost,
-      total_to_you,
-      total_customer,
-      total_supplier_cost,
-      margin_total,
+      ...(!preserveEconomics ? { your_unit_price, public_unit_price, supplier_unit_cost,
+        total_to_you, total_customer, total_supplier_cost, margin_total, price_tier_snapshot: calculated.price_tier_snapshot,
+        total_to_you_source: calculated.total_to_you_source } : {}),
       ...(formData.has("customer_payment_status") ? { customer_payment_status } : {}),
       ...(formData.has("supplier_payment_status") ? { supplier_payment_status } : {}),
       ...(formData.has("supplier_amount_paid") ? { supplier_amount_paid } : {}),

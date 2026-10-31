@@ -1,5 +1,6 @@
 "use server";
 
+import { resolveParticipantPrice } from "@/lib/booking-pricing";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
@@ -275,7 +276,9 @@ export async function importBokunBookings(
       let fNet = 0;
       let fUnitL = 0;
       let fUnitN = 0;
-      const unitCost = exp?.supplier_unit_cost || 0;
+      let unitCost = exp?.supplier_unit_cost || 0;
+      let supplierTotal = unitCost * pricingPax;
+      let tierSnapshot = null;
 
       if (isGYG && fileTotalCustomer > 0) {
         fLord = fileTotalCustomer;
@@ -283,17 +286,26 @@ export async function importBokunBookings(
         fUnitL = pricingPax > 0 ? fLord / pricingPax : 0;
         fUnitN = pricingPax > 0 ? fNet / pricingPax : 0;
       } else {
-        const { data: pR } = await supabaseServer
+        const { data: storedPrice, error: priceError } = await supabaseServer
           .from("experience_channel_prices")
           .select("*")
           .eq("experience_id", experienceId)
           .eq("channel_id", channel?.id || 0)
           .maybeSingle();
 
+        if (priceError) throw new Error(`Errore lettura listino: ${priceError.message}`);
+        const pR = storedPrice ? resolveParticipantPrice(storedPrice, adults, children) : null;
         fUnitL = pR?.public_unit_price || 0;
         fUnitN = pR?.your_unit_price || 0;
         fLord = fUnitL * pricingPax;
         fNet = fUnitN * pricingPax;
+        if (pR?.pricing_mode === "tiered") {
+          tierSnapshot = pR;
+          unitCost = Number(pR.supplier_adult_unit_cost);
+          fLord = adults * fUnitL + children * Number(pR.public_child_unit_price ?? fUnitL);
+          fNet = adults * fUnitN + children * Number(pR.your_child_unit_price ?? fUnitN);
+          supplierTotal = adults * unitCost + children * Number(pR.supplier_child_unit_cost ?? unitCost);
+        }
       }
 
       const { error } = await supabaseServer.from("bookings").insert({
@@ -319,10 +331,11 @@ export async function importBokunBookings(
         your_unit_price: fUnitN,
         public_unit_price: fUnitL,
         supplier_unit_cost: unitCost,
+        ...(tierSnapshot ? { price_tier_snapshot: tierSnapshot, total_to_you_source: "configured_price" } : {}),
         total_to_you: fNet,
         total_customer: fLord,
-        total_supplier_cost: unitCost * pricingPax,
-        margin_total: fNet - unitCost * pricingPax,
+        total_supplier_cost: supplierTotal,
+        margin_total: fNet - supplierTotal,
         customer_payment_status: finalPaymentStatus,
         is_cancelled: isCancelled,
       });

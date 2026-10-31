@@ -32,6 +32,8 @@ export async function getExperiences() {
         name
       ),
       experience_channel_prices (
+        pricing_mode,
+        price_tiers,
         id,
         channel_id,
         your_unit_price,

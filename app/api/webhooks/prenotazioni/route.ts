@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
-import { applyBookingAgreement, parseAgreedUnitPrice, assertPersonAgreement, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
+import { resolveParticipantPrice, type TierPricingRule, applyBookingAgreement, parseAgreedUnitPrice, assertPersonAgreement, isDirectFmdqAgreementContext } from "@/lib/booking-pricing";
 import { getFmdqInternalSupplierKeys } from "@/lib/booking-pricing-server";
 import {
   BokunIdentityError,
@@ -44,7 +44,7 @@ type ExistingBooking = {
   [key: string]: any;
 };
 
-type ExperienceChannelPrice = {
+type ExperienceChannelPrice = TierPricingRule & {
   id: number;
   experience_id: number;
   channel_id: number;
@@ -136,6 +136,12 @@ function toMoney(value: unknown, fallback = 0) {
   const n = Number(value ?? fallback);
   if (!Number.isFinite(n)) return fallback;
   return Math.round(n * 100) / 100;
+}
+
+function sourceBookingTotal(value: unknown) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const total = toOptionalNumber(value);
+  return total !== null && total >= 0 ? total : null;
 }
 
 function normalizeText(value: unknown) {
@@ -368,7 +374,7 @@ async function getExperienceChannelPrice(params: {
   const { data, error } = await supabaseServer
     .from("experience_channel_prices")
     .select(
-      "id, experience_id, channel_id, your_unit_price, public_unit_price, your_child_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost"
+      "pricing_mode, price_tiers, id, experience_id, channel_id, your_unit_price, public_unit_price, your_child_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost"
     )
     .eq("experience_id", experienceId)
     .eq("channel_id", channelId)
@@ -414,10 +420,8 @@ function calculateBookingEconomics(params: {
       priceRule.your_unit_price
   );
 
-  const sourceTotalPrice = params.channelId === 2 &&
-    (typeof params.sourceTotalPrice === "number" ||
-      typeof params.sourceTotalPrice === "string")
-    ? toOptionalNumber(params.sourceTotalPrice)
+  const sourceTotalPrice = (params.channelId === 2 || priceRule.pricing_mode === "tiered")
+    ? sourceBookingTotal(params.sourceTotalPrice)
     : null;
 
   // Viator supplies the total for the entire booking, not a per-person price.
@@ -428,7 +432,8 @@ function calculateBookingEconomics(params: {
       ? adultYourPrice
       : adultYourPrice * adults + childYourPrice * children;
 
-  const totalCustomer = isGroupPricing
+  const totalCustomer = priceRule.pricing_mode === "tiered" && usesSourceTotalPrice
+    ? toMoney(sourceTotalPrice) : isGroupPricing
     ? adultPublicPrice
     : adultPublicPrice * adults + childPublicPrice * children;
 
@@ -441,7 +446,7 @@ function calculateBookingEconomics(params: {
     public_unit_price: adultPublicPrice,
     supplier_unit_cost: adultSupplierCost,
     total_to_you: toMoney(totalToYou),
-    ...(params.channelId === 2 ? {
+    ...(params.channelId === 2 || priceRule.pricing_mode === "tiered" ? {
       total_to_you_source: usesSourceTotalPrice ? "bokun_webhook" : "configured_price",
     } : {}),
     total_customer: toMoney(totalCustomer),
@@ -1312,7 +1317,7 @@ export async function POST(req: Request) {
         ? infantsFromBody
         : Number(existing?.infants || 0);
 
-    const priceRule = await getExperienceChannelPrice({
+    let priceRule = await getExperienceChannelPrice({
       experienceId: Number(experience.id),
       channelId,
     });
@@ -1331,17 +1336,37 @@ export async function POST(req: Request) {
       );
     }
 
-    let economicData = priceRule
+    const tiered = priceRule?.pricing_mode === "tiered";
+    const samePricingContext = existing && Number(existing.experience_id) === Number(experience.id)
+      && Number(existing.channel_id) === channelId;
+    const sameParticipants = samePricingContext && Number(existing.adults || 0) === finalAdults
+      && Number(existing.children || 0) === finalChildren;
+    // Legacy/manual snapshots have no trustworthy automatic origin. Never replace
+    // them with today's list price or an incoming source amount (including #2000).
+    const protectedSnapshot = tiered && samePricingContext && agreement === null
+      && existing.total_to_you_source == null;
+    if (!isCancelled && protectedSnapshot && !sameParticipants) {
+      return NextResponse.json({ error: "Importi manuali o storici protetti: variazione partecipanti da verificare manualmente." }, { status: 409 });
+    }
+    const preserveSnapshot = tiered && existing && (protectedSnapshot || (sameParticipants && agreement === null
+      && sourceBookingTotal(body.source_total_price) === null));
+    if (priceRule && !isCancelled && !preserveSnapshot) {
+      try { priceRule = resolveParticipantPrice(priceRule, finalAdults, finalChildren, Boolean(experience.is_group_pricing)); }
+      catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Tariffa assente." }, { status: 400 }); }
+    }
+    let economicData = preserveSnapshot || isCancelled ? {} : priceRule
       ? calculateBookingEconomics({
           priceRule,
           channelId,
-          sourceTotalPrice: isCancelled ? undefined : body.source_total_price,
+          sourceTotalPrice: sourceBookingTotal(body.source_total_price) ?? (tiered && existing?.total_to_you_source === "bokun_webhook" ? existing.total_to_you : undefined),
           isGroupPricing: Boolean(experience.is_group_pricing),
           adults: finalAdults,
           children: finalChildren,
           infants: finalInfants,
         })
       : {};
+
+    if (tiered && !preserveSnapshot && !isCancelled) economicData = { ...economicData, price_tier_snapshot: priceRule };
 
     if (agreement !== null && !isCancelled) {
       assertPersonAgreement(agreement, Boolean(experience.is_group_pricing));
@@ -1402,7 +1427,7 @@ export async function POST(req: Request) {
       children: finalChildren,
       infants: finalInfants,
       total_people: finalAdults + finalChildren + finalInfants +
-        (agreement !== null ? Number(existing?.non_paying_adults || 0) : 0),
+        Number(existing?.non_paying_adults || 0),
 
       is_cancelled: isCancelled,
       ...(isCancelled ? {} : economicData),

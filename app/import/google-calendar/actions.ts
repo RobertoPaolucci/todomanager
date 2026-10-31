@@ -4,7 +4,7 @@ import { inspectBookingLink } from "@/lib/google-calendar-booking-link.mjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
-import { effectiveFmdqInvoiceRates } from "@/lib/booking-pricing";
+import { resolveParticipantPrice, type TierPricingRule, effectiveFmdqInvoiceRates } from "@/lib/booking-pricing";
 import {
   canRetryTuscanEscapeImport,
   isTuscanEscapeBlockRow,
@@ -47,7 +47,9 @@ type ChannelRow = {
   name: string;
 };
 
-type PriceRow = {
+type PriceRow = TierPricingRule & {
+  supplier_adult_unit_cost?: number | null;
+  supplier_child_unit_cost?: number | null;
   your_unit_price: number | string | null;
   public_unit_price: number | string | null;
 };
@@ -288,7 +290,7 @@ async function getChannel(channelId: number | null) {
 async function getPrice(experienceId: number | null, channelId: number | null) {
   const { data, error } = await supabaseServer
     .from("experience_channel_prices")
-    .select("your_unit_price, public_unit_price")
+    .select("pricing_mode, price_tiers, your_unit_price, public_unit_price, your_child_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost")
     .eq("experience_id", experienceId)
     .eq("channel_id", channelId)
     .limit(1);
@@ -400,7 +402,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     const channel = isTuscanEscapeBlock
       ? { id: TUSCAN_ESCAPE_STAGING_DEFAULTS.channel_id, name: TUSCAN_ESCAPE_NAME }
       : await getChannel(row.channel_id);
-    const price = isTuscanEscapeBlock
+    let price: PriceRow | null = isTuscanEscapeBlock
       ? { your_unit_price: 0, public_unit_price: 0 }
       : await getPrice(row.experience_id, row.channel_id);
 
@@ -416,6 +418,8 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
       nonPayingAdults,
     } = getImportPeople(row);
 
+    try { price = resolveParticipantPrice(price, adults, children, Boolean(experience.is_group_pricing)); }
+    catch { await markRow(row.id, "needs_review", null); continue; }
     const payingPax = Math.max(adults + children, 1);
     const totalPeople = Math.max(
       adults + children + infants + nonPayingAdults,
@@ -425,6 +429,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
     let yourUnitPrice = toNumber(price.your_unit_price);
     const publicUnitPrice = toNumber(price.public_unit_price);
     let supplierUnitCost = isTuscanEscapeBlock ? 0 : toNumber(experience.supplier_unit_cost);
+    if (price.pricing_mode === "tiered") supplierUnitCost = Number(price.supplier_adult_unit_cost);
     const isGroupPricing = isTuscanEscapeBlock ? false : Boolean(experience.is_group_pricing);
     if (!isTuscanEscapeBlock && row.channel_id === 7 && getTuscanEscapeTotal(row) !== null
       && experience.id === 7 && experience.supplier_id === 3
@@ -438,15 +443,15 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
 
     const totalToYou = isGroupPricing
       ? yourUnitPrice
-      : yourUnitPrice * payingPax;
+      : price.pricing_mode === "tiered" ? adults * yourUnitPrice + children * Number(price.your_child_unit_price ?? yourUnitPrice) : yourUnitPrice * payingPax;
 
     const totalCustomer = isGroupPricing
       ? publicUnitPrice
-      : publicUnitPrice * payingPax;
+      : price.pricing_mode === "tiered" ? adults * publicUnitPrice + children * Number(price.public_child_unit_price ?? publicUnitPrice) : publicUnitPrice * payingPax;
 
     const totalSupplierCost = isGroupPricing
       ? supplierUnitCost
-      : supplierUnitCost * payingPax;
+      : price.pricing_mode === "tiered" ? adults * supplierUnitCost + children * Number(price.supplier_child_unit_cost ?? supplierUnitCost) : supplierUnitCost * payingPax;
 
     const marginTotal = totalToYou - totalSupplierCost;
 
@@ -478,6 +483,7 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
         your_unit_price: yourUnitPrice,
         public_unit_price: publicUnitPrice,
         supplier_unit_cost: supplierUnitCost,
+        ...(price.pricing_mode === "tiered" ? { price_tier_snapshot: price, total_to_you_source: "configured_price" } : {}),
         total_to_you: totalToYou,
         total_customer: totalCustomer,
         total_supplier_cost: totalSupplierCost,

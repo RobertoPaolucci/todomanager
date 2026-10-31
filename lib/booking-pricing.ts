@@ -83,9 +83,14 @@ export function effectiveFmdqInvoiceRates(params: {
   adult: number; child: number;
   channelId?: number; payingClients?: number;
   guideEvidence?: TuscanEscapeGuideEvidence;
+  tierSnapshot?: { supplier_adult_unit_cost: number; supplier_child_unit_cost?: number | null } | null;
 }) {
   assertPersonAgreement(params.price, params.isGroupPricing);
   if (params.price !== null && params.directFmdq) return { adult: params.price, child: params.price };
+  if (params.tierSnapshot) return {
+    adult: Number(params.tierSnapshot.supplier_adult_unit_cost),
+    child: Number(params.tierSnapshot.supplier_child_unit_cost ?? params.tierSnapshot.supplier_adult_unit_cost),
+  };
   if (params.channelId === 7 && params.directFmdq && !params.isGroupPricing) {
     const evidence = params.guideEvidence;
     const discounted = params.payingClients === 8
@@ -109,4 +114,53 @@ export function reportPayingAdults(booking: {
   }
   // Preserve the historical convention for rows without evidence of separation.
   return Math.max(adults - nonPaying, 0);
+}
+export type ParticipantPriceTier = {
+  min_participants: number;
+  max_participants: number;
+  your_unit_price: number;
+  public_unit_price: number;
+  supplier_adult_unit_cost: number;
+};
+
+export type TierPricingRule = {
+  pricing_mode?: string;
+  price_tiers?: ParticipantPriceTier[];
+  your_child_unit_price?: number | null;
+  public_child_unit_price?: number | null;
+};
+
+export function validatePriceTiers(value: unknown): ParticipantPriceTier[] {
+  if (!Array.isArray(value)) throw new Error("Fasce prezzo non valide.");
+  const tiers = value as ParticipantPriceTier[];
+  for (const tier of tiers) {
+    if (!tier || !Number.isInteger(tier.min_participants) || !Number.isInteger(tier.max_participants)
+      || tier.min_participants < 1 || tier.max_participants < tier.min_participants || tier.max_participants > 100000) {
+      throw new Error("Intervallo partecipanti non valido.");
+    }
+    for (const key of ["your_unit_price", "public_unit_price", "supplier_adult_unit_cost"] as const) {
+      const price = tier[key];
+      if (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 9999999999.99
+        || Math.abs(price * 100 - Math.round(price * 100)) > 0.0001) throw new Error("Prezzo fascia non valido: usare importi non negativi con massimo due decimali.");
+    }
+  }
+  const sorted = [...tiers].sort((a, b) => a.min_participants - b.min_participants);
+  if (sorted.some((tier, i) => i > 0 && tier.min_participants <= sorted[i - 1].max_participants)) {
+    throw new Error("Le fasce partecipanti non possono sovrapporsi.");
+  }
+  return sorted;
+}
+
+/** Free children, infants and staff never move a booking into a higher tier.
+ * Child rates remain separate: NULL follows the selected adult rate, zero stays free.
+ */
+export function resolveParticipantPrice<T extends TierPricingRule>(rule: T, adults: number, children: number, isGroupPricing = false): T {
+  if (rule.pricing_mode !== "tiered") return rule;
+  if (![adults, children].every(n => Number.isInteger(n) && n >= 0)) throw new Error("Numero di partecipanti non valido.");
+  if (isGroupPricing) throw new Error("Prezzi a fasce non disponibili per esperienze a gruppi o quad.");
+  const childrenPay = rule.your_child_unit_price !== 0 || rule.public_child_unit_price !== 0;
+  const participants = adults + (childrenPay ? children : 0);
+  const tier = validatePriceTiers(rule.price_tiers).find(t => participants >= t.min_participants && participants <= t.max_participants);
+  if (!tier) throw new Error(`Tariffa a fasce assente per ${participants} partecipanti paganti. Configurare una fascia per esperienza e canale.`);
+  return { ...rule, ...tier };
 }

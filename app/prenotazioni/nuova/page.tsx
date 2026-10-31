@@ -4,6 +4,8 @@ import { getChannels, getExperiences } from "@/lib/queries";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCognanelloExperienceLine } from "@/lib/supplier-whatsapp";
 
+export const dynamic = "force-dynamic";
+
 type PageProps = {
   searchParams: Promise<{
     saved?: string;

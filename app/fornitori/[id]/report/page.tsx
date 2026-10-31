@@ -175,6 +175,7 @@ function isGroupPricingBooking(booking: EconomicBookingRow) {
 }
 
 function getBookingIncome(booking: EconomicBookingWithChannelPrice) {
+  if (booking.total_to_you != null) return moneyValue(booking.total_to_you);
   const agreement = parseAgreedUnitPrice(booking.agreed_unit_price);
   if (agreement !== null) return agreedTotal(getPayingAdultCount(booking), Number(booking.children || 0), agreement);
   if (isGroupPricingBooking(booking)) {
@@ -193,6 +194,7 @@ function getBookingIncome(booking: EconomicBookingWithChannelPrice) {
 }
 
 function getBookingGross(booking: EconomicBookingWithChannelPrice) {
+  if (booking.total_customer != null) return moneyValue(booking.total_customer);
   if (isGroupPricingBooking(booking)) {
     return moneyValue(booking.total_customer);
   }
@@ -1120,7 +1122,7 @@ export default async function SupplierReportPage({
                   {formatCurrency(economicIncomeTotal)}
                 </div>
                 <p className="mt-2 text-xs text-emerald-700">
-                  Prezzo unitario di incasso moltiplicato per le persone paganti.
+                  Importi salvati nelle prenotazioni, inclusi prezzi a fasce e correzioni manuali.
                 </p>
               </div>
 

@@ -39,6 +39,10 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
         return q;
       },
       is(k, v) { predicates.push(row => (row[k] ?? null) === v); return q; },
+      not(k, op, v) {
+        if (op !== 'is' || v !== null) throw new Error('Unexpected negated filter');
+        predicates.push(row => row[k] != null); return q;
+      },
       gte(k, v) { predicates.push(row => row[k] >= v); return q; }, lte(k, v) { predicates.push(row => row[k] <= v); return q; },
       gt(k, v) { predicates.push(row => row[k] > v); return q; },
       in(k, v) { predicates.push(row => v.includes(row[k])); return q; },
@@ -99,7 +103,7 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
       throw new Error(`Unexpected import ${name}`);
     };
     vm.runInNewContext(code, { module: mod, exports: mod.exports, require: requireMock,
-      console: { log() {}, error() {} }, fetch: fetchMock, Date, Set, Map, Error, Response, Request, URL, Buffer, Uint8Array }, { filename: file });
+      console: { log() {}, error() {} }, fetch: fetchMock, Date, Set, Map, Error, Response, Request, URL, URLSearchParams, Buffer, Uint8Array }, { filename: file });
     cache.set(file, mod.exports);
     return mod.exports;
   }

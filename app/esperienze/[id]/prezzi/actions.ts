@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
+import { validatePriceTiers } from "@/lib/booking-pricing";
 
 function parseNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string" || value.trim() === "") return 0;
@@ -44,6 +45,26 @@ export async function saveExperienceChannelPrices(formData: FormData) {
     throw new Error(`Errore caricamento canali: ${channelsError.message}`);
   }
 
+  const { data: experience, error: experienceError } = await supabaseServer.from("experiences")
+    .select("is_group_pricing").eq("id", experienceId).single();
+  if (experienceError || !experience) throw new Error("Esperienza non trovata.");
+  // Validate every channel before writing any row.
+  const configurations = new Map<number, { pricing_mode: string; price_tiers: ReturnType<typeof validatePriceTiers> }>();
+  try {
+    for (const channel of channels ?? []) {
+      const mode = String(formData.get(`pricing_mode_${channel.id}`) ?? "fixed");
+      if (mode !== "fixed" && mode !== "tiered") throw new Error("Modalità prezzo non valida.");
+      const tiers = validatePriceTiers(JSON.parse(String(formData.get(`price_tiers_${channel.id}`) ?? "[]")));
+      if (mode === "tiered" && (tiers.length === 0 || experience.is_group_pricing)) {
+        throw new Error("Configurare almeno una fascia; fasce non disponibili per gruppi o quad.");
+      }
+      configurations.set(Number(channel.id), { pricing_mode: mode, price_tiers: tiers });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Configurazione fasce non valida.";
+    redirect(`/esperienze/${experienceId}/prezzi?error=${encodeURIComponent(message)}`);
+  }
+
   for (const channel of channels ?? []) {
     const channelId = Number(channel.id);
 
@@ -77,6 +98,7 @@ export async function saveExperienceChannelPrices(formData: FormData) {
     const notes = normalizeText(formData.get(`notes_${channelId}`));
 
     const row = {
+      ...configurations.get(channelId),
       experience_id: experienceId,
       channel_id: channelId,
       your_unit_price,

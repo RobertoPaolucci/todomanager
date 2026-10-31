@@ -612,6 +612,7 @@ export async function GET(
             specificChildCost ??
             adultUnitCost;
         const effectiveRates = effectiveFmdqInvoiceRates({
+          tierSnapshot: booking.price_tier_snapshot,
           price: parseAgreedUnitPrice(booking.agreed_unit_price),
           directFmdq: isDirectFmdqAgreementContext(
             fmdqKeys.has(`${booking.business_unit_id}:${booking.supplier_id}`), channel?.fattura_mensile_fmdq),

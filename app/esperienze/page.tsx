@@ -4,6 +4,8 @@ import SectionCard from "@/components/SectionCard";
 import { deleteExperience } from "./actions";
 import { getExperiences } from "@/lib/queries";
 
+export const dynamic = "force-dynamic";
+
 function formatEuro(value: number) {
   return new Intl.NumberFormat("it-IT", {
     style: "currency",

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { createBooking, updateBooking } from "@/app/prenotazioni/actions";
-import { applyBookingAgreement, parseAgreedUnitPrice, assertFmdqAgreementRates, isDirectFmdqAgreementContext, roundBookingMoney } from "@/lib/booking-pricing";
+import { resolveParticipantPrice, type TierPricingRule, applyBookingAgreement, parseAgreedUnitPrice, assertFmdqAgreementRates, isDirectFmdqAgreementContext, roundBookingMoney } from "@/lib/booking-pricing";
 
 type Channel = {
   id: number;
@@ -11,7 +11,7 @@ type Channel = {
   fattura_mensile_fmdq?: boolean | null;
 };
 
-type ExperiencePrice = {
+type ExperiencePrice = TierPricingRule & {
   id: number;
   channel_id: number;
   your_unit_price: number;
@@ -161,7 +161,7 @@ export default function BookingForm({
     [experiences, experienceId]
   );
 
-  const selectedPrice = useMemo(() => {
+  const storedPrice = useMemo(() => {
     if (!selectedExperience || !channelId) return null;
 
     return (
@@ -170,6 +170,16 @@ export default function BookingForm({
       ) || null
     );
   }, [selectedExperience, channelId]);
+
+  const preserveEconomics = isEditing && initialData && String(initialData.channel_id) === channelId
+    && String(initialData.experience_id) === experienceId && Number(initialData.adults) === adults
+    && Number(initialData.children) === children && String(initialData.agreed_unit_price ?? "") === agreedPrice;
+  let selectedPrice = storedPrice;
+  let tierError: string | null = null;
+  if (storedPrice && !preserveEconomics) {
+    try { selectedPrice = resolveParticipantPrice(storedPrice, adults, children, selectedExperience?.is_group_pricing); }
+    catch (error) { tierError = error instanceof Error ? error.message : "Tariffa assente."; }
+  }
 
   useEffect(() => {
     setManualYourPrice(0);
@@ -272,7 +282,8 @@ export default function BookingForm({
     ? Number(selectedPrice.public_unit_price)
     : manualPublicPrice;
 
-  const automaticSupplierCost = Number(selectedExperience?.supplier_unit_cost || 0);
+  const automaticSupplierCost = Number(selectedPrice?.pricing_mode === "tiered"
+    ? selectedPrice.supplier_adult_unit_cost : selectedExperience?.supplier_unit_cost || 0);
   const isGroupPricing = selectedExperience?.is_group_pricing === true;
   const isQuadExperience = normalizeText(selectedExperience?.name).includes("quad");
 
@@ -311,18 +322,28 @@ export default function BookingForm({
   } catch (error) {
     agreementError = error instanceof Error ? error.message : "Prezzo concordato non valido.";
   }
+  if (preserveEconomics) effective = {
+    your_unit_price: Number(initialData.your_unit_price), supplier_unit_cost: Number(initialData.supplier_unit_cost),
+    total_to_you: Number(initialData.total_to_you), total_supplier_cost: Number(initialData.total_supplier_cost),
+    margin_total: Number(initialData.margin_total),
+  };
+  const preserveSourceTotal = isEditing && initialData && String(initialData.channel_id) === channelId
+    && String(initialData.experience_id) === experienceId && agreement === null
+    && ["bokun_webhook", "bokun_api_backfill"].includes(initialData.total_to_you_source);
+  if (preserveSourceTotal) effective = { ...effective, total_to_you: Number(initialData.total_to_you),
+    margin_total: roundBookingMoney(Number(initialData.total_to_you) - effective.total_supplier_cost) };
   const yourUnitPrice = effective.your_unit_price;
   const supplierUnitCost = effective.supplier_unit_cost;
   const totalToYou = effective.total_to_you;
   const totalSupplierCost = effective.total_supplier_cost;
   const marginTotal = effective.margin_total;
-  const totalCustomer = roundBookingMoney(isGroupPricing
+  const totalCustomer = preserveEconomics || (preserveSourceTotal && initialData.price_tier_snapshot) ? Number(initialData.total_customer) : roundBookingMoney(isGroupPricing
     ? publicUnitPrice * groupPricingUnits : adults * publicUnitPrice + children * publicChildPrice);
 
   async function handleFormAction(formData: FormData) {
     setErrorMessage(null);
-    if (agreementError) {
-      setErrorMessage(agreementError);
+    if (agreementError || tierError) {
+      setErrorMessage(agreementError || tierError);
       return;
     }
 
@@ -383,6 +404,8 @@ export default function BookingForm({
       {isEditing && <input type="hidden" name="id" value={initialData.id} />}
       <input type="hidden" name="returnTo" value={returnTo} />
 
+      {tierError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-700 md:col-span-2">{tierError}</p>}
+      {preserveEconomics && <p className="text-sm text-zinc-600 md:col-span-2">Importi salvati conservati. Il cambio di paganti, esperienza, canale o prezzo concordato richiede un nuovo calcolo.</p>}
       {errorMessage && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm md:col-span-2">
           <p className="text-sm font-bold text-red-700">{errorMessage}</p>
@@ -776,7 +799,7 @@ export default function BookingForm({
         </p>}
       </div>
 
-      <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2 sm:p-5">
+      {!tierError && <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm md:col-span-2 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-base font-bold text-zinc-900 sm:text-lg">
@@ -853,7 +876,7 @@ export default function BookingForm({
           <div>Unit. Lordo: €{publicUnitPrice.toFixed(2)}</div>
           <div>Unit. Forn: €{supplierUnitCost.toFixed(2)}</div>
         </div>
-      </div>
+      </div>}
 
       <div className={sectionClass}>
         <label className="mb-1 block text-sm font-medium text-zinc-700">

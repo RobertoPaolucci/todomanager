@@ -3,9 +3,11 @@ import AppShell from "@/components/AppShell";
 import SectionCard from "@/components/SectionCard";
 import { supabaseServer } from "@/lib/supabase-server";
 import { saveExperienceChannelPrices } from "./actions";
+import PriceTierEditor from "@/components/PriceTierEditor";
 
 type PageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 };
 
 function valueForInput(value: number | string | null | undefined) {
@@ -27,8 +29,9 @@ function formatCurrency(value: number | string | null | undefined) {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
-export default async function PrezziEsperienzaPage({ params }: PageProps) {
+export default async function PrezziEsperienzaPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const { error: validationError } = await searchParams;
   const experienceId = Number(id);
 
   if (!experienceId || Number.isNaN(experienceId)) {
@@ -42,7 +45,7 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
   ] = await Promise.all([
     supabaseServer
       .from("experiences")
-      .select("id, name, supplier_unit_cost")
+      .select("id, name, supplier_unit_cost, is_group_pricing")
       .eq("id", experienceId)
       .single(),
 
@@ -54,7 +57,7 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
     supabaseServer
       .from("experience_channel_prices")
       .select(
-        "id, channel_id, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost, currency, notes"
+        "id, channel_id, pricing_mode, price_tiers, your_unit_price, your_child_unit_price, public_unit_price, public_child_unit_price, supplier_adult_unit_cost, supplier_child_unit_cost, currency, notes"
       )
       .eq("experience_id", experienceId),
   ]);
@@ -90,6 +93,7 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
         </div>
 
         <SectionCard title="Prezzi per canale">
+          {validationError && <p role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">{validationError}</p>}
           <form action={saveExperienceChannelPrices} className="space-y-6">
             <input type="hidden" name="experience_id" value={experienceId} />
 
@@ -256,6 +260,11 @@ export default async function PrezziEsperienzaPage({ params }: PageProps) {
                 </tbody>
               </table>
             </div>
+
+            <p className="text-sm text-zinc-600">I prezzi adulto della tabella valgono in modalità fissa. In modalità a fasce si usano i tre importi della fascia. Le modifiche al listino non ricalcolano le prenotazioni esistenti.</p>
+            {(channels ?? []).map(channel => <PriceTierEditor key={channel.id} channelId={channel.id} channelName={channel.name}
+              mode={pricesMap.get(channel.id)?.pricing_mode ?? "fixed"}
+              tiers={pricesMap.get(channel.id)?.price_tiers ?? []} isGroupPricing={experience.is_group_pricing === true} />)}
 
             <div className="flex justify-end border-t border-zinc-100 pt-6">
               <button
