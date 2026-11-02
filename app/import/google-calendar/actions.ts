@@ -1,6 +1,6 @@
 "use server";
 
-import { inspectBookingLink } from "@/lib/google-calendar-booking-link.mjs";
+import { inspectBookingLink, resolveGoogleBokunLink } from "@/lib/google-calendar-booking-link.mjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase-server";
@@ -207,15 +207,25 @@ function getImportPeople(row: StagingRow) {
 async function markRow(
   rowId: number,
   importStatus: string,
-  importedBookingId?: number | null
+  importedBookingId?: number | null,
+  expected?: StagingRow,
 ) {
-  await supabaseServer
+  let query = supabaseServer
     .from("google_calendar_import_staging")
     .update({
       import_status: importStatus,
       imported_booking_id: importedBookingId ?? null,
     })
     .eq("id", rowId);
+  if (expected) {
+    for (const [field, value] of Object.entries(expected)) {
+      query = value === null ? query.is(field, null) : query.eq(field, value);
+    }
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error || !data) throw new Error("Staging modificato o aggiornamento non verificato: rileggere prima di ripetere la riconciliazione Bókun.");
+  } else {
+    await query;
+  }
 }
 
 async function findExistingByReference(bookingReference: string) {
@@ -322,6 +332,11 @@ export async function importSelectedGoogleCalendarRows(formData: FormData) {
   for (const row of rows) {
     const isTuscanEscapeBlock = isTuscanEscapeBlockRow(row);
     if (row.import_status === "gcal_cancelled") {
+      continue;
+    }
+    const bokunLink = await resolveGoogleBokunLink(supabaseServer, row, FMDQ_BUSINESS_UNIT_ID, row);
+    if (bokunLink.applicable) {
+      await markRow(row.id, bokunLink.import_status, bokunLink.imported_booking_id, row);
       continue;
     }
     // Linked Tuscan rows are reconciled transactionally by the webhook, never

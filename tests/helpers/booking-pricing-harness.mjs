@@ -48,6 +48,7 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
       in(k, v) { predicates.push(row => v.includes(row[k])); return q; },
       order() { return q; }, limit(n) { limit = n; return q; },
       insert(value) { operation = 'insert'; payload = value; return q; },
+      upsert(value) { operation = 'upsert'; payload = value; return q; },
       update(value) { operation = 'update'; payload = value; return q; },
       single() { return Promise.resolve(run(true)); }, maybeSingle() { return Promise.resolve(run(true)); },
       then(ok, fail) { return Promise.resolve().then(() => run(false)).then(ok, fail); },
@@ -60,6 +61,12 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
       if (operation === 'insert') {
         const row = { id: Math.max(0, ...tables[table].map(row => row.id || 0)) + 1, ...structuredClone(payload) };
         tables[table].push(row); rows = [row];
+      }
+      if (operation === 'upsert') {
+        let row = tables[table].find(item => item.gcal_uid === payload.gcal_uid);
+        if (row) Object.assign(row, structuredClone(payload));
+        else { row = { id: Math.max(0, ...tables[table].map(item => item.id || 0)) + 1, ...structuredClone(payload) }; tables[table].push(row); }
+        rows = [row];
       }
       if (operation === 'update') rows.forEach(row => Object.assign(row, structuredClone(payload)));
       return { data: structuredClone(single ? rows[0] ?? null : rows), error: null };
@@ -81,6 +88,7 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
     const jsx = (type, props) => ({ type, props });
     const requireMock = name => {
       if (name === '@/lib/supabase-server') return { supabaseServer: db };
+      if (name === '@supabase/supabase-js') return { createClient: () => db };
       if (name === 'next/cache') return { revalidatePath() {} };
       if (name === 'next/navigation') return { redirect(path) { throw new Error(`REDIRECT:${path}`); } };
       if (name === 'next/server') return { NextResponse: { json: Response.json } };
@@ -103,7 +111,9 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
       throw new Error(`Unexpected import ${name}`);
     };
     vm.runInNewContext(code, { module: mod, exports: mod.exports, require: requireMock,
-      console: { log() {}, error() {} }, fetch: fetchMock, Date, Set, Map, Error, Response, Request, URL, URLSearchParams, Buffer, Uint8Array }, { filename: file });
+      console: { log() {}, error() {}, warn() {} },
+      process: { env: { GOOGLE_CALENDAR_WEBHOOK_SECRET: 'offline-test', NEXT_PUBLIC_SUPABASE_URL: 'offline-test', SUPABASE_SERVICE_ROLE_KEY: 'offline-test' } },
+      fetch: fetchMock, Date, Set, Map, Error, Response, Request, URL, URLSearchParams, Buffer, Uint8Array }, { filename: file });
     cache.set(file, mod.exports);
     return mod.exports;
   }
@@ -136,7 +146,7 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
         experience_channel_prices: tables.experience_channel_prices.filter(p => p.experience_id === item.id) })),
       today: '2026-09-29', initialData: booking, isEditing: true, ...props });
   }
-  return { tables, booking, experience, channel, price, writes, pdfTexts, load, form, save, webhook, renderForm,
+  return { db, tables, booking, experience, channel, price, writes, pdfTexts, load, form, save, webhook, renderForm,
     flushEffects() { for (const effect of effects.splice(0)) effect(); },
     beforeUpdate(callback) { beforeUpdate = callback; } };
 }

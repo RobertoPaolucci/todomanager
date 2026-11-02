@@ -8,6 +8,8 @@ import {
   findBokunBooking,
   requireBokunBusinessUnit,
   getBokunBookingReference,
+  getBokunItemReference,
+  getBokunParticipantCount,
   hasGetYourGuideReference,
   requireBokunIdentityForGYG,
 } from "@/lib/bokun-booking-identity";
@@ -66,6 +68,7 @@ const BOKUN_ID_ALIASES: Record<string, string> = {
 };
 
 const COMPARE_FIELDS = [
+  "bokun_item_reference",
   "booking_reference",
   "channel_id",
   "booking_source",
@@ -991,6 +994,7 @@ export async function POST(req: Request) {
     const rawBokunId = cleanString(body.bokun_id);
     const resolvedBokunId = BOKUN_ID_ALIASES[rawBokunId] ?? rawBokunId;
     const bokunBookingReference = getBokunBookingReference(body);
+    const bokunItemReference = getBokunItemReference(body);
 
     const incomingBookingReferences = Array.from(
       new Set(
@@ -1128,6 +1132,11 @@ export async function POST(req: Request) {
         }, { status: 409 });
       }
 
+      if (booking.superseded_by_booking_id || (bokunItemReference && booking.bokun_item_reference
+        && bokunItemReference !== booking.bokun_item_reference)) {
+        throw new BokunIdentityError("Cancellazione con identità item discordante o archiviata: revisione necessaria.");
+      }
+
       if (isWidget) resolveWidgetChannel(body, businessUnitId, booking, bokunBookingReference);
       const unchanged = booking.is_cancelled === true;
       if (!unchanged) {
@@ -1201,9 +1210,9 @@ export async function POST(req: Request) {
     const incomingBookingDate = cleanString(body.booking_date);
     const incomingBookingTime = cleanString(body.booking_time);
 
-    const adultsFromBody = toOptionalNumber(body.adults);
-    const childrenFromBody = toOptionalNumber(body.children);
-    const infantsFromBody = toOptionalNumber(body.infants);
+    const adultsFromBody = getBokunParticipantCount(body.adults);
+    const childrenFromBody = getBokunParticipantCount(body.children);
+    const infantsFromBody = getBokunParticipantCount(body.infants);
 
     const incomingTotalPeople =
       (adultsFromBody ?? 0) + (childrenFromBody ?? 0) + (infantsFromBody ?? 0);
@@ -1225,6 +1234,18 @@ export async function POST(req: Request) {
       totalPeople: incomingTotalPeople > 0 ? incomingTotalPeople : null,
     });
     const existing = existingMatch?.booking || null;
+    if (existing?.superseded_by_booking_id || (existing?.bokun_item_reference && bokunItemReference
+      && existing.bokun_item_reference !== bokunItemReference)) {
+      throw new BokunIdentityError("Identità item Bókun modificata o prenotazione archiviata: revisione necessaria.");
+    }
+    if (bokunBookingReference && bokunItemReference) {
+      const { data: owners, error: itemError } = await supabaseServer.from("bookings").select("id")
+        .eq("business_unit_id", businessUnitId).eq("bokun_item_reference", bokunItemReference).limit(2);
+      if (itemError) throw new Error(itemError.message);
+      if (owners?.some(owner => owner.id !== existing?.id)) {
+        throw new BokunIdentityError("Riferimento item Bókun già associato a un'altra prenotazione: revisione necessaria.");
+      }
+    }
     const agreement = parseAgreedUnitPrice(existing?.agreed_unit_price);
     if (agreement !== null && !isCancelled && (
       Number(existing?.experience_id) !== Number(experience.id) ||
@@ -1317,6 +1338,11 @@ export async function POST(req: Request) {
         ? infantsFromBody
         : Number(existing?.infants || 0);
 
+    const declaredTotal = getBokunParticipantCount(body.total_people);
+    if (!isCancelled && declaredTotal !== null && declaredTotal !== finalAdults + finalChildren + finalInfants) {
+      throw new BokunIdentityError("Totale partecipanti discordante dalle categorie adults/children/infants: nessun importo aggiornato.");
+    }
+
     let priceRule = await getExperienceChannelPrice({
       experienceId: Number(experience.id),
       channelId,
@@ -1401,6 +1427,7 @@ export async function POST(req: Request) {
     const bookingData = {
       ...(bokunBookingReference ? {
         bokun_booking_reference: bokunBookingReference,
+        ...(bokunItemReference ? { bokun_item_reference: bokunItemReference } : {}),
         // Fill the external reference if an earlier event only had the cart ID.
         booking_reference: todoProductReference
           ? incomingBookingReference || todoProductReference
