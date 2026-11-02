@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '../.tmp/bokun-sql/node_modules/@electric-sql/pglite/dist/index.js';
-const migration = readFileSync('supabase/migrations/20261101135751_bokun_item_calendar_identity.sql', 'utf8');
+const migration = readFileSync('supabase/migrations/20261102110358_bokun_item_calendar_identity.sql', 'utf8');
 const repair = readFileSync('supabase/diagnostics/bokun-2415-2419-repair-preview.sql', 'utf8');
 const existingCancellationTrigger = `create function track_booking_cancellation_alert_revision()
     returns trigger language plpgsql as $ begin return new; end; $;
