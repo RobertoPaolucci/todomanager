@@ -30,14 +30,16 @@ begin
     or b.bokun_item_reference is not null or d.bokun_booking_reference is not null
     or b.superseded_by_booking_id is not null or d.superseded_by_booking_id is not null
     or b.is_cancelled is distinct from false or d.is_cancelled is distinct from false
-    or b.booking_date is distinct from date '2026-11-23' or b.booking_time is distinct from time '12:00'
+    or b.booking_date is distinct from date '2026-11-23' or left(b.booking_time,5) is distinct from '12:00'
     or d.booking_date is distinct from date '2026-11-24'
     or b.customer_name is distinct from 'Andie Beustring' or d.customer_name is distinct from 'Beustring'
     or b.adults is distinct from 3 or b.children is distinct from 0 or b.infants is distinct from 0
-    or b.total_people is distinct from 3 or b.total_to_you is distinct from 114
+    or b.total_people is distinct from 3 or b.pax is distinct from 1 or b.total_amount is distinct from 0
+    or b.total_to_you is distinct from 114
     or b.total_customer is distinct from 135 or b.total_supplier_cost is distinct from 114
     or b.agreed_unit_price is not null or b.price_tier_snapshot is not null
-    or d.adults is distinct from 2 or d.infants is distinct from 1
+    or d.adults is distinct from 2 or d.children is distinct from 0 or d.infants is distinct from 1
+    or d.pax is distinct from 2 or d.total_amount is distinct from 90
     or d.total_to_you is distinct from 76 or d.total_customer is distinct from 90
     or b.customer_payment_status is distinct from 'pending' or b.supplier_payment_status is distinct from 'pending'
     or d.customer_payment_status is distinct from 'pending' or d.supplier_payment_status is distinct from 'pending'
