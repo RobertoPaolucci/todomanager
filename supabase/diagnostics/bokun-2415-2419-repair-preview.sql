@@ -1,4 +1,7 @@
 -- PREVIEW ONLY. Requires the prepared item-identity migration.
+-- Updated after the user's Google Calendar date correction on 2026-11-02.
+-- Once the survivor is verified, staging 724 can be marked already_exists;
+-- the audited manual reconciliation resolves the previous needs_review.
 -- Never run until the native Bókun/Make evidence establishes that TOD-T151827070
 -- belongs to TOD-108037806 and confirms the 2/0/1 categories.
 -- Keep the final ROLLBACK for preview. Export snapshots before an authorized COMMIT.
@@ -29,6 +32,7 @@ begin
     or b.is_cancelled is distinct from false or d.is_cancelled is distinct from false
     or b.booking_date is distinct from date '2026-11-23' or b.booking_time is distinct from time '12:00'
     or d.booking_date is distinct from date '2026-11-24'
+    or b.customer_name is distinct from 'Andie Beustring' or d.customer_name is distinct from 'Beustring'
     or b.adults is distinct from 3 or b.children is distinct from 0 or b.infants is distinct from 0
     or b.total_people is distinct from 3 or b.total_to_you is distinct from 114
     or b.total_customer is distinct from 135 or b.total_supplier_cost is distinct from 114
@@ -38,11 +42,14 @@ begin
     or b.customer_payment_status is distinct from 'pending' or b.supplier_payment_status is distinct from 'pending'
     or d.customer_payment_status is distinct from 'pending' or d.supplier_payment_status is distinct from 'pending'
     or coalesce(b.supplier_amount_paid,0)<>0 or coalesce(d.supplier_amount_paid,0)<>0
-    or s.imported_booking_id is distinct from d.id or s.import_status is distinct from 'imported'
+    or s.imported_booking_id is distinct from d.id or s.import_status is distinct from 'needs_review'
+    or s.booking_date is distinct from date '2026-11-23'
+    or s.booking_time is distinct from time '12:00'
     or s.gcal_uid is distinct from e.original_uid
     or s.original_title is distinct from '2+1 neonato pranzo T151827070 Beustring'
     or e.original_title is distinct from s.original_title
-    or e.event_date is distinct from date '2026-11-24' or e.gcal_event_status is distinct from 'confirmed'
+    or e.event_date is distinct from date '2026-11-23' or e.gcal_event_status is distinct from 'confirmed'
+    or e.event_time is distinct from time '12:00'
     or e.historical_booking_id is not null or e.staging_id is not null
     or e.cancellation_reconciliation_history is distinct from '[]'::jsonb then
     raise exception 'Case changed: reread and review; no repair applied';
@@ -67,8 +74,8 @@ begin
       'evidence',evidence,'actor',current_user,'at',clock_timestamp(),
       'survivor_before',to_jsonb(b),'survivor_after',after_booking,'duplicate_before',to_jsonb(d),
       'staging_before',to_jsonb(s),'canonical_before',to_jsonb(e)) where id=d.id;
-  -- Google's incorrect date remains an observation to review. No rescheduling.
-  update public.google_calendar_import_staging set imported_booking_id=b.id, import_status='needs_review' where id=s.id;
+  -- Google Calendar has now been corrected to 23 November; preserve the canonical observation.
+  update public.google_calendar_import_staging set imported_booking_id=b.id, import_status='already_exists' where id=s.id;
   if (select to_jsonb(row) from public.google_calendar_events row where id=e.id) is distinct from to_jsonb(e) then
     raise exception 'Unexpected canonical mutation';
   end if;
