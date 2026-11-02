@@ -112,7 +112,7 @@ non è stato alterato e l'ordinamento upstream va verificato separatamente.
 ## Migration e attivazione futura
 
 Preparata con Supabase CLI, **non applicata**:
-`supabase/migrations/20261101135751_bokun_item_calendar_identity.sql`.
+`supabase/migrations/20261102110358_bokun_item_calendar_identity.sql`.
 Non contiene UPDATE storici, seed, nuove tabelle o modifiche alle policy RLS.
 Usa funzioni SECURITY INVOKER e indici parziali.
 
