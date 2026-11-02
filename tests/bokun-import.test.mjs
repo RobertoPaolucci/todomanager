@@ -245,7 +245,7 @@ test('widget new Bókun identity rebooks separately and old cancellation never t
   const h = harness(); await h.send(widgetPayload);
   await h.send({ ...widgetPayload, action: 'BOOKING_CANCELLED' });
   const old = structuredClone(h.tables.bookings[0]);
-  assert.equal((await h.send({ ...widgetPayload, bokun_booking_reference: 'TOD-NEW' })).body.action, 'created');
+  assert.equal((await h.send({ ...widgetPayload, bokun_booking_reference: 'TOD-NEW', booking_reference: 'TOD-T146861413' })).body.action, 'created');
   await h.send({ ...widgetPayload, action: 'BOOKING_CANCELLED' });
   assert.deepEqual(h.tables.bookings[0], old);
   assert.equal(h.tables.bookings[1].is_cancelled, false);
@@ -581,7 +581,7 @@ async function todoHarness() {
   h.tables.experience_channel_prices.forEach(price => Object.assign(price, {
     experience_id: 27, your_unit_price: 38, public_unit_price: 38, supplier_adult_unit_cost: 20,
   }));
-  assert.equal((await h.send({ ...todoPayload, booking_reference: undefined })).status, 200);
+  assert.equal((await h.send({ ...todoPayload, booking_reference: undefined, productConfirmationCode: 'TOD-T147665882' })).status, 200);
   h.tables.bookings[0].id = 2240;
   return h;
 }
@@ -643,7 +643,7 @@ for (const [channel_id, booking_source, bokun_booking_reference, commercialRefer
     test(`${booking_source} ignores TOD-T product ref with external ref ${JSON.stringify(externalBookingReference)}`, async () => {
       const h = harness();
       const payload = { channel_id, booking_source, bokun_booking_reference, externalBookingReference };
-      assert.equal((await h.send(payload)).status, 200);
+      assert.equal((await h.send({ ...payload, productConfirmationCode: 'TOD-T147665882' })).status, 200);
       const before = structuredClone(h.tables.bookings);
       const result = await h.send({ ...payload, booking_reference: 'TOD-T147665882' });
       assert.equal(result.status, 200);
@@ -678,7 +678,8 @@ test('Todointheworld product ref never matches a different cart for modification
     assert.equal((await h.send({ ...newCart, status, action: `BOOKING_${status}` })).status, 409);
     assert.deepEqual(h.tables.bookings, before);
   }
-  assert.equal((await h.send(newCart)).body.action, 'created');
+  assert.equal((await h.send(newCart)).status, 409, 'one item cannot belong to two carts in the same unit');
+  assert.equal((await h.send({ ...newCart, booking_reference: 'TOD-T147665883' })).body.action, 'created');
   assert.equal(h.tables.bookings.length, 2);
   assert.deepEqual(h.tables.bookings[0], before[0]);
   assert.equal(h.tables.bookings[1].bokun_booking_reference, 'TOD-104921604');

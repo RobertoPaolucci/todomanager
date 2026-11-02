@@ -9,6 +9,33 @@ export class BokunIdentityError extends Error {
   }
 }
 
+// These are fields in our normalized webhook contract, not guessed paths in
+// a native Bókun notification (which may contain only booking IDs).
+export function getBokunItemReference(body: Record<string, unknown>) {
+  const dedicated = text(body.bokun_item_reference).toUpperCase();
+  if (dedicated && !/^TOD-T\d+$/.test(dedicated)) {
+    throw new BokunIdentityError("Riferimento item Bókun non supportato: revisione necessaria.");
+  }
+  // Other vendors' product-code namespaces keep their existing behaviour.
+  const explicit = [body.productConfirmationCode, body.product_confirmation_code, dedicated]
+    .map(text).map(value => value.toUpperCase()).filter(value => /^TOD-T\d+$/.test(value));
+  const display = text(body.booking_reference).toUpperCase();
+  if (/^TOD-T\d+$/.test(display)) explicit.push(display);
+  if (explicit.some(value => !/^TOD-T\d+$/.test(value)) || new Set(explicit).size > 1) {
+    throw new BokunIdentityError("Riferimento item Bókun non supportato o discordante: revisione necessaria.");
+  }
+  return explicit[0] || null;
+}
+
+export function getBokunParticipantCount(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  if ((typeof value !== "number" && typeof value !== "string") || !/^\d+$/.test(String(value).trim())
+    || !Number.isSafeInteger(Number(value))) {
+    throw new BokunIdentityError("Partecipanti Bókun non validi: inviare conteggi interi separati per adults, children e infants.");
+  }
+  return Number(value);
+}
+
 // The cart/booking reference identifies the booking. A product code or a
 // reference mentioned in rebooking notes must never be used as the cart code.
 export function getBokunBookingReference(body: Record<string, unknown>) {

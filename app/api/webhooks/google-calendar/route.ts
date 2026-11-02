@@ -1,4 +1,4 @@
-import { extractAirbnbBookingData, inspectBookingLink, preserveAirbnbStagingLink, preserveViatorStagingLink } from "@/lib/google-calendar-booking-link.mjs";
+import { extractAirbnbBookingData, inspectBookingLink, preserveAirbnbStagingLink, preserveViatorStagingLink, resolveGoogleBokunLink } from "@/lib/google-calendar-booking-link.mjs";
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
@@ -622,12 +622,13 @@ async function getExistingStagingRowByGcalUid(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   gcalUid: string
 ) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("google_calendar_import_staging")
     .select("*")
     .eq("gcal_uid", gcalUid)
     .maybeSingle();
 
+  if (error) throw new Error("Verifica identità evento Google Calendar non disponibile");
   return data;
 }
 
@@ -635,12 +636,13 @@ async function getExistingStagingRowByBookingReference(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   bookingReference: string
 ) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("google_calendar_import_staging")
     .select("*")
     .eq("booking_reference", bookingReference)
     .maybeSingle();
 
+  if (error) throw new Error("Verifica riferimento staging Google Calendar non disponibile");
   return data;
 }
 
@@ -1088,6 +1090,12 @@ export async function POST(request: NextRequest) {
       if (!linkInspection.compatible) rowPayload.import_status = importStatus = "needs_review";
     }
     if (referenceCollision) rowPayload.import_status = importStatus = "needs_review";
+
+    const bokunLink = await resolveGoogleBokunLink(supabase, rowPayload, 1, existing);
+    if (bokunLink.applicable) {
+      rowPayload.import_status = importStatus = referenceCollision ? "needs_review" : bokunLink.import_status;
+      rowPayload.imported_booking_id = bokunLink.imported_booking_id;
+    }
 
     if (existing?.id) {
       let stagingUpdate = supabase
