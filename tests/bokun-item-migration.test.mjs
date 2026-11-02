@@ -5,16 +5,25 @@ import { readFileSync } from 'node:fs';
 import { PGlite } from '../.tmp/bokun-sql/node_modules/@electric-sql/pglite/dist/index.js';
 const migration = readFileSync('supabase/migrations/20261101135751_bokun_item_calendar_identity.sql', 'utf8');
 const repair = readFileSync('supabase/diagnostics/bokun-2415-2419-repair-preview.sql', 'utf8');
+const existingCancellationTrigger = `create function track_booking_cancellation_alert_revision()
+    returns trigger language plpgsql as $ begin return new; end; $;
+  create trigger track_booking_cancellation_alert_revision
+    after update on bookings for each row
+    execute function track_booking_cancellation_alert_revision();`;
 
 test('item identity, race guard and immutable archived duplicates, without historical backfill', async () => {
   const db = await PGlite.create();
   try {
     await db.exec(`create role anon; create role authenticated;
       create table bookings (id bigint primary key, business_unit_id bigint, bokun_booking_reference text,
-        is_cancelled boolean, booking_reference text, notes text);
-      insert into bookings values (1,1,'TOD-108037806',false,null,null),
-        (2,1,null,false,'GCAL-original','2+1 neonato pranzo T151827070 Test');`);
+        is_cancelled boolean, booking_reference text, notes text, booking_date date, booking_time text,
+        total_people integer, customer_name text, experience_id bigint, experience_name text,
+        channel_id bigint, booking_source text);
+      insert into bookings(id,business_unit_id,bokun_booking_reference,is_cancelled,booking_reference,notes)
+        values (1,1,'TOD-108037806',false,null,null),
+          (2,1,null,false,'GCAL-original','2+1 neonato pranzo T151827070 Test');`);
     const before = (await db.query('select * from bookings order by id')).rows;
+    await db.exec(existingCancellationTrigger);
     await db.exec(migration);
     const after = (await db.query('select * from bookings order by id')).rows;
     for (const row of after) {
@@ -52,14 +61,14 @@ test('case repair refuses missing evidence, preserves snapshots/canonical, relin
   try {
     await db.exec(`create role anon; create role authenticated;
       create table bookings(id bigint primary key,business_unit_id int,channel_id int,experience_id int,
-        bokun_booking_reference text,booking_date date,booking_time time,adults int,children int,infants int,
+        bokun_booking_reference text,booking_date date,booking_time text,adults int,children int,infants int,
         total_people int,total_to_you numeric,total_customer numeric,total_supplier_cost numeric,margin_total numeric,
         total_amount numeric,pax int,agreed_unit_price numeric,price_tier_snapshot jsonb,customer_payment_status text,
         supplier_payment_status text,supplier_amount_paid numeric,is_cancelled boolean,cancelled_at timestamptz,
-        booking_reference text,notes text);
+        booking_reference text,notes text,customer_name text,experience_name text,booking_source text);
       create table google_calendar_import_staging(id bigint primary key,imported_booking_id bigint,
-        import_status text,gcal_uid text,original_title text,booking_date date);
-      create table google_calendar_events(id bigint primary key,original_uid text,original_title text,event_date date,
+        import_status text,gcal_uid text,original_title text,booking_date date,booking_time time);
+      create table google_calendar_events(id bigint primary key,original_uid text,original_title text,event_date date,event_time time,
         gcal_event_status text,historical_booking_id bigint,staging_id bigint,cancellation_reconciliation_history jsonb);
       create table google_calendar_event_aliases(historical_booking_id bigint);
       create table viator_email_imports(booking_id bigint);
@@ -69,10 +78,14 @@ test('case repair refuses missing evidence, preserves snapshots/canonical, relin
         customer_payment_status,supplier_payment_status,supplier_amount_paid,is_cancelled)
       values(2415,1,6,7,'TOD-108037806','2026-11-23','12:00',3,0,0,3,114,135,114,0,'pending','pending',0,false),
         (2419,1,6,7,null,'2026-11-24','12:00',2,0,1,3,76,90,76,0,'pending','pending',0,false);
-      insert into google_calendar_import_staging values(724,2419,'imported','offline-uid',
-        '2+1 neonato pranzo T151827070 Beustring','2026-11-24');
+      update bookings set pax=case id when 2415 then 1 else 2 end,
+        total_amount=case id when 2415 then 0 else 90 end,
+        customer_name=case id when 2415 then 'Andie Beustring' else 'Beustring' end;
+      insert into google_calendar_import_staging values(724,2419,'needs_review','offline-uid',
+        '2+1 neonato pranzo T151827070 Beustring','2026-11-23','12:00');
       insert into google_calendar_events values(1373,'offline-uid','2+1 neonato pranzo T151827070 Beustring',
-        '2026-11-24','confirmed',null,null,'[]');`);
+        '2026-11-23','12:00','confirmed',null,null,'[]');`);
+    await db.exec(existingCancellationTrigger);
     await db.exec(migration);
     const canonical = (await db.query('select * from google_calendar_events')).rows;
     await assert.rejects(db.exec(repair), /evidence required/);
@@ -90,7 +103,7 @@ test('case repair refuses missing evidence, preserves snapshots/canonical, relin
     assert.equal(rows[1].duplicate_reconciliation_audit.staging_before.imported_booking_id, 2419);
     assert.deepEqual((await db.query('select * from google_calendar_events')).rows, canonical);
     const staging = (await db.query('select * from google_calendar_import_staging')).rows[0];
-    assert.equal(Number(staging.imported_booking_id), 2415); assert.equal(staging.import_status, 'needs_review');
+    assert.equal(Number(staging.imported_booking_id), 2415); assert.equal(staging.import_status, 'already_exists');
     await assert.rejects(db.exec('update bookings set is_cancelled=false where id=2419'), /immutable/);
     await assert.rejects(db.exec('delete from bookings where id=2419'), /Preserve/);
   } finally { await db.close(); }
