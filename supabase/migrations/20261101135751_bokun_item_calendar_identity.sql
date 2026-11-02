@@ -66,6 +66,17 @@ $$;
 create trigger guard_google_bokun_insert before insert on public.bookings
 for each row execute function public.guard_google_bokun_insert();
 
+-- Archived Google Calendar duplicates are administrative reconciliations, not customer cancellations.
+-- Preserve the existing alert logic for real cancellations, while suppressing false
+-- cancellation revision creation when superseded_by_booking_id is populated.
+drop trigger track_booking_cancellation_alert_revision on public.bookings;
+create trigger track_booking_cancellation_alert_revision
+  after insert or update of is_cancelled, booking_date, booking_time, total_people,
+    customer_name, experience_id, experience_name, channel_id, booking_source
+  on public.bookings for each row
+  when (new.is_cancelled is true and new.superseded_by_booking_id is null)
+  execute function public.track_booking_cancellation_alert_revision();
+
 comment on column public.bookings.bokun_item_reference is
   'Verified product booking confirmation code (TOD-T...), not catalogue product ID. No inferred historical backfill.';
 comment on column public.bookings.superseded_by_booking_id is
