@@ -1,11 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { syncAuthCookie } from "@/lib/sync-auth-cookie";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    // When the server cookie expires, the browser may still hold a valid
+    // refresh token. Validate the current account before restoring the cookie.
+    void supabase.auth.getUser().then(async ({ data, error }) => {
+      if (!active || error || data.user?.role !== "authenticated" || data.user.is_anonymous) {
+        return;
+      }
+
+      const result = await supabase.auth.getSession();
+      if (!active || result.error || !result.data.session) return;
+
+      syncAuthCookie(result.data.session);
+      window.location.replace("/");
+    }).catch(() => {
+      // Leave the manual login available if session restoration fails.
+    });
+
+    return () => { active = false; };
+  }, []);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -38,7 +61,7 @@ export default function LoginPage() {
 
       if (data.session) {
         // Il login è andato a buon fine, creiamo il cookie
-        document.cookie = `tm-auth-token=${data.session.access_token}; path=/; max-age=604800; SameSite=Lax`;
+        syncAuthCookie(data.session);
         
         // Forziamo il reindirizzamento
         window.location.replace("/");
@@ -46,8 +69,9 @@ export default function LoginPage() {
         setError("Attenzione: Sessione vuota. Controlla le impostazioni di Supabase.");
         setLoading(false);
       }
-    } catch (err: any) {
-      setError(`Errore imprevisto: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Errore imprevisto: ${message}`);
       setLoading(false);
     }
   };

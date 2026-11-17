@@ -1,12 +1,13 @@
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const COGNANELLO_PATH = "/cognanello";
 const COGNANELLO_SUMMARY_PATH = "/prenotazioni/riepilogo";
-
-function hasSupabaseAuthCookie(req: NextRequest) {
-  return req.cookies.getAll().some((c) => c.name.includes("-auth-token"));
-}
+const COGNANELLO_AVAILABILITY_API = "/api/cognanello/availability";
+const COGNANELLO_AVAILABILITY_ALIAS = "/cognanello/api/availability";
+const NEXT_DIRECT_REFERENCE_API = "/api/bookings/next-direct-ref";
+const AUTH_COOKIE = "tm-auth-token";
 
 function getBasicAuthCredentials(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -68,30 +69,78 @@ function isCognanelloSummaryRequest(req: NextRequest) {
   );
 }
 
-export function proxy(req: NextRequest) {
+async function hasVerifiedSupabaseSession(req: NextRequest): Promise<boolean> {
+  const token = req.cookies.get(AUTH_COOKIE)?.value;
+
+  if (!token) return false;
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) return false;
+
+  try {
+    // Checking cookie presence or decoding its JWT payload is not authentication.
+    // getUser(token) verifies the signed-in account with the Supabase Auth server.
+    const client = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await client.auth.getUser(token);
+
+    return (
+      !error &&
+      data.user?.role === "authenticated" &&
+      data.user.is_anonymous !== true
+    );
+  } catch {
+    // Fail closed on network errors or invalid credentials.
+    return false;
+  }
+}
+
+export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
-
   const isCognanelloArea =
-    pathname.startsWith(COGNANELLO_PATH) || isCognanelloSummaryRequest(req);
+    pathname.startsWith(COGNANELLO_PATH) ||
+    isCognanelloSummaryRequest(req) ||
+    pathname === COGNANELLO_AVAILABILITY_API;
 
-  // Area Cognanello: usa sempre Basic Auth dedicata
+  // Cognanello keeps its independent Basic Auth, including its privileged API.
   if (isCognanelloArea) {
     if (!isValidCognanelloBasicAuth(req)) {
       return buildBasicAuthResponse();
     }
 
+    // Use the same browser Basic Auth protection space for the portal's fetches.
+    if (pathname === COGNANELLO_AVAILABILITY_ALIAS) {
+      const target = req.nextUrl.clone();
+      target.pathname = COGNANELLO_AVAILABILITY_API;
+      return NextResponse.rewrite(target);
+    }
+
     return NextResponse.next();
   }
 
-  // Resto di Todo Manager: usa il login normale Supabase
-  const hasAuthCookie = hasSupabaseAuthCookie(req);
-  const isLoginPage = pathname.startsWith("/login");
+  const isLoginPage = pathname === "/login";
+  const isProtectedApi = pathname === NEXT_DIRECT_REFERENCE_API;
+  const authenticated = await hasVerifiedSupabaseSession(req);
 
-  if (!hasAuthCookie && !isLoginPage) {
-    return NextResponse.redirect(new URL("/login", req.url));
+  if (!authenticated) {
+    if (isLoginPage) return NextResponse.next();
+
+    if (isProtectedApi) {
+      return NextResponse.json(
+        { error: "Sessione non valida o scaduta" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    const response = NextResponse.redirect(new URL("/login", req.url));
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   }
 
-  if (hasAuthCookie && isLoginPage) {
+  if (isLoginPage) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
@@ -101,5 +150,7 @@ export function proxy(req: NextRequest) {
 export const config = {
   matcher: [
     "/((?!api|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|robots.txt|sitemap.xml).*)",
+    "/api/bookings/next-direct-ref",
+    "/api/cognanello/availability",
   ],
 };

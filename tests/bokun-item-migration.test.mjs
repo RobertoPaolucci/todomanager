@@ -6,7 +6,7 @@ import { PGlite } from '../.tmp/bokun-sql/node_modules/@electric-sql/pglite/dist
 const migration = readFileSync('supabase/migrations/20261102110358_bokun_item_calendar_identity.sql', 'utf8');
 const repair = readFileSync('supabase/diagnostics/bokun-2415-2419-repair-preview.sql', 'utf8');
 const existingCancellationTrigger = `create function track_booking_cancellation_alert_revision()
-    returns trigger language plpgsql as $ begin return new; end; $;
+    returns trigger language plpgsql as $$ begin return new; end; $$;
   create trigger track_booking_cancellation_alert_revision
     after update on bookings for each row
     execute function track_booking_cancellation_alert_revision();`;

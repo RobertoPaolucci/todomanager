@@ -2,6 +2,36 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabaseServer } from "@/lib/supabase-server";
 
+function hasCognanelloAuthorization(request: Request) {
+  const expectedUser = process.env.COGNANELLO_BASIC_USER ?? "";
+  const expectedPassword = process.env.COGNANELLO_BASIC_PASSWORD ?? "";
+  const authorization = request.headers.get("authorization");
+
+  if (!expectedUser || !expectedPassword || !authorization?.startsWith("Basic ")) {
+    return false;
+  }
+
+  try {
+    const decoded = atob(authorization.slice(6).trim());
+    const separatorIndex = decoded.indexOf(":");
+    return separatorIndex !== -1 &&
+      decoded.slice(0, separatorIndex) === expectedUser &&
+      decoded.slice(separatorIndex + 1) === expectedPassword;
+  } catch {
+    return false;
+  }
+}
+
+function unauthorizedCognanelloResponse() {
+  return NextResponse.json(
+    { error: "Autenticazione richiesta" },
+    { status: 401, headers: {
+      "WWW-Authenticate": 'Basic realm="Cognanello Live"',
+      "Cache-Control": "no-store",
+    } }
+  );
+}
+
 const HORSEBACK_EXPERIENCE_IDS = [1, 8, 9];
 
 function truthyFlag(value: unknown) {
@@ -86,6 +116,8 @@ function getMonthDates(month: string) {
 }
 
 export async function GET(request: Request) {
+  if (!hasCognanelloAuthorization(request)) return unauthorizedCognanelloResponse();
+
   const { searchParams } = new URL(request.url);
 
   const month = searchParams.get("month") || "";
@@ -178,6 +210,8 @@ type UpdateBody = {
 };
 
 export async function POST(request: Request) {
+  if (!hasCognanelloAuthorization(request)) return unauthorizedCognanelloResponse();
+
   try {
     const body = (await request.json()) as UpdateBody;
 

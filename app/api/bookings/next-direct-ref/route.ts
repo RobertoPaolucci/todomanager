@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { supabaseServer } from "@/lib/supabase-server";
 
 type ChannelRow = {
@@ -57,6 +58,21 @@ function extractProgressiveByPrefix(
 }
 
 export async function GET(request: Request) {
+  // The route uses a privileged database client: never rely on Proxy alone.
+  const token = (await cookies()).get("tm-auth-token")?.value;
+  if (!token) {
+    return NextResponse.json({ error: "Accesso non autorizzato" }, { status: 401 });
+  }
+
+  try {
+    const { data, error } = await supabaseServer.auth.getUser(token);
+    if (error || data.user?.role !== "authenticated" || data.user.is_anonymous) {
+      return NextResponse.json({ error: "Accesso non autorizzato" }, { status: 401 });
+    }
+  } catch {
+    return NextResponse.json({ error: "Verifica autenticazione non disponibile" }, { status: 503 });
+  }
+
   const { searchParams } = new URL(request.url);
   const channelId = Number(searchParams.get("channelId") || 0);
 

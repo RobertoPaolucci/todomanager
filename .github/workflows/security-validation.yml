@@ -1,0 +1,43 @@
+name: Security validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [security/validate-todo-manager-session-20261117]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: build-test-placeholder
+      SUPABASE_SERVICE_ROLE_KEY: build-test-placeholder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install isolated PGlite test database
+        run: npm install --prefix .tmp/bokun-sql --no-save --no-audit --no-fund --ignore-scripts @electric-sql/pglite@0.3.16
+      - name: Run regression tests
+        run: npm test
+      - name: Lint updated application files
+        run: npx eslint proxy.ts app/login/page.tsx app/layout.tsx components/SessionCookieSync.tsx lib/sync-auth-cookie.ts app/api/bookings/next-direct-ref/route.ts app/cognanello/disponibilita/page.tsx
+      - name: Lint Cognanello API (legacy any annotations remain warnings)
+        run: npx eslint app/api/cognanello/availability/route.ts --rule '@typescript-eslint/no-explicit-any:warn'
+      - name: TypeScript
+        run: npx tsc --noEmit
+      # GitHub CI has no real Supabase credentials: static prerendering /fornitori
+      # requires the live database. Vercel runs the complete preview build.
+      - name: Production compilation (no database prerender)
+        run: npm run build -- --experimental-build-mode compile

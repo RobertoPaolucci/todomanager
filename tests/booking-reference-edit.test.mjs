@@ -175,3 +175,13 @@ for (const reference of [null, 'EXISTING-123']) {
     }
   });
 }
+
+test('booking reference API refuses missing or forged cookies', async () => {
+  for (const authToken of [null, 'fabricated-session-token']) {
+    const h = pricingHarness({ authToken });
+    const response = await h.load('app/api/bookings/next-direct-ref/route.ts')
+      .GET(new Request('http://local.test/api/bookings/next-direct-ref?channelId=6'));
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error, 'Accesso non autorizzato');
+  }
+});

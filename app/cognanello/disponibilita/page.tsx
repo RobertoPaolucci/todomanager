@@ -107,7 +107,7 @@ export default function CognanelloDisponibilitaPage() {
 
     try {
       const response = await fetch(
-        `/api/cognanello/availability?month=${encodeURIComponent(
+        `/cognanello/api/availability?month=${encodeURIComponent(
           month
         )}`,
         {
@@ -226,7 +226,7 @@ export default function CognanelloDisponibilitaPage() {
 
     try {
       const response = await fetch(
-        "/api/cognanello/availability",
+        "/cognanello/api/availability",
         {
           method: "POST",
           headers: {
