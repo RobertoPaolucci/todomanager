@@ -1,0 +1,37 @@
+name: Security validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [security/validate-todo-manager-session-20261117]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: build-test-placeholder
+      SUPABASE_SERVICE_ROLE_KEY: build-test-placeholder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run regression tests
+        run: npm test
+      - name: Lint changed application files
+        run: npx eslint proxy.ts app/login/page.tsx app/layout.tsx components/SessionCookieSync.tsx lib/sync-auth-cookie.ts app/api/bookings/next-direct-ref/route.ts app/api/cognanello/availability/route.ts app/cognanello/disponibilita/page.tsx
+      - name: TypeScript
+        run: npx tsc --noEmit
+      - name: Production build
+        run: npm run build
