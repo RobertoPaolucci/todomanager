@@ -27,6 +27,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Install isolated PGlite test database
+        run: npm install --prefix .tmp/bokun-sql --no-save --no-audit --no-fund --ignore-scripts @electric-sql/pglite@0.3.16
       - name: Run regression tests
         run: npm test
       - name: Lint changed application files
