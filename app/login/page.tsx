@@ -69,8 +69,9 @@ export default function LoginPage() {
         setError("Attenzione: Sessione vuota. Controlla le impostazioni di Supabase.");
         setLoading(false);
       }
-    } catch (err: any) {
-      setError(`Errore imprevisto: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Errore imprevisto: ${message}`);
       setLoading(false);
     }
   };
