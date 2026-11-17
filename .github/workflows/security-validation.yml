@@ -37,5 +37,7 @@ jobs:
         run: npx eslint app/api/cognanello/availability/route.ts --rule '@typescript-eslint/no-explicit-any:warn'
       - name: TypeScript
         run: npx tsc --noEmit
-      - name: Production build
-        run: npm run build
+      # GitHub CI has no real Supabase credentials: static prerendering /fornitori
+      # requires the live database. Vercel runs the complete preview build.
+      - name: Production compilation (no database prerender)
+        run: npm run build -- --experimental-build-mode compile
