@@ -150,7 +150,7 @@ export async function proxy(req: NextRequest) {
 export const config = {
   matcher: [
     "/((?!api|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|robots.txt|sitemap.xml).*)",
-    NEXT_DIRECT_REFERENCE_API,
-    COGNANELLO_AVAILABILITY_API,
+    "/api/bookings/next-direct-ref",
+    "/api/cognanello/availability",
   ],
 };
