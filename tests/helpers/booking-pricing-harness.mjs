@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 // Real application modules, with only framework/database/PDF drawing boundaries replaced.
-export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
+export function pricingHarness({ runEffects = false, fetch: fetchMock, authToken = 'fixture-session-token' } = {}) {
   const channel = { id: 22, name: 'Test agency', type: 'agency', fattura_mensile_fmdq: true };
   const experience = { id: 7, name: 'Tour della Cinta Senese con pranzo', supplier_id: 3,
     business_unit_id: 1, supplier_unit_cost: 38, is_group_pricing: false, bokun_id: '956472' };
@@ -28,7 +28,16 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
     google_calendar_import_staging: [], google_calendar_events: [], google_calendar_event_aliases: [] };
   const writes = [], pdfTexts = [], hooks = [], effects = [];
   let hookIndex = 0, beforeUpdate = null;
-  const db = { from(table) {
+  const db = {
+    auth: {
+      async getUser(token) {
+        if (token === 'fixture-session-token') {
+          return { data: { user: { id: 'test-user', role: 'authenticated', is_anonymous: false } }, error: null };
+        }
+        return { data: { user: null }, error: { status: 401, code: 'bad_jwt' } };
+      },
+    },
+    from(table) {
     let predicates = [], operation = 'select', payload, limit = Infinity;
     const q = {
       select() { return q; }, eq(k, v) { predicates.push(row => row[k] === v); return q; },
@@ -92,6 +101,7 @@ export function pricingHarness({ runEffects = false, fetch: fetchMock } = {}) {
       if (name === 'next/cache') return { revalidatePath() {} };
       if (name === 'next/navigation') return { redirect(path) { throw new Error(`REDIRECT:${path}`); } };
       if (name === 'next/server') return { NextResponse: { json: Response.json } };
+      if (name === 'next/headers') return { cookies: async () => ({ get(key) { return key === 'tm-auth-token' && authToken ? { value: authToken } : undefined; } }) };
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'react') return { useMemo: fn => fn(), useEffect(effect) { if (runEffects) effects.push(effect); }, useState(initial) {
         const i = hookIndex++;
